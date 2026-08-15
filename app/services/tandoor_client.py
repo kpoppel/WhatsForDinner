@@ -64,14 +64,61 @@ class TandoorClient:
         self,
         search: str | None = None,
         limit: int = 20,
+        page: int | None = None,
         keyword_ids: list[int] | None = None,
     ) -> Any:
         params: dict[str, Any] = {"page_size": limit}
+        if page is not None:
+            params["page"] = page
         if search:
             params["query"] = search
         if keyword_ids:
             params["keywords"] = keyword_ids
         return await self._get("/api/recipe/", params=params)
+
+    async def list_recipes_all(
+        self,
+        search: str | None = None,
+        keyword_ids: list[int] | None = None,
+        page_size: int = 100,
+    ) -> dict[str, Any]:
+        all_results: list[dict[str, Any]] = []
+        page = 1
+        total_count: int | None = None
+
+        while True:
+            data = await self.list_recipes(
+                search=search,
+                limit=page_size,
+                page=page,
+                keyword_ids=keyword_ids,
+            )
+
+            if not isinstance(data, dict):
+                # Fall back to the original payload if pagination metadata is absent.
+                return {"count": 0, "next": None, "previous": None, "results": []}
+
+            if total_count is None and isinstance(data.get("count"), int):
+                total_count = int(data["count"])
+
+            batch = data.get("results")
+            if not isinstance(batch, list):
+                break
+
+            all_results.extend([row for row in batch if isinstance(row, dict)])
+
+            next_page = data.get("next")
+            if not next_page or not batch:
+                break
+
+            page += 1
+
+        return {
+            "count": total_count if total_count is not None else len(all_results),
+            "next": None,
+            "previous": None,
+            "results": all_results,
+        }
 
     async def get_recipe(self, recipe_id: int) -> Any:
         return await self._get(f"/api/recipe/{recipe_id}/")

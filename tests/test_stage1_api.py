@@ -60,6 +60,35 @@ def test_recipes_route_uses_tandoor_payload(monkeypatch) -> None:
     assert payload["data"]["results"][0]["name"] == "Pasta"
 
 
+def test_recipes_route_defaults_to_all_results(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        async def list_recipes_all(self, search=None, keyword_ids=None, page_size=100):
+            captured["search"] = search
+            captured["keyword_ids"] = keyword_ids
+            captured["page_size"] = page_size
+            return {
+                "count": 2,
+                "next": None,
+                "previous": None,
+                "results": [
+                    {"id": 1, "name": "Pasta"},
+                    {"id": 2, "name": "Soup"},
+                ],
+            }
+
+    monkeypatch.setattr("app.api.client", FakeClient())
+
+    response = client.get("/api/v1/recipes?search=weeknight")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["count"] == 2
+    assert len(payload["data"]["results"]) == 2
+    assert captured["search"] == "weeknight"
+    assert captured["keyword_ids"] is None
+
+
 def test_recipes_route_forwards_keyword_ids(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

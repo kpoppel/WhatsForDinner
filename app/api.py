@@ -292,18 +292,24 @@ async def health() -> dict[str, str]:
 )
 async def recipes(
     search: str | None = Query(default=None, description="Search term"),
-    limit: int = Query(default=20, ge=1, le=100),
+    limit: int | None = Query(default=None, ge=1, le=100),
     keyword_ids: list[int] | None = Query(
         default=None,
         description="Filter by keyword IDs from /recipe-tags.",
     ),
 ) -> dict:
     try:
-        data = await client.list_recipes(
-            search=search,
-            limit=limit,
-            keyword_ids=keyword_ids,
-        )
+        if limit is None:
+            data = await client.list_recipes_all(
+                search=search,
+                keyword_ids=keyword_ids,
+            )
+        else:
+            data = await client.list_recipes(
+                search=search,
+                limit=limit,
+                keyword_ids=keyword_ids,
+            )
         return {"source": "tandoor", "data": data}
     except TandoorError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
