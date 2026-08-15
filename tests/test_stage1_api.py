@@ -79,6 +79,25 @@ def test_recipes_route_forwards_keyword_ids(monkeypatch) -> None:
     assert captured["keyword_ids"] == [12, 18]
 
 
+def test_recipe_by_id_route_returns_raw_tandoor_payload(monkeypatch) -> None:
+    class FakeClient:
+        async def get_recipe(self, recipe_id):
+            assert recipe_id == 123
+            return {
+                "id": 123,
+                "name": "Lentil Soup",
+                "internal": {"difficulty": "easy"},
+            }
+
+    monkeypatch.setattr("app.api.client", FakeClient())
+
+    response = client.get("/api/v1/recipes/123")
+    assert response.status_code == 200
+    assert response.json()["id"] == 123
+    assert response.json()["name"] == "Lentil Soup"
+    assert response.json()["internal"]["difficulty"] == "easy"
+
+
 def test_recipe_tags_route_returns_list(monkeypatch) -> None:
     class FakeClient:
         async def list_tags(self):
