@@ -1,0 +1,1 @@
+"""WhatsForDinner application package."""

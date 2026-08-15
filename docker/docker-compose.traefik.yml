@@ -1,0 +1,22 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file:
+      - ../.env
+    labels:
+      - traefik.enable=true
+      - traefik.http.services.whatsfordinner.loadbalancer.server.port=8000
+      - traefik.http.routers.whatsfordinner.rule=Host(`${TRAEFIK_HOST:-example.com}`)
+      - traefik.http.routers.whatsfordinner.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}
+      - traefik.http.routers.whatsfordinner.tls=true
+      - traefik.http.routers.whatsfordinner.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}
+    networks:
+      - traefik_proxy
+    restart: unless-stopped
+
+networks:
+  traefik_proxy:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik_proxy}
