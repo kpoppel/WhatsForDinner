@@ -117,6 +117,16 @@ def render_inspector(api_prefix: str) -> HTMLResponse:
         <label for=\"search\">Search</label>
         <input id=\"search\" type=\"text\" placeholder=\"chicken, soup, pasta...\" />
         <label for=\"limit\">Limit</label>
+      <article class="panel">
+        <h2>Recipe Tags</h2>
+        <p>Fetch available Tandoor recipe tags and categories.</p>
+        <button id="tags">GET /recipe-tags</button>
+      </article>
+      <article class="panel">
+        <h2>Today Meal</h2>
+        <p>Fetch a normalized today meal payload for app and Home Assistant.</p>
+        <button id="today" class="secondary">GET /today-meal</button>
+      </article>
         <input id=\"limit\" type=\"number\" value=\"10\" min=\"1\" max=\"100\" />
         <button id=\"recipes\">GET /recipes</button>
       </article>
@@ -156,6 +166,14 @@ def render_inspector(api_prefix: str) -> HTMLResponse:
 
     document.getElementById("shopping").addEventListener("click", () => {{
       callApi("/shopping-list");
+    }});
+
+    document.getElementById("tags").addEventListener("click", () => {{
+      callApi("/recipe-tags");
+    }});
+
+    document.getElementById("today").addEventListener("click", () => {{
+      callApi("/today-meal");
     }});
   </script>
 </body>

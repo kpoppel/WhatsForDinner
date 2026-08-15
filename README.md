@@ -7,7 +7,9 @@ FastAPI backend for a mobile app that proxies recipe and shopping list data from
 - REST endpoints for mobile clients
 - Tandoor integration via configurable base URL and token
 - Browser inspection UI at `/inspect` to quickly test endpoints
-- OpenAPI docs at `/docs`
+- Stage 2 user app at `/app` with four sections: configuration, quick 1-day meal planning, multi-day meal planning, and shopping list handling
+- Offline-friendly shopping sync endpoints with cursor-based change feeds
+- OpenAPI docs at `/docs` and versioned docs at `/api/v1/docs`
 
 ## Quick start
 
@@ -52,7 +54,7 @@ Before deploying, ensure `.env` contains your Tandoor settings:
 - `TANDOOR_API_TOKEN`
 
 #### Getting a Tandoor Token
-Visit your instance of Tandoor: https://<tandoor_url>/settings/api and create a new API token here. It needs to read/write to e able to update meal plans and shopping lists.
+Visit your instance of Tandoor: https://<tandoor_url>/settings/api and create a new API token here. It needs read/write access to update meal plans and shopping lists.
 
 ### Deploy with Caddy
 
@@ -104,11 +106,62 @@ This compose file assumes you already run Traefik and have an external Docker ne
 
 ## API endpoints
 
+### Core endpoints
+
 - `GET /api/v1/health`
-- `GET /api/v1/recipes?search=<term>&limit=<n>`
-- `GET /api/v1/shopping-list`
+- `GET /api/v1/recipes?search=<term>&limit=<n>&keyword_ids=<id>`
+- `GET /api/v1/recipe-tags`
+- `GET /api/v1/today-meal`
+
+### Stage 2 configuration
+
+- `GET /api/v1/config/keywords`
+- `GET /api/v1/config/keywords/selected`
+- `PUT /api/v1/config/keywords/selected`
+- `GET /api/v1/config/meal-plan-rules`
+- `PUT /api/v1/config/meal-plan-rules`
+
+### Stage 2 meal plan flow
+
+- `POST /api/v1/meal-plans/generate`
+- `GET /api/v1/meal-plans/stored`
+- `GET /api/v1/meal-plans/{plan_id}`
+- `DELETE /api/v1/meal-plans/stored/{plan_id}`
+- `PATCH /api/v1/meal-plans/{plan_id}`
+- `POST /api/v1/meal-plans/{plan_id}/entries`
+- `PATCH /api/v1/meal-plans/{plan_id}/entries/{entry_id}`
+- `DELETE /api/v1/meal-plans/{plan_id}/entries/{entry_id}`
+- `POST /api/v1/meal-plans/{plan_id}/shopping-list`
+
+### Stage 2 shopping list + sync flow
+
+- `GET /api/v1/shopping-list/view`
+- `POST /api/v1/shopping-list/entries`
+- `PATCH /api/v1/shopping-list/entries/{entry_id}`
+- `DELETE /api/v1/shopping-list/entries/{entry_id}`
+- `GET /api/v1/shopping-list/sync?since=<cursor>`
+- `POST /api/v1/shopping-list/sync`
+
+### Documentation endpoints
+
+- `GET /docs`
+- `GET /api/v1/docs`
+- `GET /api/v1/redoc`
+- `GET /api/v1/openapi.json`
+
+## Stage 2 state persistence
+
+Stage 2 stores local app state (selected keywords, meal-plan drafts, and shopping sync event cursors) in a JSON file:
+
+- default path: `app/state/stage2_state.json`
+- configurable with: `STAGE2_STATE_FILE`
+
+This local state is app-managed metadata; recipe and shopping list data still come from Tandoor APIs.
 
 ## Browser inspection
 
 - Open `http://127.0.0.1:8000/inspect` for a lightweight UI to call the API.
+- Open `http://127.0.0.1:8000/app` for the Stage 2 user app flow (configuration, quick 1-day plan, meal planning, shopping + sync).
 - Open `http://127.0.0.1:8000/docs` for interactive Swagger docs.
+- Open `http://127.0.0.1:8000/api/v1/docs` for versioned Swagger docs tied to `http://127.0.0.1:8000/api/v1/openapi.json`.
+- Open `http://127.0.0.1:8000/api/v1/redoc` for versioned ReDoc.
