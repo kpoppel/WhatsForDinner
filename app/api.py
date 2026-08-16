@@ -121,18 +121,18 @@ def _normalize_shopping_entry(entry: dict[str, Any], status: str) -> dict[str, A
     food = entry.get("food") if isinstance(entry.get("food"), dict) else {}
     unit = entry.get("unit") if isinstance(entry.get("unit"), dict) else {}
 
-    ingredient_type = str(food.get("category"))
-    raw_store_group = food.get("store_group")
-    if isinstance(raw_store_group, dict) and raw_store_group.get("name") is not None:
-        store_group = raw_store_group
-    else:
-        store_group = food.get("supermarket_category")
+    ingredient_type = (
+        str(food.get("category") or food.get("food_type") or food.get("type") or "Other")
+    )
+    store_group = (
+        str(food.get("supermarket_category") or food.get("supermarket") or "General")
+    )
 
     return {
         "id": entry.get("id"),
-        "name": food.get("name"),
+        "name": food.get("name") or entry.get("name") or "Unnamed",
         "amount": entry.get("amount"),
-        "unit": unit.get("name"),
+        "unit": unit.get("name") or entry.get("unit") or "",
         "status": status,
         "ingredient_type": ingredient_type,
         "store_group": store_group,
@@ -143,11 +143,7 @@ def _normalize_shopping_entry(entry: dict[str, Any], status: str) -> dict[str, A
 def _group_section(items: list[dict[str, Any]], key: str) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for item in items:
-        value = item.get(key)
-        if isinstance(value, dict):
-            group = str(value.get("id"))
-        else:
-            group = str(value)
+        group = str(item.get(key) or "Other")
         grouped.setdefault(group, []).append(item)
     return grouped
 
@@ -275,74 +271,32 @@ def _is_within_no_repeat_window(
     return False
 
 
-@router.get(
-    "/health",
-    tags=["core"],
-    summary="Health check",
-    description="Simple health endpoint used for liveness checks.",
-)
+@router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.get(
-    "/recipes",
-    tags=["core"],
-    summary="List recipes",
-    description=(
-        "Returns recipes from Tandoor with optional text search, result limit, "
-        "and keyword filtering."
-    ),
-)
+@router.get("/recipes")
 async def recipes(
     search: str | None = Query(default=None, description="Search term"),
-    limit: int | None = Query(default=None, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=100),
     keyword_ids: list[int] | None = Query(
         default=None,
         description="Filter by keyword IDs from /recipe-tags.",
     ),
 ) -> dict:
     try:
-        if limit is None:
-            data = await client.list_recipes_all(
-                search=search,
-                keyword_ids=keyword_ids,
-            )
-        else:
-            data = await client.list_recipes(
-                search=search,
-                limit=limit,
-                keyword_ids=keyword_ids,
-            )
+        data = await client.list_recipes(
+            search=search,
+            limit=limit,
+            keyword_ids=keyword_ids,
+        )
         return {"source": "tandoor", "data": data}
     except TandoorError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.get(
-    "/recipes/{recipe_id}",
-    tags=["core"],
-    summary="Get recipe by ID",
-    description=(
-        "Returns the raw recipe payload from Tandoor for the provided recipe ID."
-    ),
-)
-async def recipe_by_id(recipe_id: int) -> dict[str, Any]:
-    try:
-        data = await client.get_recipe(recipe_id)
-        if isinstance(data, dict):
-            return data
-        raise HTTPException(status_code=502, detail="Unexpected Tandoor response format.")
-    except TandoorError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-
-@router.get(
-    "/recipe-tags",
-    tags=["core"],
-    summary="List recipe tags",
-    description="Returns available recipe tags/keywords from Tandoor.",
-)
+@router.get("/recipe-tags")
 async def recipe_tags() -> dict:
     try:
         data = await client.list_tags()
@@ -351,15 +305,7 @@ async def recipe_tags() -> dict:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.get(
-    "/today-meal",
-    tags=["core"],
-    summary="Get a single meal payload",
-    description=(
-        "Fetches one recipe candidate and returns a stable payload with title, "
-        "ingredients, and steps for app and dashboard use."
-    ),
-)
+@router.get("/today-meal")
 async def today_meal() -> dict:
     try:
         data = await client.list_recipes(limit=10)
@@ -386,12 +332,7 @@ async def today_meal() -> dict:
 
 
 
-@router.get(
-    "/config/keywords",
-    tags=["configuration"],
-    summary="List available keywords",
-    description="Returns available Tandoor keywords/tags used by Stage 2 planning flows.",
-)
+@router.get("/config/keywords")
 async def config_keywords() -> dict:
     try:
         data = await client.list_tags()
@@ -400,12 +341,7 @@ async def config_keywords() -> dict:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.get(
-    "/config/keywords/selected",
-    tags=["configuration"],
-    summary="Get selected keywords",
-    description="Returns locally stored keyword IDs selected for planning and one-meal flows.",
-)
+@router.get("/config/keywords/selected")
 async def selected_keywords() -> dict:
     return {
         "source": "local-state",
@@ -413,12 +349,7 @@ async def selected_keywords() -> dict:
     }
 
 
-@router.put(
-    "/config/keywords/selected",
-    tags=["configuration"],
-    summary="Set selected keywords",
-    description="Replaces locally stored selected keyword IDs used by Stage 2 flows.",
-)
+@router.put("/config/keywords/selected")
 async def set_selected_keywords(payload: dict[str, Any] = Body(...)) -> dict:
     values = payload.get("keyword_ids")
     if not isinstance(values, list):
@@ -436,12 +367,7 @@ async def set_selected_keywords(payload: dict[str, Any] = Body(...)) -> dict:
     }
 
 
-@router.get(
-    "/config/meal-plan-rules",
-    tags=["configuration"],
-    summary="Get meal plan rules",
-    description="Returns local meal planning rules, including no-repeat behavior.",
-)
+@router.get("/config/meal-plan-rules")
 async def get_meal_plan_rules() -> dict:
     rules = stage2_state.meal_plan_rules()
     return {
@@ -450,12 +376,7 @@ async def get_meal_plan_rules() -> dict:
     }
 
 
-@router.put(
-    "/config/meal-plan-rules",
-    tags=["configuration"],
-    summary="Set meal plan rules",
-    description="Updates local meal planning rules such as no_repeat_days.",
-)
+@router.put("/config/meal-plan-rules")
 async def set_meal_plan_rules(payload: dict[str, Any] = Body(...)) -> dict:
     raw_value = payload.get("no_repeat_days")
     try:
@@ -473,15 +394,7 @@ async def set_meal_plan_rules(payload: dict[str, Any] = Body(...)) -> dict:
     }
 
 
-@router.post(
-    "/meal-plans/generate",
-    tags=["meal-plans"],
-    summary="Generate a meal plan",
-    description=(
-        "Builds a meal plan from date, duration, diners, constraints, keyword filtering, "
-        "and no-repeat rules. Generated plan is stored in local Stage 2 state."
-    ),
-)
+@router.post("/meal-plans/generate")
 async def generate_meal_plan(payload: dict[str, Any] = Body(...)) -> dict:
     start_date_raw = payload.get("start_date")
     if not isinstance(start_date_raw, str):
@@ -511,20 +424,18 @@ async def generate_meal_plan(payload: dict[str, Any] = Body(...)) -> dict:
     empty_days = _parse_constraint_days(constraints.get("empty_days", []), start_day, length_days)
 
     raw_keyword_ids = payload.get("keyword_ids")
-    if isinstance(raw_keyword_ids, list):
+    if isinstance(raw_keyword_ids, list) and raw_keyword_ids:
         keyword_ids = [int(v) for v in raw_keyword_ids]
     else:
         keyword_ids = stage2_state.selected_keywords()
 
     recipe_candidates: list[dict[str, Any]] = []
-    try:
-        result = await client.list_recipes(
-            limit=max(20, length_days * 3),
-            keyword_ids=keyword_ids or None,
-        )
-        recipe_candidates = _extract_results(result)
-    except TandoorError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if keyword_ids:
+        try:
+            result = await client.list_recipes(limit=max(20, length_days * 3), keyword_ids=keyword_ids)
+            recipe_candidates = _extract_results(result)
+        except TandoorError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     configured_rules = stage2_state.meal_plan_rules()
     raw_no_repeat = payload.get("no_repeat_days")
@@ -629,12 +540,7 @@ async def generate_meal_plan(payload: dict[str, Any] = Body(...)) -> dict:
     return {"source": "tandoor+local-state", "data": stored}
 
 
-@router.get(
-    "/meal-plans/stored",
-    tags=["meal-plans"],
-    summary="List stored meal plans",
-    description="Returns summary information for meal plans currently stored in local state.",
-)
+@router.get("/meal-plans/stored")
 async def list_stored_meal_plans() -> dict:
     plans = stage2_state.list_meal_plans()
     summary: list[dict[str, Any]] = []
@@ -658,12 +564,7 @@ async def list_stored_meal_plans() -> dict:
     }
 
 
-@router.get(
-    "/meal-plans/{plan_id}",
-    tags=["meal-plans"],
-    summary="Get meal plan by ID",
-    description="Returns a full stored meal plan, including entries and constraints.",
-)
+@router.get("/meal-plans/{plan_id}")
 async def get_meal_plan_stage2(plan_id: int) -> dict:
     plan = stage2_state.get_meal_plan(plan_id)
     if plan is None:
@@ -671,12 +572,7 @@ async def get_meal_plan_stage2(plan_id: int) -> dict:
     return {"source": "local-state", "data": plan}
 
 
-@router.delete(
-    "/meal-plans/stored/{plan_id}",
-    tags=["meal-plans"],
-    summary="Delete stored meal plan",
-    description="Deletes a stored meal plan by ID from local state.",
-)
+@router.delete("/meal-plans/stored/{plan_id}")
 async def delete_stored_meal_plan(plan_id: int) -> dict:
     deleted = stage2_state.delete_meal_plan(plan_id)
     if deleted is None:
@@ -692,12 +588,7 @@ async def delete_stored_meal_plan(plan_id: int) -> dict:
     }
 
 
-@router.patch(
-    "/meal-plans/{plan_id}",
-    tags=["meal-plans"],
-    summary="Patch meal plan",
-    description="Partially updates a stored meal plan and records a sync event.",
-)
+@router.patch("/meal-plans/{plan_id}")
 async def patch_meal_plan_stage2(plan_id: int, payload: dict[str, Any] = Body(...)) -> dict:
     current = stage2_state.get_meal_plan(plan_id)
     if current is None:
@@ -719,12 +610,7 @@ async def patch_meal_plan_stage2(plan_id: int, payload: dict[str, Any] = Body(..
     return {"source": "local-state", "data": updated}
 
 
-@router.post(
-    "/meal-plans/{plan_id}/entries",
-    tags=["meal-plans"],
-    summary="Add meal plan entry",
-    description="Adds a new entry to a stored meal plan and reorders by day index.",
-)
+@router.post("/meal-plans/{plan_id}/entries")
 async def add_meal_plan_entry(plan_id: int, payload: dict[str, Any] = Body(...)) -> dict:
     plan = stage2_state.get_meal_plan(plan_id)
     if plan is None:
@@ -765,12 +651,7 @@ async def add_meal_plan_entry(plan_id: int, payload: dict[str, Any] = Body(...))
     return {"source": "local-state", "data": updated}
 
 
-@router.patch(
-    "/meal-plans/{plan_id}/entries/{entry_id}",
-    tags=["meal-plans"],
-    summary="Update meal plan entry",
-    description="Updates fields for one meal plan entry, including optional day re-targeting.",
-)
+@router.patch("/meal-plans/{plan_id}/entries/{entry_id}")
 async def patch_meal_plan_entry(
     plan_id: int,
     entry_id: int,
@@ -805,12 +686,7 @@ async def patch_meal_plan_entry(
     return {"source": "local-state", "data": updated}
 
 
-@router.delete(
-    "/meal-plans/{plan_id}/entries/{entry_id}",
-    tags=["meal-plans"],
-    summary="Delete meal plan entry",
-    description="Removes a specific entry from a stored meal plan.",
-)
+@router.delete("/meal-plans/{plan_id}/entries/{entry_id}")
 async def delete_meal_plan_entry(plan_id: int, entry_id: int) -> dict:
     plan = stage2_state.get_meal_plan(plan_id)
     if plan is None:
@@ -832,15 +708,7 @@ async def delete_meal_plan_entry(plan_id: int, entry_id: int) -> dict:
     return {"source": "local-state", "data": updated}
 
 
-@router.post(
-    "/meal-plans/{plan_id}/shopping-list",
-    tags=["meal-plans"],
-    summary="Generate shopping list from meal plan",
-    description=(
-        "Converts meal plan entries into Tandoor shopping updates using recipe ingredients "
-        "and returns both operation results and a refreshed shopping view."
-    ),
-)
+@router.post("/meal-plans/{plan_id}/shopping-list")
 async def meal_plan_to_shopping_list(plan_id: int) -> dict:
     _ensure_tandoor_writes_enabled("meal_plan_to_shopping_list")
     plan = stage2_state.get_meal_plan(plan_id)
@@ -914,15 +782,7 @@ async def meal_plan_to_shopping_list(plan_id: int) -> dict:
     }
 
 
-@router.get(
-    "/shopping-list/view",
-    tags=["shopping"],
-    summary="Get shopping list view",
-    description=(
-        "Returns an app-friendly shopping list view grouped into Remaining, Skipped, and "
-        "Completed sections, with category-based grouping metadata."
-    ),
-)
+@router.get("/shopping-list/view")
 async def shopping_list_view(limit: int = Query(default=300, ge=1, le=1000)) -> dict:
     try:
         data = await client.list_shopping_entries(limit=limit)
@@ -938,12 +798,7 @@ async def shopping_list_view(limit: int = Query(default=300, ge=1, le=1000)) -> 
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.post(
-    "/shopping-list/entries",
-    tags=["shopping"],
-    summary="Create shopping list entry",
-    description="Creates a shopping list entry in Tandoor and records a local sync event.",
-)
+@router.post("/shopping-list/entries")
 async def shopping_entries_stage2_create(payload: dict[str, Any] = Body(...)) -> dict:
     _ensure_tandoor_writes_enabled("shopping_entries_stage2_create")
     try:
@@ -958,15 +813,7 @@ async def shopping_entries_stage2_create(payload: dict[str, Any] = Body(...)) ->
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.patch(
-    "/shopping-list/entries/{entry_id}",
-    tags=["shopping"],
-    summary="Update shopping list entry",
-    description=(
-        "Updates one shopping entry. Supports explicit status transitions "
-        "(remaining/skipped/completed) mapped to Tandoor-compatible fields."
-    ),
-)
+@router.patch("/shopping-list/entries/{entry_id}")
 async def shopping_entries_stage2_update(
     entry_id: int,
     payload: dict[str, Any] = Body(...),
@@ -1012,12 +859,7 @@ async def shopping_entries_stage2_update(
     }
 
 
-@router.delete(
-    "/shopping-list/entries/{entry_id}",
-    tags=["shopping"],
-    summary="Delete shopping list entry",
-    description="Deletes one shopping entry in Tandoor and records a local sync event.",
-)
+@router.delete("/shopping-list/entries/{entry_id}")
 async def shopping_entries_stage2_delete(entry_id: int) -> dict:
     _ensure_tandoor_writes_enabled("shopping_entries_stage2_delete")
     try:
@@ -1032,12 +874,7 @@ async def shopping_entries_stage2_delete(entry_id: int) -> dict:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.get(
-    "/shopping-list/sync",
-    tags=["shopping"],
-    summary="Get shopping sync delta",
-    description="Returns local shopping sync events newer than the provided cursor.",
-)
+@router.get("/shopping-list/sync")
 async def shopping_sync_get(
     since: int = Query(default=0, ge=0),
     limit: int = Query(default=500, ge=1, le=2000),
@@ -1051,15 +888,7 @@ async def shopping_sync_get(
     }
 
 
-@router.post(
-    "/shopping-list/sync",
-    tags=["shopping"],
-    summary="Apply offline shopping changes",
-    description=(
-        "Accepts batched offline create/update/delete operations, applies them to Tandoor, "
-        "and returns applied plus rejected results with updated server cursor."
-    ),
-)
+@router.post("/shopping-list/sync")
 async def shopping_sync_post(payload: dict[str, Any] = Body(...)) -> dict:
     _ensure_tandoor_writes_enabled("shopping_sync_post")
     changes = payload.get("changes")

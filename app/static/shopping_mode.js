@@ -1,131 +1,25 @@
 (() => {
-  const DEBUG_MODE = false;
-
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("/shopping-sw.js", { scope: "/" }).catch(() => {
-        // Ignore service worker registration failures.
-      });
-    });
-
-    // Reload once when a new service worker takes control (new build deployed).
-    let _swRefreshing = false;
-    navigator.serviceWorker.addEventListener("controllerchange", () => {
-      if (!_swRefreshing) {
-        _swRefreshing = true;
-        window.location.reload();
-      }
-    });
-  }
-
-  // Pull-to-refresh: blocks native PTR when offline; triggers list refresh when online.
-  let _ptrStartY = 0;
-  let _ptrDragging = false;
-  let _ptrIndicator = null;
-  const PTR_THRESHOLD = 80;
-
-  function getPtrIndicator() {
-    if (!_ptrIndicator) {
-      _ptrIndicator = document.createElement("div");
-      _ptrIndicator.id = "ptr-indicator";
-      _ptrIndicator.setAttribute("aria-hidden", "true");
-      document.body.prepend(_ptrIndicator);
-    }
-    return _ptrIndicator;
-  }
-
-  document.addEventListener("touchstart", (e) => {
-    _ptrStartY = e.touches[0].pageY;
-    _ptrDragging = false;
-  }, { passive: true });
-
-  document.addEventListener("touchmove", (e) => {
-    const dy = e.touches[0].pageY - _ptrStartY;
-    if (dy <= 0 || window.scrollY !== 0) {
-      return;
-    }
-    // Always prevent native PTR; we handle it ourselves when online.
-    if (e.cancelable) {
-      e.preventDefault();
-    }
-    if (!isOnline()) {
-      return;
-    }
-    _ptrDragging = true;
-    const indicator = getPtrIndicator();
-    indicator.style.display = "flex";
-    indicator.classList.toggle("ptr-ready", dy >= PTR_THRESHOLD);
-  }, { passive: false });
-
-  document.addEventListener("touchend", () => {
-    if (!_ptrDragging || !_ptrIndicator) {
-      return;
-    }
-    const wasReady = _ptrIndicator.classList.contains("ptr-ready");
-    _ptrIndicator.classList.remove("ptr-ready");
-    _ptrIndicator.style.display = "none";
-    _ptrDragging = false;
-    if (wasReady) {
-      run(() => refreshAndSyncIfNeeded());
-    }
-  }, { passive: true });
-
   const apiPrefix = window.WFD_API_PREFIX;
   const output = document.getElementById("output");
   const CACHE_KEY = "wfd.shopping-mode.v1";
   const SHOPPING_STATUSES = new Set(["remaining", "skipped", "completed"]);
-  const SECTION_CONFIG = {
-    remaining: {
-      titleId: "shop-mode-remaining-title",
-      label: "Remaining by Category",
-      collapsible: false,
-    },
-    skipped: {
-      titleId: "shop-mode-skipped-title",
-      containerId: "shop-mode-skipped",
-      label: "Postponed / Skipped",
-      collapsible: true,
-    },
-    completed: {
-      titleId: "shop-mode-completed-title",
-      containerId: "shop-mode-completed",
-      label: "Completed",
-      collapsible: true,
-    },
-  };
 
   const state = {
     itemsById: {},
     pendingChanges: [],
     serverCursor: 0,
-    apiReachable: true,
-    collapsedSections: {
-      skipped: true,
-      completed: true,
-    },
   };
 
   function show(data) {
-    if (DEBUG_MODE) {
-      output.textContent = JSON.stringify(data, null, 2);
-    }
-  }
-
-  function browserOnline() {
-    return navigator.onLine !== false;
+    output.textContent = JSON.stringify(data, null, 2);
   }
 
   function isOnline() {
-    return browserOnline() && state.apiReachable;
-  }
-
-  function setApiReachable(value) {
-    state.apiReachable = Boolean(value);
-    updateStatusBadges();
+    return navigator.onLine !== false;
   }
 
   function escapeAttr(value) {
-    return String(value)
+    return String(value ?? "")
       .replaceAll("&", "&amp;")
       .replaceAll("\"", "&quot;")
       .replaceAll("<", "&lt;")
@@ -138,33 +32,44 @@
   }
 
   async function api(path, options = {}) {
-    try {
-      const response = await fetch(`${apiPrefix}${path}`, {
-        headers: { "Content-Type": "application/json" },
-        ...options,
-      });
+    const response = await fetch(`${apiPrefix}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(JSON.stringify(data));
-      }
-
-      setApiReachable(true);
-      return data;
-    } catch (error) {
-      setApiReachable(false);
-      throw error;
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(JSON.stringify(data));
     }
+
+    return data;
   }
 
   async function run(action) {
     try {
       await action();
     } catch (err) {
-      show({ message: "Request failed", status: `Error: ${err}` });
+      output.textContent = `Request failed: ${err}`;
     }
   }
 
+  function normalizeShoppingItem(item, fallbackStatus) {
+    const id = shoppingItemId(item?.id);
+    if (id === null) {
+      return null;
+    }
+
+    const status = SHOPPING_STATUSES.has(item?.status) ? item.status : fallbackStatus;
+    return {
+      id,
+      name: String(item?.name || "Unnamed"),
+      amount: item?.amount,
+      unit: item?.unit ? String(item.unit) : "",
+      status: SHOPPING_STATUSES.has(status) ? status : "remaining",
+      ingredient_type: String(item?.ingredient_type || "Other"),
+      store_group: String(item?.store_group || "General"),
+    };
+  }
 
   function persistCache() {
     try {
@@ -174,31 +79,19 @@
     }
   }
 
-  function applyPendingChanges() {
+  function applyPendingStatuses() {
     for (const change of state.pendingChanges) {
-      if (!change) {
+      if (!change || change.operation !== "update") {
         continue;
       }
-
       const id = shoppingItemId(change.entry_id);
-      if (id === null) {
+      const status = change.payload?.status;
+      if (id === null || !SHOPPING_STATUSES.has(status)) {
         continue;
       }
-
-      if (change.operation === "delete") {
-        delete state.itemsById[String(id)];
-        continue;
-      }
-
-      if (change.operation === "update") {
-        const status = change.payload?.status;
-        if (!SHOPPING_STATUSES.has(status)) {
-          continue;
-        }
-        const row = state.itemsById[String(id)];
-        if (row) {
-          row.status = status;
-        }
+      const row = state.itemsById[String(id)];
+      if (row) {
+        row.status = status;
       }
     }
   }
@@ -227,28 +120,15 @@
       state.serverCursor = 0;
     }
 
-    applyPendingChanges();
+    applyPendingStatuses();
     persistCache();
   }
 
   function updateStatusBadges() {
     const network = document.getElementById("shop-mode-network");
     const pending = document.getElementById("shop-mode-pending");
-    const pendingCount = document.getElementById("shop-mode-pending-count");
-    const online = isOnline();
-
-    network.classList.toggle("is-online", online);
-    network.classList.toggle("is-offline", !online);
-    network.setAttribute("aria-label", online ? "Online" : "Offline");
-    network.setAttribute("title", online ? "Online" : "Offline");
-
-    if (pendingCount) {
-      pendingCount.textContent = String(state.pendingChanges.length);
-    } else {
-      pending.textContent = `o ${state.pendingChanges.length}`;
-    }
-    pending.setAttribute("aria-label", `Pending sync: ${state.pendingChanges.length}`);
-    pending.setAttribute("title", `Pending sync: ${state.pendingChanges.length}`);
+    network.textContent = isOnline() ? "Status: online" : "Status: offline";
+    pending.textContent = `Pending sync: ${state.pendingChanges.length}`;
   }
 
   function sortedByStatus(status) {
@@ -257,88 +137,8 @@
       .sort((a, b) => String(a.name).localeCompare(String(b.name)));
   }
 
-  function suppressNextCardClick(card) {
-    card.dataset.suppressNextClick = "1";
-  }
-
-  function consumeSuppressedCardClick(card) {
-    if (card.dataset.suppressNextClick === "1") {
-      card.dataset.suppressNextClick = "0";
-      return true;
-    }
-    return false;
-  }
-
-  function attachSwipeRightDeleteGesture(card, entryId) {
-    let startX = 0;
-    let startY = 0;
-    let deltaX = 0;
-    let isDragging = false;
-
-    card.addEventListener("touchstart", (event) => {
-      const touch = event.changedTouches?.[0];
-      if (!touch) {
-        return;
-      }
-      startX = touch.clientX;
-      startY = touch.clientY;
-      deltaX = 0;
-      isDragging = false;
-      card.classList.remove("swiping-delete-right");
-      card.style.setProperty("--swipe-delete-right-progress", "0");
-    });
-
-    card.addEventListener("touchmove", (event) => {
-      const touch = event.changedTouches?.[0];
-      if (!touch) {
-        return;
-      }
-
-      deltaX = touch.clientX - startX;
-      const deltaY = touch.clientY - startY;
-      if (Math.abs(deltaX) <= Math.abs(deltaY) || deltaX <= 0) {
-        return;
-      }
-
-      isDragging = true;
-      const clamped = Math.max(Math.min(deltaX, 140), 0);
-      card.style.transform = `translateX(${clamped}px)`;
-      card.classList.toggle("swiping-delete-right", clamped > 20);
-      const progress = Math.min(Math.abs(clamped) / 140, 1);
-      card.style.setProperty("--swipe-delete-right-progress", String(progress));
-      if (event.cancelable) {
-        event.preventDefault();
-      }
-    }, { passive: false });
-
-    card.addEventListener("touchend", () => {
-      const shouldDelete = isDragging && deltaX > 80;
-      card.style.transform = "";
-      card.classList.remove("swiping-delete-right");
-      card.style.setProperty("--swipe-delete-right-progress", "0");
-
-      if (shouldDelete) {
-        suppressNextCardClick(card);
-        run(() => deleteEntry(entryId));
-      }
-
-      isDragging = false;
-      deltaX = 0;
-    });
-
-    card.addEventListener("click", (event) => {
-      if (consumeSuppressedCardClick(card)) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-      }
-    }, true);
-  }
-
   function attachRestoreToRemainingClick(card, entryId) {
     card.addEventListener("click", () => {
-      if (consumeSuppressedCardClick(card)) {
-        return;
-      }
       run(() => setStatus(entryId, "remaining"));
     });
   }
@@ -348,6 +148,7 @@
     let startY = 0;
     let deltaX = 0;
     let isDragging = false;
+    let suppressClick = false;
 
     card.addEventListener("touchstart", (event) => {
       const touch = event.changedTouches?.[0];
@@ -359,7 +160,6 @@
       deltaX = 0;
       isDragging = false;
       card.classList.remove("swiping");
-      card.style.setProperty("--swipe-skip-progress", "0");
     });
 
     card.addEventListener("touchmove", (event) => {
@@ -378,8 +178,6 @@
       const clamped = Math.max(Math.min(deltaX, 0), -140);
       card.style.transform = `translateX(${clamped}px)`;
       card.classList.toggle("swiping", clamped < -20);
-      const progress = Math.min(Math.abs(clamped) / 140, 1);
-      card.style.setProperty("--swipe-skip-progress", String(progress));
       if (event.cancelable) {
         event.preventDefault();
       }
@@ -389,10 +187,9 @@
       const shouldSkip = isDragging && deltaX < -80;
       card.style.transform = "";
       card.classList.remove("swiping");
-      card.style.setProperty("--swipe-skip-progress", "0");
 
       if (shouldSkip) {
-        suppressNextCardClick(card);
+        suppressClick = true;
         run(() => setStatus(entryId, "skipped"));
       }
 
@@ -401,306 +198,113 @@
     });
 
     card.addEventListener("click", () => {
-      if (consumeSuppressedCardClick(card)) {
+      if (suppressClick) {
+        suppressClick = false;
         return;
       }
       run(() => setStatus(entryId, "completed"));
     });
   }
 
-  function attachCompletedCardGestures(card, entryId) {
-    let startX = 0;
-    let startY = 0;
-    let deltaX = 0;
-    let isDragging = false;
-
-    card.addEventListener("touchstart", (event) => {
-      const touch = event.changedTouches?.[0];
-      if (!touch) {
-        return;
-      }
-      startX = touch.clientX;
-      startY = touch.clientY;
-      deltaX = 0;
-      isDragging = false;
-      card.classList.remove("swiping-delete");
-      card.style.setProperty("--swipe-delete-progress", "0");
-    });
-
-    card.addEventListener("touchmove", (event) => {
-      const touch = event.changedTouches?.[0];
-      if (!touch) {
-        return;
-      }
-
-      deltaX = touch.clientX - startX;
-      const deltaY = touch.clientY - startY;
-      if (Math.abs(deltaX) <= Math.abs(deltaY)) {
-        return;
-      }
-
-      isDragging = true;
-      const clamped = Math.max(Math.min(deltaX, 0), -140);
-      card.style.transform = `translateX(${clamped}px)`;
-      card.classList.toggle("swiping-delete", clamped < -20);
-      const progress = Math.min(Math.abs(clamped) / 140, 1);
-      card.style.setProperty("--swipe-delete-progress", String(progress));
-      if (event.cancelable) {
-        event.preventDefault();
-      }
-    }, { passive: false });
-
-    card.addEventListener("touchend", () => {
-      const shouldDelete = isDragging && deltaX < -80;
-      card.style.transform = "";
-      card.classList.remove("swiping-delete");
-      card.style.setProperty("--swipe-delete-progress", "0");
-
-      if (shouldDelete) {
-        suppressNextCardClick(card);
-        run(() => deleteEntry(entryId));
-      }
-
-      isDragging = false;
-      deltaX = 0;
-    });
-
-    card.addEventListener("click", () => {
-      if (consumeSuppressedCardClick(card)) {
-        return;
-      }
-      run(() => setStatus(entryId, "remaining"));
-    });
-  }
-
-  function titleWithCount(label, count, collapsed) {
-    if (typeof collapsed === "boolean") {
-      return `${label} (${count}) ${collapsed ? "▸" : "▾"}`;
-    }
-    return `${label} (${count})`;
-  }
-
-  function updateSectionTitle(key, count) {
-    const config = SECTION_CONFIG[key];
-    if (!config) {
-      return;
-    }
-
-    const title = document.getElementById(config.titleId);
-    if (!title) {
-      return;
-    }
-
-    if (config.collapsible) {
-      const collapsed = !!state.collapsedSections[key];
-      title.textContent = titleWithCount(config.label, count, collapsed);
-      title.setAttribute("aria-expanded", String(!collapsed));
-    } else {
-      title.textContent = titleWithCount(config.label, count);
-    }
-  }
-
-  function applyCollapsedSectionState(key) {
-    const config = SECTION_CONFIG[key];
-    if (!config || !config.collapsible) {
-      return;
-    }
-
-    const container = document.getElementById(config.containerId);
-    if (!container) {
-      return;
-    }
-
-    container.hidden = !!state.collapsedSections[key];
-  }
-
-  function toggleCollapsedSection(key) {
-    const config = SECTION_CONFIG[key];
-    if (!config || !config.collapsible) {
-      return;
-    }
-
-    state.collapsedSections[key] = !state.collapsedSections[key];
-    applyCollapsedSectionState(key);
-    updateSectionTitle(key, sortedByStatus(key).length);
-  }
-
-  function wireCollapsibleSection(key) {
-    const config = SECTION_CONFIG[key];
-    if (!config || !config.collapsible) {
-      return;
-    }
-
-    const title = document.getElementById(config.titleId);
-    if (!title) {
-      return;
-    }
-
-    title.addEventListener("click", () => {
-      toggleCollapsedSection(key);
-    });
-
-    title.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        toggleCollapsedSection(key);
-      }
-    });
-
-    applyCollapsedSectionState(key);
-  }
-
   function createCard(item, mode) {
-    // TODO: Make font size larger for the ingredient name, smaller for the category. Amount same size as name and category in height.
     const card = document.createElement("div");
     card.className = "shop-card";
 
     const unitPart = item.unit ? ` ${item.unit}` : "";
-    const amountPart = item.amount;
-    const quantityText = `${amountPart}${unitPart}`.trim();
-    const deleteRightHint = `
-      <div class="shop-swipe-delete-right-hint" aria-hidden="true">
-        <span class="shop-swipe-delete-right-icon">x</span>
-        <span class="shop-swipe-delete-right-label">Delete</span>
-      </div>`;
-    const skipHint = mode === "remaining"
-      ? `
-      <div class="shop-swipe-skip-hint" aria-hidden="true">
-        <span class="shop-swipe-skip-icon">\u22ef</span>
-        <span class="shop-swipe-skip-label">Postpone</span>
-      </div>`
-      : "";
-    const deleteHint = mode === "completed"
-      ? `
-      <div class="shop-swipe-delete-hint" aria-hidden="true">
-        <span class="shop-swipe-delete-icon">x</span>
-        <span class="shop-swipe-delete-label">Delete</span>
-      </div>`
-      : "";
-
+    const amountPart = item.amount ?? "";
     card.innerHTML = `
-      ${deleteRightHint}
-      ${skipHint}
-      ${deleteHint}
       <div class="shop-card-head">
-        <div class="shop-card-name-wrap">
-          <strong class="shop-item-name">${escapeAttr(item.name)}</strong>
-          <span class="shop-item-category muted">${escapeAttr(item.ingredient_type)}</span>
-        </div>
-        <span class="shop-item-amount muted">${escapeAttr(quantityText)}</span>
+        <strong>${escapeAttr(item.name)}</strong>
+        <span class="muted">#${item.id}</span>
       </div>
+      <div class="muted">${escapeAttr(String(amountPart))}${escapeAttr(unitPart)} | ${escapeAttr(item.ingredient_type)}</div>
     `;
 
     if (mode === "remaining") {
       attachRemainingCardGestures(card, item.id);
-    } else if (mode === "completed") {
-      attachCompletedCardGestures(card, item.id);
     } else {
       attachRestoreToRemainingClick(card, item.id);
     }
-    attachSwipeRightDeleteGesture(card, item.id);
 
     return card;
   }
 
-  function renderSection(containerId, items, mode, groupByCategory = false) {
-    // Render a section (remaining, skipped, completed) with the given items and mode.
+  function renderSection(containerId, items, mode) {
     const container = document.getElementById(containerId);
     container.innerHTML = "";
-    if (items.length === 0) {
+    if (!Array.isArray(items) || items.length === 0) {
       container.innerHTML = '<div class="empty">No items.</div>';
       return;
     }
 
-    if (!groupByCategory) {
-      for (const item of items) {
-        container.appendChild(createCard(item, mode));
-      }
+    for (const item of items) {
+      container.appendChild(createCard(item, mode));
+    }
+  }
+
+  function renderRemainingByCategory(items) {
+    const container = document.getElementById("shop-mode-remaining");
+    container.innerHTML = "";
+
+    if (!Array.isArray(items) || items.length === 0) {
+      container.innerHTML = '<div class="empty">No items.</div>';
       return;
     }
 
     const grouped = {};
     for (const item of items) {
-      const groupName = item.store_group.name;
-      if (!grouped[groupName]) {
-        grouped[groupName] = [];
+      const key = String(item.ingredient_type || "Other");
+      if (!grouped[key]) {
+        grouped[key] = [];
       }
-      grouped[groupName].push(item);
+      grouped[key].push(item);
     }
 
     const categories = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
-    for (const categoryName of categories) {
+    for (const category of categories) {
       const group = document.createElement("section");
       group.className = "category";
 
       const title = document.createElement("div");
       title.className = "category-title";
-      title.textContent = categoryName;
+      title.textContent = category;
       group.appendChild(title);
 
-      grouped[categoryName]
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .forEach((item) => group.appendChild(createCard(item, mode)));
+      grouped[category]
+        .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+        .forEach((item) => group.appendChild(createCard(item, "remaining")));
 
       container.appendChild(group);
     }
   }
 
   function render() {
-    if (DEBUG_MODE) {
-      output.style.display = "block";
-    } else {
-      output.style.display = "none";
-    }
-    const remaining = sortedByStatus("remaining");
-    const skipped = sortedByStatus("skipped");
-    const completed = sortedByStatus("completed");
-
-    renderSection("shop-mode-remaining", remaining, "remaining", true);
-    renderSection("shop-mode-skipped", skipped, "skipped");
-    renderSection("shop-mode-completed", completed, "completed");
-
-    updateSectionTitle("remaining", remaining.length);
-    updateSectionTitle("skipped", skipped.length);
-    updateSectionTitle("completed", completed.length);
-
+    renderRemainingByCategory(sortedByStatus("remaining"));
+    renderSection("shop-mode-skipped", sortedByStatus("skipped"), "skipped");
+    renderSection("shop-mode-completed", sortedByStatus("completed"), "completed");
     updateStatusBadges();
   }
 
-  async function refreshAndSyncIfNeeded() {
-    if (!browserOnline()) {
-      setApiReachable(false);
-      updateStatusBadges();
-      return;
-    }
-
-    await refresh();
-    if (state.pendingChanges.length > 0) {
-      await syncPending(false);
-    }
-  }
-
   function hydrateFromServer(payload) {
-    // This data transformation looks pointless instead of sjust workign with the server data directly.
-    // The servar payload already organises the data by ingredient type, category and status, but here
-    // is flattened into a single id-based map with the status with each item.
-    const sections = payload.data.sections;
+    const sections = payload?.data?.sections || {};
     const merged = {};
 
-    //console.log("Hydrating from server:", payload);
-
     for (const status of ["remaining", "skipped", "completed"]) {
-      const list = sections[status];
+      const list = Array.isArray(sections[status]) ? sections[status] : [];
       for (const item of list) {
-        merged[item.id] = item;
+        const normalized = normalizeShoppingItem(item, status);
+        if (!normalized) {
+          continue;
+        }
+        merged[String(normalized.id)] = normalized;
       }
     }
 
-    //console.log("Merged items:", merged);
-
     state.itemsById = merged;
-    state.serverCursor = payload.cursor;
-    applyPendingChanges();
+    if (Number.isInteger(payload?.cursor)) {
+      state.serverCursor = payload.cursor;
+    }
+    applyPendingStatuses();
     persistCache();
   }
 
@@ -710,7 +314,9 @@
       return;
     }
 
-    state.pendingChanges = state.pendingChanges.filter((change) => shoppingItemId(change.entry_id) !== id);
+    state.pendingChanges = state.pendingChanges.filter((change) => {
+      return !(change?.operation === "update" && shoppingItemId(change.entry_id) === id);
+    });
 
     state.pendingChanges.push({
       operation: "update",
@@ -724,24 +330,6 @@
       row.status = status;
     }
 
-    persistCache();
-  }
-
-  function queueDeleteChange(entryId) {
-    const id = shoppingItemId(entryId);
-    if (id === null) {
-      return;
-    }
-
-    state.pendingChanges = state.pendingChanges.filter((change) => shoppingItemId(change.entry_id) !== id);
-
-    state.pendingChanges.push({
-      operation: "delete",
-      entry_id: id,
-      queued_at: new Date().toISOString(),
-    });
-
-    delete state.itemsById[String(id)];
     persistCache();
   }
 
@@ -775,7 +363,7 @@
 
     const rejectedIndexes = new Set(
       (Array.isArray(payload.rejected) ? payload.rejected : [])
-        .map((row) => row.index)
+        .map((row) => Number(row?.index))
         .filter((value) => Number.isInteger(value) && value >= 0)
     );
 
@@ -827,50 +415,15 @@
     });
   }
 
-  async function deleteEntry(entryId) {
-    queueDeleteChange(entryId);
-    render();
-
-    if (!isOnline()) {
-      show({
-        source: "local-cache",
-        message: "Offline mode: delete saved locally and queued for sync.",
-        entry_id: entryId,
-        pending_count: state.pendingChanges.length,
-      });
-      return;
-    }
-
-    await syncPending(false);
-    show({
-      source: "shopping-mode",
-      message: "Delete synced to server.",
-      entry_id: entryId,
-      pending_count: state.pendingChanges.length,
-    });
-  }
-
-  // Event listeners for buttons
-  // -----------------------------
-  // Toggle instruction visibility
-  const instr = document.getElementById("shopping-mode-instructions");
-  document.getElementById("toggle-instructions").addEventListener("click", () => {
-    if (instr.style.display === "none") {
-      instr.style.display = "block";
-    } else {
-      instr.style.display = "none";
-    }
-  });
+  document.getElementById("shop-mode-refresh").addEventListener("click", () => run(refresh));
+  document.getElementById("shop-mode-sync").addEventListener("click", () => run(() => syncPending(true)));
 
   window.addEventListener("online", () => {
-    setApiReachable(true);
     updateStatusBadges();
-    // Delay sync: the 'online' event fires before routing is stable (e.g. after flight mode).
-    setTimeout(() => run(() => refreshAndSyncIfNeeded()), 2000);
+    run(() => syncPending(false));
   });
 
   window.addEventListener("offline", () => {
-    setApiReachable(false);
     updateStatusBadges();
     show({
       source: "local-cache",
@@ -879,27 +432,13 @@
     });
   });
 
-  // navigator.onLine and the 'online' event are unreliable on LANs; probe the API directly.
-  setInterval(async () => {
-    if (isOnline()) {
-      return;
-    }
-    try {
-      const response = await fetch(`${apiPrefix}/health`, { cache: "no-store" });
-      if (response.ok) {
-        setApiReachable(true);
-        run(() => refreshAndSyncIfNeeded());
-      }
-    } catch {
-      // Still unreachable.
-    }
-  }, 5000);
-
-  // Initial load
-  wireCollapsibleSection("skipped");
-  wireCollapsibleSection("completed");
   loadCache();
   render();
 
-  run(() => refreshAndSyncIfNeeded());
+  run(async () => {
+    await refresh();
+    if (state.pendingChanges.length > 0) {
+      await syncPending(false);
+    }
+  });
 })();

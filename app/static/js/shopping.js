@@ -45,7 +45,9 @@ setInterval(async () => {
   }
 }, 5000);
 
-setupServiceWorker();
+if (window.location.pathname === "/shopping") {
+  setupServiceWorker();
+}
 setupPullToRefresh({ isOnline, run, refreshAndSyncIfNeeded });
 wireCollapsibleSection("skipped");
 wireCollapsibleSection("completed");

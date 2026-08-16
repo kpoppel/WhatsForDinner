@@ -3,147 +3,129 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WhatsForDinner User App</title>
-  <link rel="stylesheet" href="/static/user_app.css" />
+  <meta name="theme-color" content="#1d5c4f" />
+  <title>WhatsForDinner</title>
+  <link rel="stylesheet" href="/static/shopping_app.css?v=20260817e" />
+  <link rel="stylesheet" href="/static/user_app.css?v=20260817e" />
 </head>
 <body>
-  <main class="shell">
-    <h1>WhatsForDinner User App</h1>
-    <p class="sub">Workflow-first Stage 2 UI: configure keywords, plan meals, manage stored plans, generate shopping, then manage shopping items.</p>
+  <main class="wf-shell">
+    <header class="wf-header">
+      <div class="wf-header-left">
+        <button id="wf-exit-btn" class="wf-exit-btn" type="button" hidden>← Exit</button>
+        <h1 id="wf-view-title">Today's Dinner</h1>
+      </div>
+      <div class="wf-header-actions">
+        <button id="toggle-instructions" class="wf-icon-btn wf-shop-control" type="button" aria-label="Shopping mode instructions" hidden>?</button>
+        <span id="shop-mode-network" class="status-dot is-offline wf-shop-control" role="status" aria-label="Offline" title="Offline" hidden></span>
+        <span id="shop-mode-pending" class="badge pending-sync wf-shop-control" role="status" aria-label="Pending sync: 0" title="Pending sync: 0" hidden><span class="pending-sync-icon" aria-hidden="true">⟳</span><span id="shop-mode-pending-count">0</span></span>
+        <button id="wf-settings-btn" class="wf-icon-btn" type="button" aria-label="Settings">⚙</button>
+      </div>
+    </header>
 
-    <section class="grid">
-      <article class="card">
-        <h2>1) Configuration</h2>
-        <p>Choose the keywords used for one-meal panic and meal-plan generation.</p>
-        <button id="cfg-load-tags">Load Available Keywords</button>
-        <label for="cfg-tags">Available tags/keywords</label>
-        <select id="cfg-tags" multiple size="8"></select>
-        <div class="row">
-          <button id="cfg-load-selected" class="alt">Load Selected</button>
-          <button id="cfg-save-selected">Save Selected</button>
-        </div>
-          <label for="cfg-no-repeat-days">Don't repeat recipe within days</label>
-          <input id="cfg-no-repeat-days" type="number" min="0" value="30" />
-          <div class="row">
-            <button id="cfg-load-rules" class="ghost">Load Plan Rules</button>
-            <button id="cfg-save-rules">Save Plan Rules</button>
+    <section class="wf-content" id="wf-content">
+      <section id="wf-tab-home" class="wf-tab is-active" data-tab-panel="home" aria-label="Home">
+        <article class="wf-card wf-card-today">
+          <p class="wf-card-kicker">Today • Monday, Aug 17</p>
+          <h2>Grillsandwich with Salad</h2>
+
+          <div class="wf-meta-row">
+            <span>👥 2 Diners</span>
+            <span class="wf-badge wf-badge-cook">Cook</span>
+            <span class="wf-badge wf-badge-notify">🔔 Thaw Bread @ 08:00 AM</span>
           </div>
-        <div id="cfg-selected"></div>
-      </article>
 
-      <article class="card">
-        <h2>2) Quick Meal Plan (1 Day)</h2>
-        <p>Use the same meal-plan pipeline for a single-day plan and generate shopping from it.</p>
-        <label for="panic-servings">Servings</label>
-        <input id="panic-servings" type="number" min="1" value="1" />
-        <div class="row">
-          <button id="panic-run">Run Quick Meal</button>
-          <button id="panic-last" class="alt">Load Newest Stored Plan</button>
-        </div>
-        <p>This creates a 1-day meal plan, selects it, and generates shopping list entries.</p>
-      </article>
-
-      <article class="card wide">
-        <h2>3) Meal Plans</h2>
-        <p>Generate a plan, review stored plans, then edit or delete selected plans.</p>
-
-        <div class="mini-grid">
-          <div>
-            <label for="plan-start">Start date</label>
-            <input id="plan-start" type="date" />
+          <div class="wf-action-row">
+            <button class="wf-btn wf-btn-blue" type="button">View Recipe</button>
+            <button class="wf-btn wf-btn-outline" type="button">Edit</button>
           </div>
-          <div>
-            <label for="plan-length">Length (days)</label>
-            <input id="plan-length" type="number" min="1" max="31" value="7" />
+        </article>
+
+        <p class="wf-section-title">Upcoming This Week</p>
+
+        <article class="wf-day-card">
+          <div class="wf-day-date">
+            <span>Tue</span>
+            <span>18</span>
           </div>
-          <div>
-            <label for="plan-diners">Diners</label>
-            <input id="plan-diners" type="number" min="1" value="2" />
+          <div class="wf-day-main">
+            <h3>Lasagne</h3>
+            <p>👥 2 diners • <span class="wf-badge wf-badge-leftovers">Leftovers</span></p>
           </div>
-        </div>
-        <label for="plan-leftover">Leftover days (1-based, comma separated)</label>
-        <input id="plan-leftover" type="text" placeholder="3, 6" />
-        <label for="plan-takeout">Takeout days (1-based, comma separated)</label>
-        <input id="plan-takeout" type="text" placeholder="5" />
-        <label for="plan-empty">Empty days (1-based, comma separated)</label>
-        <input id="plan-empty" type="text" placeholder="7" />
-        <div class="row">
-          <button id="plan-generate">Generate Plan</button>
-          <button id="plan-list" class="ghost">List Stored Plans</button>
-          <button id="plan-shopping" class="alt">Generate Shopping For Selected Plan</button>
-        </div>
+          <span class="wf-day-arrow">❯</span>
+        </article>
 
-        <h3>Stored meal plans</h3>
-        <div id="plan-listbox" class="listbox"></div>
-
-        <div class="mini-grid">
-          <div>
-            <label for="plan-id">Selected plan ID</label>
-            <input id="plan-id" type="number" min="1" placeholder="Plan ID" />
+        <article class="wf-day-card">
+          <div class="wf-day-date">
+            <span>Wed</span>
+            <span>19</span>
           </div>
-          <div>
-            <label for="plan-entry-id">Entry ID</label>
-            <input id="plan-entry-id" type="number" min="1" placeholder="Entry ID" />
+          <div class="wf-day-main">
+            <h3>Sushi Takeout</h3>
+            <p>👥 2 diners • <span class="wf-badge wf-badge-takeout">Takeout</span></p>
           </div>
-          <div>
-            <label for="plan-entry-day">Target day index</label>
-            <input id="plan-entry-day" type="number" min="0" placeholder="Target day index" />
-          </div>
-        </div>
-        <div class="row">
-          <button id="plan-fetch" class="ghost">Load Selected Plan Details</button>
-          <button id="plan-move-entry" class="alt">Move Entry</button>
-          <button id="plan-delete-entry" class="danger">Delete Entry</button>
-          <button id="plan-delete" class="danger">Delete Selected Plan</button>
-        </div>
+          <span class="wf-day-arrow">❯</span>
+        </article>
+      </section>
 
-        <h3>Entries in selected plan</h3>
-        <div id="plan-entries" class="listbox"></div>
-      </article>
+      <section id="wf-tab-meal-plans" class="wf-tab" data-tab-panel="meal-plans" aria-label="Meal Plans" hidden>
+        <article class="wf-card">
+          <h2>Meal Plans</h2>
+          <p>Phase 1 placeholder. Generator and schedule editing arrive in Phase 3.</p>
+        </article>
+      </section>
 
-      <article class="card wide">
-        <h2>4) Shopping List</h2>
-        <p>After generation, all items appear below and each item can be updated directly.</p>
-        <div class="mini-grid">
-          <div>
-            <label for="shop-name">Food name</label>
-            <input id="shop-name" type="text" placeholder="milk" />
-          </div>
-          <div>
-            <label for="shop-amount">Amount</label>
-            <input id="shop-amount" type="number" value="1" step="0.5" />
-          </div>
-        </div>
-        <div class="row">
-          <button id="shop-refresh">Refresh Shopping List</button>
-          <button id="shop-add" class="alt">Add Item</button>
-        </div>
+      <section id="wf-tab-shop-editor" class="wf-tab" data-tab-panel="shop-editor" aria-label="Shop Editor" hidden>
+        <article class="wf-card">
+          <h2>Shop Editor</h2>
+          <p>Phase 1 placeholder. Editor controls and modals arrive in Phase 2.</p>
+        </article>
+      </section>
 
-        <h3>Remaining items</h3>
-        <div id="shop-remaining" class="listbox"></div>
+      <section id="wf-tab-shopping-mode" class="wf-tab" data-tab-panel="shopping-mode" aria-label="Shopping Mode" hidden>
+        <p id="shopping-mode-instructions" style="display: none;">Swipe right on any item to delete it. Tap a remaining item to complete it. Swipe left on a remaining item to postpone it. Tap postponed items to move them back to remaining. Swipe left on completed items to delete them.</p>
 
-        <h3>Skipped items</h3>
-        <div id="shop-skipped" class="listbox"></div>
+        <section class="section">
+          <h2 id="shop-mode-remaining-title">Remaining by Category (0)</h2>
+          <div id="shop-mode-remaining"></div>
+        </section>
 
-        <h3>Completed items</h3>
-        <div id="shop-completed" class="listbox"></div>
+        <section class="section">
+          <h2 id="shop-mode-skipped-title" class="section-toggle" role="button" tabindex="0" aria-controls="shop-mode-skipped" aria-expanded="false">Postponed / Skipped (0) ▸</h2>
+          <div id="shop-mode-skipped" hidden></div>
+        </section>
 
-        <div class="row">
-          <input id="sync-cursor" type="number" min="0" value="0" placeholder="Since cursor" />
-          <button id="sync-pull" class="ghost">Pull Sync Changes</button>
-        </div>
+        <section class="section">
+          <h2 id="shop-mode-completed-title" class="section-toggle" role="button" tabindex="0" aria-controls="shop-mode-completed" aria-expanded="false">Completed (0) ▸</h2>
+          <div id="shop-mode-completed" hidden></div>
+        </section>
 
-        <p>Use the dedicated phone-friendly shopping screen at <a href="/shopping">/shopping</a>.</p>
-      </article>
-
-      <article class="card wide">
-        <h2>API Result</h2>
-        <pre id="output">Ready.</pre>
-      </article>
+        <pre id="output"></pre>
+      </section>
     </section>
+
+    <nav class="wf-bottom-nav" aria-label="Main navigation">
+      <button class="wf-nav-btn is-active" data-tab="home" type="button">
+        <span class="wf-nav-icon">🏠</span>
+        <span>Home</span>
+      </button>
+      <button class="wf-nav-btn" data-tab="meal-plans" type="button">
+        <span class="wf-nav-icon">📅</span>
+        <span>Meal Plans</span>
+      </button>
+      <button class="wf-nav-btn" data-tab="shop-editor" type="button">
+        <span class="wf-nav-icon">📝</span>
+        <span>Shop Editor</span>
+      </button>
+      <button class="wf-nav-btn wf-nav-shopping" data-tab="shopping-mode" type="button">
+        <span class="wf-nav-icon">🛒</span>
+        <span>Shopping Mode</span>
+      </button>
+    </nav>
   </main>
 
   <script>window.WFD_API_PREFIX = {{ api_prefix_js }};</script>
-  <script src="/static/user_app.js"></script>
+  <script type="module" src="/static/js/shopping.js?v=20260817e"></script>
+  <script type="module" src="/static/user_shell.js?v=20260817e"></script>
 </body>
 </html>

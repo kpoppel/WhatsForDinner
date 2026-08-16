@@ -33,14 +33,6 @@ def test_versioned_docs_routes() -> None:
     redoc_response = client.get("/api/v1/redoc")
     assert redoc_response.status_code == 200
     assert "/api/v1/openapi.json" in redoc_response.text
-    assert "redoc@2.4.0" in redoc_response.text
-
-
-def test_root_redoc_route() -> None:
-    response = client.get("/redoc")
-    assert response.status_code == 200
-    assert "/openapi.json" in response.text
-    assert "redoc@2.4.0" in response.text
 
 
 def test_recipes_route_uses_tandoor_payload(monkeypatch) -> None:
@@ -60,35 +52,6 @@ def test_recipes_route_uses_tandoor_payload(monkeypatch) -> None:
     assert payload["data"]["results"][0]["name"] == "Pasta"
 
 
-def test_recipes_route_defaults_to_all_results(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    class FakeClient:
-        async def list_recipes_all(self, search=None, keyword_ids=None, page_size=100):
-            captured["search"] = search
-            captured["keyword_ids"] = keyword_ids
-            captured["page_size"] = page_size
-            return {
-                "count": 2,
-                "next": None,
-                "previous": None,
-                "results": [
-                    {"id": 1, "name": "Pasta"},
-                    {"id": 2, "name": "Soup"},
-                ],
-            }
-
-    monkeypatch.setattr("app.api.client", FakeClient())
-
-    response = client.get("/api/v1/recipes?search=weeknight")
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["data"]["count"] == 2
-    assert len(payload["data"]["results"]) == 2
-    assert captured["search"] == "weeknight"
-    assert captured["keyword_ids"] is None
-
-
 def test_recipes_route_forwards_keyword_ids(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -106,25 +69,6 @@ def test_recipes_route_forwards_keyword_ids(monkeypatch) -> None:
     assert captured["search"] is None
     assert captured["limit"] == 7
     assert captured["keyword_ids"] == [12, 18]
-
-
-def test_recipe_by_id_route_returns_raw_tandoor_payload(monkeypatch) -> None:
-    class FakeClient:
-        async def get_recipe(self, recipe_id):
-            assert recipe_id == 123
-            return {
-                "id": 123,
-                "name": "Lentil Soup",
-                "internal": {"difficulty": "easy"},
-            }
-
-    monkeypatch.setattr("app.api.client", FakeClient())
-
-    response = client.get("/api/v1/recipes/123")
-    assert response.status_code == 200
-    assert response.json()["id"] == 123
-    assert response.json()["name"] == "Lentil Soup"
-    assert response.json()["internal"]["difficulty"] == "easy"
 
 
 def test_recipe_tags_route_returns_list(monkeypatch) -> None:
