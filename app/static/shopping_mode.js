@@ -9,6 +9,17 @@
     });
   }
 
+  // Prevent the browser's native pull-to-refresh in standalone PWA mode.
+  let _ptrStartY = 0;
+  document.addEventListener("touchstart", (e) => { _ptrStartY = e.touches[0].pageY; }, { passive: true });
+  document.addEventListener("touchmove", (e) => {
+    if (e.touches[0].pageY > _ptrStartY && window.scrollY === 0) {
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+    }
+  }, { passive: false });
+
   const apiPrefix = window.WFD_API_PREFIX;
   const output = document.getElementById("output");
   const CACHE_KEY = "wfd.shopping-mode.v1";

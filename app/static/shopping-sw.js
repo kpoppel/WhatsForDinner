@@ -1,9 +1,10 @@
-const CACHE_NAME = "wfd-shopping-pwa-v2";
+const CACHE_NAME = "wfd-shopping-pwa-v3";
 const SHOPPING_FALLBACK_PATH = "/shopping";
 const APP_SHELL = [
   "/shopping",
   "/shopping/",
   "/static/shopping_mode.js",
+  "/static/shopping_app.css",
   "/shopping.webmanifest",
   "/static/pwa-icon-192.svg",
   "/static/pwa-icon-512.svg"
@@ -53,23 +54,26 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.mode === "navigate") {
+    // Cache-first for navigate: serve shell immediately offline, update cache in background.
     event.respondWith(
-      fetch(request)
-        .then(async (response) => {
-          if (response && response.ok) {
-            const cache = await caches.open(CACHE_NAME);
-            await cache.put(SHOPPING_FALLBACK_PATH, response.clone());
-          }
-          return response;
-        })
-        .catch(async () => {
-          const cachedRoute = await caches.match(url.pathname);
-          if (cachedRoute) {
-            return cachedRoute;
-          }
-          const fallback = await caches.match(SHOPPING_FALLBACK_PATH);
-          return fallback || Response.error();
-        })
+      (async () => {
+        const cachedShell = await caches.match(SHOPPING_FALLBACK_PATH);
+        const networkFetch = fetch(request)
+          .then(async (response) => {
+            if (response && response.ok) {
+              const cache = await caches.open(CACHE_NAME);
+              await cache.put(SHOPPING_FALLBACK_PATH, response.clone());
+            }
+            return response;
+          })
+          .catch(() => null);
+        if (cachedShell) {
+          networkFetch.catch(() => {});
+          return cachedShell;
+        }
+        const networkResponse = await networkFetch;
+        return networkResponse || Response.error();
+      })()
     );
     return;
   }
