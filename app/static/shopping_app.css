@@ -16,6 +16,39 @@
     html, body {
       overscroll-behavior-y: none;
     }
+    #ptr-indicator {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      display: none;
+      justify-content: center;
+      align-items: flex-start;
+      padding-top: 10px;
+      height: 56px;
+      z-index: 200;
+      pointer-events: none;
+    }
+    #ptr-indicator::after {
+      content: "↓";
+      font-size: 1.15rem;
+      color: var(--accent);
+      background: var(--panel);
+      border: 1.5px solid var(--line);
+      border-radius: 50%;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(12, 31, 23, 0.12);
+      transition: background 0.15s, color 0.15s;
+    }
+    #ptr-indicator.ptr-ready::after {
+      content: "↻";
+      background: var(--accent);
+      color: #fff;
+    }
     body {
       margin: 0;
       font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
