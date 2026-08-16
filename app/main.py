@@ -1,10 +1,11 @@
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import router as api_router
 from app.config import settings
+from app.home_app import render_home_app
 from app.inspect_ui import render_inspector
 from app.shopping_app import render_shopping_app
 from app.user_app import render_user_app
@@ -82,8 +83,8 @@ async def versioned_redoc_docs() -> object:
 
 
 @app.get("/", include_in_schema=False)
-async def root_redirect() -> RedirectResponse:
-    return RedirectResponse(url="/shopping", status_code=302)
+async def home() -> HTMLResponse:
+    return render_home_app()
 
 
 @app.get("/app", include_in_schema=False)

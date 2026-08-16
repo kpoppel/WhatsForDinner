@@ -1,9 +1,19 @@
-const CACHE_NAME = "wfd-shopping-pwa-v3";
-const SHOPPING_FALLBACK_PATH = "/shopping";
+const CACHE_NAME = "wfd-shopping-pwa-v4";
+const HOME_FALLBACK_PATH = "/";
 const APP_SHELL = [
+  "/",
   "/shopping",
-  "/static/shopping_mode.js",
+  "/static/js/shopping.js",
+  "/static/js/state.js",
+  "/static/js/api.js",
+  "/static/js/render.js",
+  "/static/js/gestures.js",
+  "/static/js/sync.js",
+  "/static/js/ptr.js",
+  "/static/js/sw-setup.js",
+  "/static/js/utils.js",
   "/static/shopping_app.css",
+  "/static/home_app.css",
   "/shopping.webmanifest",
   "/static/pwa-icon-192.svg",
   "/static/pwa-icon-512.svg"
@@ -56,12 +66,14 @@ self.addEventListener("fetch", (event) => {
     // Cache-first for navigate: serve shell immediately offline, update cache in background.
     event.respondWith(
       (async () => {
-        const cachedShell = await caches.match(SHOPPING_FALLBACK_PATH);
+        const url = new URL(request.url);
+        const fallbackPath = url.pathname === "/shopping" ? "/shopping" : HOME_FALLBACK_PATH;
+        const cachedShell = await caches.match(fallbackPath);
         const networkFetch = fetch(request)
           .then(async (response) => {
             if (response && response.ok) {
               const cache = await caches.open(CACHE_NAME);
-              await cache.put(SHOPPING_FALLBACK_PATH, response.clone());
+              await cache.put(fallbackPath, response.clone());
             }
             return response;
           })
@@ -78,18 +90,20 @@ self.addEventListener("fetch", (event) => {
   }
 
   const isShoppingRoute = url.pathname === "/shopping" || url.pathname === "/shopping/";
+  const isHomeRoute = url.pathname === "/" || url.pathname === "";
   const isStaticAsset = url.pathname.startsWith("/static/") || url.pathname === "/shopping.webmanifest";
 
-  if (isShoppingRoute) {
+  if (isHomeRoute || isShoppingRoute) {
+    const cachePath = isHomeRoute ? "/" : "/shopping";
     event.respondWith(
       fetch(request)
         .then((response) => {
           const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put("/shopping", copy));
+          caches.open(CACHE_NAME).then((cache) => cache.put(cachePath, copy));
           return response;
         })
         .catch(async () => {
-          const cached = await caches.match("/shopping");
+          const cached = await caches.match(cachePath);
           return cached || Response.error();
         })
     );

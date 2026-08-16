@@ -1,8 +1,8 @@
 {
-  "name": "WhatsForDinner Shopping Mode",
+  "name": "WhatsForDinner",
   "short_name": "Dinner",
   "description": "Offline-capable shopping mode for WhatsForDinner.",
-  "start_url": "/shopping",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f0f6f3",
