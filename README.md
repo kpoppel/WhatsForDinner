@@ -80,6 +80,8 @@ Visit your instance of Tandoor: https://<tandoor_url>/settings/api and create a 
 
 This compose file assumes you already run Traefik and have an external Docker network for proxied services.
 
+Important: `env_file` in the compose service only populates container environment variables. It does not provide values for Compose interpolation in `labels:` or top-level `networks:`. For the Traefik compose file, pass the repo `.env` file to Docker Compose explicitly.
+
 1. Set the host name Traefik should route:
 
    ```bash
@@ -95,13 +97,27 @@ This compose file assumes you already run Traefik and have an external Docker ne
 3. Build and start:
 
    ```bash
-   docker compose -f docker/docker-compose.traefik.yml up -d --build
+   docker compose --env-file .env -f docker/docker-compose.traefik.yml up -d --build
    ```
 
-4. Stop:
+   If you run the command from inside `docker/`, use:
 
    ```bash
-   docker compose -f docker/docker-compose.traefik.yml down
+   docker compose --env-file ../.env -f docker-compose.traefik.yml up -d --build
+   ```
+
+4. Ensure the external Traefik network already exists and matches `TRAEFIK_NETWORK`:
+
+   ```bash
+   docker network ls
+   ```
+
+   If the network is named `traefik`, set `TRAEFIK_NETWORK=traefik`. If it is named `traefik_proxy`, set `TRAEFIK_NETWORK=traefik_proxy`.
+
+5. Stop:
+
+   ```bash
+   docker compose --env-file .env -f docker/docker-compose.traefik.yml down
    ```
 
 ## API endpoints

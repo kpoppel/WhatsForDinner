@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import router as api_router
@@ -79,6 +79,11 @@ async def versioned_redoc_docs() -> object:
         redoc_js_url=REDOC_JS_BUNDLE,
         with_google_fonts=False,
     )
+
+
+@app.get("/", include_in_schema=False)
+async def root_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/shopping", status_code=302)
 
 
 @app.get("/app", include_in_schema=False)

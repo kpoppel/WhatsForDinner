@@ -13,8 +13,12 @@
       -webkit-user-select: none;
       -webkit-touch-callout: none;
     }
+    html {
+      overscroll-behavior: none;
+    }
     body {
       margin: 0;
+      overscroll-behavior: none;
       font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
       color: var(--ink);
       background:
