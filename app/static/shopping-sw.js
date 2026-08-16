@@ -2,7 +2,6 @@ const CACHE_NAME = "wfd-shopping-pwa-v3";
 const SHOPPING_FALLBACK_PATH = "/shopping";
 const APP_SHELL = [
   "/shopping",
-  "/shopping/",
   "/static/shopping_mode.js",
   "/static/shopping_app.css",
   "/shopping.webmanifest",
