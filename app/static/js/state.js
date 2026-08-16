@@ -36,14 +36,46 @@ export function applyPendingChanges() {
       continue;
     }
     if (change.operation === "update") {
-      const status = change.payload?.status;
-      if (!SHOPPING_STATUSES.has(status)) {
+      const patch = change.payload;
+      if (!patch || typeof patch !== "object") {
         continue;
       }
       const row = state.itemsById[String(id)];
       if (row) {
-        row.status = status;
+        Object.assign(row, patch);
+        const status = patch.status;
+        if (!SHOPPING_STATUSES.has(status)) {
+          row.status = row.status || "remaining";
+        }
       }
+      continue;
+    }
+    if (change.operation === "create") {
+      const payload = change.payload;
+      if (!payload || typeof payload !== "object") {
+        continue;
+      }
+      const tempId = shoppingItemId(payload.id);
+      if (tempId === null) {
+        continue;
+      }
+      state.itemsById[String(tempId)] = {
+        id: tempId,
+        name: String(payload.name || "Unnamed"),
+        amount: payload.amount ?? 0,
+        unit: String(payload.unit || ""),
+        status: SHOPPING_STATUSES.has(payload.status) ? payload.status : "remaining",
+        ingredient_type: String(payload.ingredient_type || "Other"),
+        store_group: payload.store_group && typeof payload.store_group === "object"
+          ? payload.store_group
+          : { id: null, name: "General" },
+        recipe_context: String(payload.recipe_context || "Unassigned"),
+        reminder_enabled: Boolean(payload.reminder_enabled),
+        reminder_date: payload.reminder_date || null,
+        reminder_text: String(payload.reminder_text || ""),
+        reminder_due: false,
+        raw: { id: tempId, source: "local" },
+      };
     }
   }
 }
@@ -80,20 +112,7 @@ export function queueStatusChange(entryId, status) {
   if (id === null || !SHOPPING_STATUSES.has(status)) {
     return;
   }
-  state.pendingChanges = state.pendingChanges.filter(
-    (change) => shoppingItemId(change.entry_id) !== id,
-  );
-  state.pendingChanges.push({
-    operation: "update",
-    entry_id: id,
-    payload: { status },
-    queued_at: new Date().toISOString(),
-  });
-  const row = state.itemsById[String(id)];
-  if (row) {
-    row.status = status;
-  }
-  persistCache();
+  queueUpdateChange(id, { status });
 }
 
 export function queueDeleteChange(entryId) {
@@ -110,5 +129,39 @@ export function queueDeleteChange(entryId) {
     queued_at: new Date().toISOString(),
   });
   delete state.itemsById[String(id)];
+  persistCache();
+}
+
+export function queueUpdateChange(entryId, patch) {
+  const id = shoppingItemId(entryId);
+  if (id === null || !patch || typeof patch !== "object") {
+    return;
+  }
+  state.pendingChanges = state.pendingChanges.filter(
+    (change) => shoppingItemId(change.entry_id) !== id,
+  );
+  state.pendingChanges.push({
+    operation: "update",
+    entry_id: id,
+    payload: patch,
+    queued_at: new Date().toISOString(),
+  });
+  const row = state.itemsById[String(id)];
+  if (row) {
+    Object.assign(row, patch);
+  }
+  persistCache();
+}
+
+export function queueCreateChange(payload) {
+  if (!payload || typeof payload !== "object") {
+    return;
+  }
+  state.pendingChanges.push({
+    operation: "create",
+    payload,
+    queued_at: new Date().toISOString(),
+  });
+  applyPendingChanges();
   persistCache();
 }

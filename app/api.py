@@ -117,16 +117,86 @@ def _status_to_tandoor_fields(status: str) -> dict[str, Any]:
     }
 
 
-def _normalize_shopping_entry(entry: dict[str, Any], status: str) -> dict[str, Any]:
+def _iso_date_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return date.fromisoformat(text[:10]).isoformat()
+        except ValueError:
+            return None
+    return None
+
+
+def _is_reminder_due(reminder_enabled: bool, reminder_date: str | None) -> bool:
+    if not reminder_enabled or reminder_date is None:
+        return False
+    try:
+        due_day = date.fromisoformat(reminder_date)
+    except ValueError:
+        return False
+    return due_day <= date.today()
+
+
+def _normalize_store_group(raw_group: Any) -> dict[str, Any]:
+    if isinstance(raw_group, dict):
+        group_id = raw_group.get("id")
+        group_name = raw_group.get("name")
+        return {
+            "id": group_id if isinstance(group_id, int) else None,
+            "name": str(group_name or "General"),
+        }
+    if isinstance(raw_group, str):
+        text = raw_group.strip()
+        return {
+            "id": None,
+            "name": text or "General",
+        }
+    if isinstance(raw_group, int):
+        return {
+            "id": raw_group,
+            "name": str(raw_group),
+        }
+    return {
+        "id": None,
+        "name": "General",
+    }
+
+
+def _recipe_context_from_entry(entry: dict[str, Any]) -> str:
+    for key in ("recipe_name", "recipe", "meal", "meal_title"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            text = value.get("name") or value.get("title")
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+    return "Unassigned"
+
+
+def _normalize_shopping_entry(
+    entry: dict[str, Any],
+    status: str,
+    reminder_meta: dict[str, Any],
+) -> dict[str, Any]:
     food = entry.get("food") if isinstance(entry.get("food"), dict) else {}
     unit = entry.get("unit") if isinstance(entry.get("unit"), dict) else {}
 
     ingredient_type = (
         str(food.get("category") or food.get("food_type") or food.get("type") or "Other")
     )
-    store_group = (
-        str(food.get("supermarket_category") or food.get("supermarket") or "General")
+    store_group = _normalize_store_group(
+        food.get("supermarket_category") or food.get("supermarket") or food.get("store_group")
     )
+    reminder_enabled = bool(reminder_meta.get("reminder_enabled", False))
+    reminder_date = _iso_date_or_none(reminder_meta.get("reminder_date"))
+    reminder_text = str(reminder_meta.get("reminder_text") or "")
 
     return {
         "id": entry.get("id"),
@@ -136,6 +206,11 @@ def _normalize_shopping_entry(entry: dict[str, Any], status: str) -> dict[str, A
         "status": status,
         "ingredient_type": ingredient_type,
         "store_group": store_group,
+        "recipe_context": _recipe_context_from_entry(entry),
+        "reminder_enabled": reminder_enabled,
+        "reminder_date": reminder_date,
+        "reminder_text": reminder_text,
+        "reminder_due": _is_reminder_due(reminder_enabled, reminder_date),
         "raw": entry,
     }
 
@@ -143,13 +218,131 @@ def _normalize_shopping_entry(entry: dict[str, Any], status: str) -> dict[str, A
 def _group_section(items: list[dict[str, Any]], key: str) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for item in items:
-        group = str(item.get(key) or "Other")
+        value = item.get(key)
+        if key == "store_group" and isinstance(value, dict):
+            group = str(value.get("id") or value.get("name") or "Other")
+        else:
+            group = str(value or "Other")
         grouped.setdefault(group, []).append(item)
     return grouped
 
 
+def _extract_reminder_patch(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    patch: dict[str, Any] = {}
+    touched = False
+
+    if "reminder_enabled" in payload:
+        value = payload.pop("reminder_enabled")
+        if not isinstance(value, bool):
+            raise HTTPException(status_code=400, detail="reminder_enabled must be a boolean.")
+        patch["reminder_enabled"] = value
+        touched = True
+
+    if "reminder_date" in payload:
+        raw = payload.pop("reminder_date")
+        normalized = _iso_date_or_none(raw)
+        if raw is not None and normalized is None:
+            raise HTTPException(status_code=400, detail="reminder_date must be YYYY-MM-DD or null.")
+        patch["reminder_date"] = normalized
+        touched = True
+
+    if "reminder_text" in payload:
+        raw_text = payload.pop("reminder_text")
+        if raw_text is None:
+            patch["reminder_text"] = ""
+        elif isinstance(raw_text, str):
+            patch["reminder_text"] = raw_text.strip()
+        else:
+            raise HTTPException(status_code=400, detail="reminder_text must be a string.")
+        touched = True
+
+    return patch, touched
+
+
+def _local_store_group_payload(raw: Any) -> dict[str, Any]:
+    normalized = _normalize_store_group(raw)
+    return {
+        "id": normalized.get("id"),
+        "name": str(normalized.get("name") or "General"),
+    }
+
+
+def _build_local_entry_payload(entry_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    raw_name = payload.get("name")
+    if not isinstance(raw_name, str) or not raw_name.strip():
+        raise HTTPException(status_code=400, detail="name is required for ad_hoc items.")
+
+    amount = payload.get("amount")
+    if amount is None:
+        amount = 0
+    if not isinstance(amount, (int, float)):
+        raise HTTPException(status_code=400, detail="amount must be numeric for ad_hoc items.")
+
+    raw_unit = payload.get("unit")
+    if raw_unit is None:
+        unit = ""
+    elif isinstance(raw_unit, str):
+        unit = raw_unit.strip()
+    else:
+        raise HTTPException(status_code=400, detail="unit must be a string.")
+
+    raw_category = payload.get("ingredient_type")
+    if raw_category is None:
+        ingredient_type = "Other"
+    elif isinstance(raw_category, str) and raw_category.strip():
+        ingredient_type = raw_category.strip()
+    else:
+        raise HTTPException(status_code=400, detail="ingredient_type must be a non-empty string.")
+
+    raw_recipe_context = payload.get("recipe_context")
+    if raw_recipe_context is None:
+        recipe_context = "Unassigned"
+    elif isinstance(raw_recipe_context, str) and raw_recipe_context.strip():
+        recipe_context = raw_recipe_context.strip()
+    else:
+        raise HTTPException(status_code=400, detail="recipe_context must be a non-empty string.")
+
+    return {
+        "id": entry_id,
+        "source": "local",
+        "name": raw_name.strip(),
+        "amount": amount,
+        "unit": unit,
+        "ingredient_type": ingredient_type,
+        "store_group": _local_store_group_payload(payload.get("store_group")),
+        "recipe_context": recipe_context,
+    }
+
+
+def _normalize_local_shopping_entry(
+    entry: dict[str, Any],
+    status: str,
+    reminder_meta: dict[str, Any],
+) -> dict[str, Any]:
+    reminder_enabled = bool(reminder_meta.get("reminder_enabled", False))
+    reminder_date = _iso_date_or_none(reminder_meta.get("reminder_date"))
+    reminder_text = str(reminder_meta.get("reminder_text") or "")
+    return {
+        "id": entry.get("id"),
+        "name": str(entry.get("name") or "Unnamed"),
+        "amount": entry.get("amount"),
+        "unit": str(entry.get("unit") or ""),
+        "status": status,
+        "ingredient_type": str(entry.get("ingredient_type") or "Other"),
+        "store_group": _normalize_store_group(entry.get("store_group")),
+        "recipe_context": str(entry.get("recipe_context") or "Unassigned"),
+        "reminder_enabled": reminder_enabled,
+        "reminder_date": reminder_date,
+        "reminder_text": reminder_text,
+        "reminder_due": _is_reminder_due(reminder_enabled, reminder_date),
+        "raw": {"id": entry.get("id"), "source": "local", "name": entry.get("name")},
+    }
+
+
 def _build_shopping_view(entries: list[dict[str, Any]]) -> dict[str, Any]:
     overrides = stage2_state.get_shopping_statuses()
+    metadata = stage2_state.get_shopping_item_metadata()
+    local_entries = stage2_state.list_local_shopping_entries()
     sectioned: dict[str, list[dict[str, Any]]] = {
         "remaining": [],
         "skipped": [],
@@ -157,8 +350,20 @@ def _build_shopping_view(entries: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
     for entry in entries:
+        entry_id = entry.get("id")
+        meta = metadata.get(str(entry_id), {}) if isinstance(entry_id, int) else {}
         status = _effective_status(entry, overrides)
-        normalized = _normalize_shopping_entry(entry, status)
+        normalized = _normalize_shopping_entry(entry, status, meta if isinstance(meta, dict) else {})
+        sectioned[status].append(normalized)
+
+    for entry in local_entries:
+        entry_id = entry.get("id")
+        if not isinstance(entry_id, int):
+            continue
+        status_value = str(entry.get("status") or "remaining")
+        status = status_value if status_value in SHOPPING_STATUSES else "remaining"
+        meta = metadata.get(str(entry_id), {})
+        normalized = _normalize_local_shopping_entry(entry, status, meta if isinstance(meta, dict) else {})
         sectioned[status].append(normalized)
 
     grouped_by_type = {
@@ -430,12 +635,14 @@ async def generate_meal_plan(payload: dict[str, Any] = Body(...)) -> dict:
         keyword_ids = stage2_state.selected_keywords()
 
     recipe_candidates: list[dict[str, Any]] = []
-    if keyword_ids:
-        try:
-            result = await client.list_recipes(limit=max(20, length_days * 3), keyword_ids=keyword_ids)
-            recipe_candidates = _extract_results(result)
-        except TandoorError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    try:
+        result = await client.list_recipes(
+            limit=max(20, length_days * 3),
+            keyword_ids=keyword_ids if keyword_ids else None,
+        )
+        recipe_candidates = _extract_results(result)
+    except TandoorError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     configured_rules = stage2_state.meal_plan_rules()
     raw_no_repeat = payload.get("no_repeat_days")
@@ -800,9 +1007,46 @@ async def shopping_list_view(limit: int = Query(default=300, ge=1, le=1000)) -> 
 
 @router.post("/shopping-list/entries")
 async def shopping_entries_stage2_create(payload: dict[str, Any] = Body(...)) -> dict:
+    request_payload = dict(payload)
+    reminder_patch, has_reminder_patch = _extract_reminder_patch(request_payload)
+    is_ad_hoc = bool(request_payload.pop("ad_hoc", False))
+    status = request_payload.pop("status", None)
+    status_value: str | None = None
+    if status is not None:
+        status_value = str(status)
+        if status_value not in SHOPPING_STATUSES:
+            raise HTTPException(status_code=400, detail="status must be remaining, skipped, or completed.")
+    if status_value is None:
+        status_value = "remaining"
+
+    if is_ad_hoc:
+        local_id = stage2_state.allocate_local_shopping_entry_id()
+        local_entry = _build_local_entry_payload(local_id, request_payload)
+        local_entry["status"] = status_value
+        stored = stage2_state.set_local_shopping_entry(local_id, local_entry)
+        if has_reminder_patch:
+            stage2_state.set_shopping_item_metadata(local_id, reminder_patch)
+        stage2_state.set_shopping_status(local_id, status_value)
+        cursor = stage2_state.append_sync_event("shopping_entry_created", stored)
+        return {
+            "source": "local-state",
+            "cursor": cursor,
+            "data": stored,
+        }
+
     _ensure_tandoor_writes_enabled("shopping_entries_stage2_create")
+    mapped = _status_to_tandoor_fields(status_value)
+    for key, value in mapped.items():
+        request_payload.setdefault(key, value)
+
     try:
-        created = await client.create_shopping_entry(payload)
+        created = await client.create_shopping_entry(request_payload)
+        created_id = created.get("id") if isinstance(created, dict) else None
+        if isinstance(created_id, int) and has_reminder_patch:
+            stage2_state.set_shopping_item_metadata(created_id, reminder_patch)
+        if isinstance(created_id, int) and status_value is not None:
+            stage2_state.set_shopping_status(created_id, status_value)
+
         cursor = stage2_state.append_sync_event("shopping_entry_created", created)
         return {
             "source": "tandoor+local-state",
@@ -818,8 +1062,8 @@ async def shopping_entries_stage2_update(
     entry_id: int,
     payload: dict[str, Any] = Body(...),
 ) -> dict:
-    _ensure_tandoor_writes_enabled("shopping_entries_stage2_update")
     request_payload = dict(payload)
+    reminder_patch, has_reminder_patch = _extract_reminder_patch(request_payload)
 
     status = request_payload.pop("status", None)
     if status is not None:
@@ -831,13 +1075,77 @@ async def shopping_entries_stage2_update(
         for key, value in mapped.items():
             request_payload.setdefault(key, value)
 
-    try:
-        updated = await client.update_shopping_entry(entry_id, request_payload)
-    except TandoorError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    local_current = stage2_state.get_local_shopping_entry(entry_id)
+    if local_current is not None:
+        patch: dict[str, Any] = {}
+        if "name" in request_payload:
+            raw_name = request_payload["name"]
+            if not isinstance(raw_name, str) or not raw_name.strip():
+                raise HTTPException(status_code=400, detail="name must be a non-empty string.")
+            patch["name"] = raw_name.strip()
+        if "amount" in request_payload:
+            raw_amount = request_payload["amount"]
+            if not isinstance(raw_amount, (int, float)):
+                raise HTTPException(status_code=400, detail="amount must be numeric.")
+            patch["amount"] = raw_amount
+        if "unit" in request_payload:
+            raw_unit = request_payload["unit"]
+            if not isinstance(raw_unit, str):
+                raise HTTPException(status_code=400, detail="unit must be a string.")
+            patch["unit"] = raw_unit.strip()
+        if "ingredient_type" in request_payload:
+            raw_category = request_payload["ingredient_type"]
+            if not isinstance(raw_category, str) or not raw_category.strip():
+                raise HTTPException(status_code=400, detail="ingredient_type must be a non-empty string.")
+            patch["ingredient_type"] = raw_category.strip()
+        if "recipe_context" in request_payload:
+            raw_context = request_payload["recipe_context"]
+            if not isinstance(raw_context, str) or not raw_context.strip():
+                raise HTTPException(status_code=400, detail="recipe_context must be a non-empty string.")
+            patch["recipe_context"] = raw_context.strip()
+        if "store_group" in request_payload:
+            patch["store_group"] = _local_store_group_payload(request_payload["store_group"])
+        if status is not None:
+            patch["status"] = status
+
+        updated_local = stage2_state.update_local_shopping_entry(entry_id, patch)
+        if updated_local is None:
+            raise HTTPException(status_code=404, detail="Shopping list entry not found.")
+        if status is not None:
+            stage2_state.set_shopping_status(entry_id, status)
+        if has_reminder_patch:
+            stage2_state.set_shopping_item_metadata(entry_id, reminder_patch)
+
+        cursor = stage2_state.append_sync_event(
+            "shopping_entry_updated",
+            {
+                "entry_id": entry_id,
+                "request": payload,
+                "data": updated_local,
+                "status": status,
+            },
+        )
+        return {
+            "source": "local-state",
+            "cursor": cursor,
+            "effective_status": str(updated_local.get("status") or "remaining"),
+            "data": updated_local,
+        }
+
+    _ensure_tandoor_writes_enabled("shopping_entries_stage2_update")
+
+    if request_payload:
+        try:
+            updated = await client.update_shopping_entry(entry_id, request_payload)
+        except TandoorError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    else:
+        updated = {"id": entry_id}
 
     if status is not None:
         stage2_state.set_shopping_status(entry_id, status)
+    if has_reminder_patch:
+        stage2_state.set_shopping_item_metadata(entry_id, reminder_patch)
 
     cursor = stage2_state.append_sync_event(
         "shopping_entry_updated",
@@ -861,9 +1169,20 @@ async def shopping_entries_stage2_update(
 
 @router.delete("/shopping-list/entries/{entry_id}")
 async def shopping_entries_stage2_delete(entry_id: int) -> dict:
+    deleted_local = stage2_state.delete_local_shopping_entry(entry_id)
+    if deleted_local is not None:
+        stage2_state.delete_shopping_item_metadata(entry_id)
+        cursor = stage2_state.append_sync_event("shopping_entry_deleted", {"entry_id": entry_id})
+        return {
+            "source": "local-state",
+            "cursor": cursor,
+            "data": {"deleted": entry_id},
+        }
+
     _ensure_tandoor_writes_enabled("shopping_entries_stage2_delete")
     try:
         deleted = await client.delete_shopping_entry(entry_id)
+        stage2_state.delete_shopping_item_metadata(entry_id)
         cursor = stage2_state.append_sync_event("shopping_entry_deleted", {"entry_id": entry_id})
         return {
             "source": "tandoor+local-state",
@@ -890,7 +1209,6 @@ async def shopping_sync_get(
 
 @router.post("/shopping-list/sync")
 async def shopping_sync_post(payload: dict[str, Any] = Body(...)) -> dict:
-    _ensure_tandoor_writes_enabled("shopping_sync_post")
     changes = payload.get("changes")
     if not isinstance(changes, list):
         raise HTTPException(status_code=400, detail="changes must be a list.")
@@ -909,14 +1227,50 @@ async def shopping_sync_post(payload: dict[str, Any] = Body(...)) -> dict:
 
         try:
             if operation == "create":
-                data = await client.create_shopping_entry(change_payload)
+                req = dict(change_payload)
+                reminder_patch, has_reminder_patch = _extract_reminder_patch(req)
+                is_ad_hoc = bool(req.pop("ad_hoc", False))
+                status = req.pop("status", None)
+                status_value: str | None = None
+                if status is not None:
+                    status_value = str(status)
+                    if status_value not in SHOPPING_STATUSES:
+                        raise ValueError("status must be remaining, skipped, or completed")
+                if status_value is None:
+                    status_value = "remaining"
+
+                if is_ad_hoc:
+                    local_id = stage2_state.allocate_local_shopping_entry_id()
+                    local_entry = _build_local_entry_payload(local_id, req)
+                    local_entry["status"] = status_value
+                    stored_local = stage2_state.set_local_shopping_entry(local_id, local_entry)
+                    if has_reminder_patch:
+                        stage2_state.set_shopping_item_metadata(local_id, reminder_patch)
+                    stage2_state.set_shopping_status(local_id, status_value)
+                    cursor = stage2_state.append_sync_event("shopping_entry_created", stored_local)
+                    applied.append({"index": idx, "cursor": cursor, "operation": operation, "data": stored_local})
+                    continue
+
+                _ensure_tandoor_writes_enabled("shopping_sync_post_create")
+                mapped = _status_to_tandoor_fields(status_value)
+                for key, value in mapped.items():
+                    req.setdefault(key, value)
+
+                data = await client.create_shopping_entry(req)
+                data_id = data.get("id") if isinstance(data, dict) else None
+                if isinstance(data_id, int) and has_reminder_patch:
+                    stage2_state.set_shopping_item_metadata(data_id, reminder_patch)
+                if isinstance(data_id, int) and status_value is not None:
+                    stage2_state.set_shopping_status(data_id, status_value)
                 cursor = stage2_state.append_sync_event("shopping_entry_created", data)
                 applied.append({"index": idx, "cursor": cursor, "operation": operation, "data": data})
             elif operation == "update":
                 if not isinstance(entry_id, int):
                     raise ValueError("entry_id is required for update")
+                local_entry = stage2_state.get_local_shopping_entry(entry_id)
                 status = change_payload.get("status")
                 req = dict(change_payload)
+                reminder_patch, has_reminder_patch = _extract_reminder_patch(req)
                 if status is not None:
                     status_str = str(status)
                     if status_str not in SHOPPING_STATUSES:
@@ -927,7 +1281,43 @@ async def shopping_sync_post(payload: dict[str, Any] = Body(...)) -> dict:
                     for key, value in mapped.items():
                         req.setdefault(key, value)
 
-                data = await client.update_shopping_entry(entry_id, req)
+                if local_entry is not None:
+                    patch: dict[str, Any] = {}
+                    if "name" in req:
+                        patch["name"] = str(req["name"]).strip()
+                    if "amount" in req:
+                        patch["amount"] = req["amount"]
+                    if "unit" in req:
+                        patch["unit"] = str(req["unit"]).strip()
+                    if "ingredient_type" in req:
+                        patch["ingredient_type"] = str(req["ingredient_type"]).strip() or "Other"
+                    if "recipe_context" in req:
+                        patch["recipe_context"] = str(req["recipe_context"]).strip() or "Unassigned"
+                    if "store_group" in req:
+                        patch["store_group"] = _local_store_group_payload(req["store_group"])
+                    if status is not None:
+                        patch["status"] = str(status)
+
+                    data = stage2_state.update_local_shopping_entry(entry_id, patch)
+                    if data is None:
+                        raise ValueError("local entry not found")
+                    if has_reminder_patch:
+                        stage2_state.set_shopping_item_metadata(entry_id, reminder_patch)
+                    cursor = stage2_state.append_sync_event(
+                        "shopping_entry_updated",
+                        {"entry_id": entry_id, "request": change_payload, "data": data},
+                    )
+                    applied.append({"index": idx, "cursor": cursor, "operation": operation, "data": data})
+                    continue
+
+                _ensure_tandoor_writes_enabled("shopping_sync_post_update")
+
+                if req:
+                    data = await client.update_shopping_entry(entry_id, req)
+                else:
+                    data = {"id": entry_id}
+                if has_reminder_patch:
+                    stage2_state.set_shopping_item_metadata(entry_id, reminder_patch)
                 cursor = stage2_state.append_sync_event(
                     "shopping_entry_updated",
                     {"entry_id": entry_id, "request": change_payload, "data": data},
@@ -936,12 +1326,28 @@ async def shopping_sync_post(payload: dict[str, Any] = Body(...)) -> dict:
             elif operation == "delete":
                 if not isinstance(entry_id, int):
                     raise ValueError("entry_id is required for delete")
+                local_removed = stage2_state.delete_local_shopping_entry(entry_id)
+                if local_removed is not None:
+                    stage2_state.delete_shopping_item_metadata(entry_id)
+                    cursor = stage2_state.append_sync_event("shopping_entry_deleted", {"entry_id": entry_id})
+                    applied.append(
+                        {
+                            "index": idx,
+                            "cursor": cursor,
+                            "operation": operation,
+                            "data": {"deleted": entry_id},
+                        }
+                    )
+                    continue
+
+                _ensure_tandoor_writes_enabled("shopping_sync_post_delete")
                 data = await client.delete_shopping_entry(entry_id)
+                stage2_state.delete_shopping_item_metadata(entry_id)
                 cursor = stage2_state.append_sync_event("shopping_entry_deleted", {"entry_id": entry_id})
                 applied.append({"index": idx, "cursor": cursor, "operation": operation, "data": data})
             else:
                 rejected.append({"index": idx, "reason": f"Unsupported operation: {operation}"})
-        except (TandoorError, ValueError) as exc:
+        except (TandoorError, ValueError, HTTPException) as exc:
             rejected.append({"index": idx, "reason": str(exc)})
 
     return {

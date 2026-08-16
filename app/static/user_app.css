@@ -357,6 +357,257 @@ body {
   min-height: 0;
 }
 
+.wf-editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+
+.wf-segment {
+  display: inline-flex;
+  border: 1px solid var(--wf-line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.wf-segment-btn {
+  border: none;
+  background: #fff;
+  color: var(--wf-muted);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+}
+
+.wf-segment-btn.is-active {
+  background: var(--wf-accent);
+  color: #fff;
+}
+
+.wf-editor-status {
+  margin: 0 0 0.6rem;
+  color: var(--wf-muted);
+  font-size: 0.84rem;
+}
+
+.wf-editor-due-banner {
+  margin-bottom: 0.7rem;
+  border: 1px solid #bbdefb;
+  background: #e3f2fd;
+  color: #1565c0;
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.wf-editor-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.wf-editor-group {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.wf-editor-group-title {
+  margin: 0;
+  color: var(--wf-muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.wf-editor-group-items {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.wf-editor-item {
+  background: #fff;
+  border: 1px solid var(--wf-line);
+  border-radius: 12px;
+  padding: 0.65rem;
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+
+.wf-editor-item:hover {
+  border-color: #c7d4cc;
+}
+
+.wf-editor-main {
+  min-width: 0;
+}
+
+.wf-editor-name {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.wf-editor-meta {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  color: var(--wf-muted);
+}
+
+.wf-editor-meta-light {
+  text-transform: capitalize;
+}
+
+.wf-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wf-bell-btn {
+  border: 1px solid var(--wf-line);
+  background: #fff;
+  color: var(--wf-ink);
+  border-radius: 10px;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.wf-bell-btn.is-on {
+  background: #fff8e1;
+  border-color: #ffcc80;
+}
+
+.wf-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.wf-stepper-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--wf-line);
+  background: #fff;
+  color: var(--wf-ink);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wf-stepper-value {
+  min-width: 3.2rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--wf-ink);
+}
+
+.wf-editor-empty {
+  margin: 0;
+  border: 1px dashed var(--wf-line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.8rem;
+  font-size: 0.9rem;
+  color: var(--wf-muted);
+}
+
+.wf-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 24, 20, 0.52);
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.wf-modal[hidden] {
+  display: none !important;
+}
+
+.wf-modal-card {
+  width: min(100%, 390px);
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid var(--wf-line);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
+  padding: 0.9rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.wf-modal-card h2 {
+  margin: 0 0 0.2rem;
+  font-size: 1.05rem;
+}
+
+.wf-field {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  color: var(--wf-muted);
+}
+
+.wf-field input,
+.wf-field select {
+  width: 100%;
+  border: 1px solid var(--wf-line);
+  border-radius: 9px;
+  min-height: 2.15rem;
+  padding: 0.38rem 0.55rem;
+  font: inherit;
+  color: var(--wf-ink);
+  background: #fff;
+}
+
+.wf-checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.wf-checkbox-field input {
+  width: auto;
+  min-height: 0;
+}
+
+.wf-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+}
+
+.wf-btn-danger {
+  background: #b71c1c;
+  color: #fff;
+}
+
 @keyframes wf-fade-in {
   from {
     opacity: 0;
@@ -385,5 +636,19 @@ body {
 
   .wf-nav-btn {
     font-size: 0.66rem;
+  }
+
+  .wf-editor-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .wf-editor-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .wf-editor-actions {
+    justify-content: flex-start;
   }
 }

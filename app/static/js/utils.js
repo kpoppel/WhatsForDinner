@@ -8,5 +8,5 @@ export function escapeAttr(value) {
 
 export function shoppingItemId(value) {
   const id = Number(value);
-  return Number.isInteger(id) && id > 0 ? id : null;
+  return Number.isInteger(id) && id !== 0 ? id : null;
 }

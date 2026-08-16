@@ -13,6 +13,9 @@ DEFAULT_STATE: dict[str, Any] = {
     "next_meal_plan_id": 1,
     "next_entry_id": 1,
     "shopping_status_overrides": {},
+    "shopping_item_metadata": {},
+    "local_shopping_entries": {},
+    "next_local_shopping_entry_id": -1,
     "shopping_sync_events": [],
     "next_sync_event_id": 1,
 }
@@ -36,6 +39,13 @@ class Stage2State:
             merged["meal_plans"] = {}
         if not isinstance(merged.get("shopping_status_overrides"), dict):
             merged["shopping_status_overrides"] = {}
+        if not isinstance(merged.get("shopping_item_metadata"), dict):
+            merged["shopping_item_metadata"] = {}
+        if not isinstance(merged.get("local_shopping_entries"), dict):
+            merged["local_shopping_entries"] = {}
+        local_next_id = merged.get("next_local_shopping_entry_id")
+        if not isinstance(local_next_id, int) or local_next_id >= 0:
+            merged["next_local_shopping_entry_id"] = -1
         if not isinstance(merged.get("shopping_sync_events"), list):
             merged["shopping_sync_events"] = []
         rules = merged.get("meal_plan_rules")
@@ -176,3 +186,106 @@ class Stage2State:
             if not isinstance(raw, dict):
                 return {}
             return {str(k): str(v) for k, v in raw.items()}
+
+    def set_shopping_item_metadata(self, entry_id: int, patch: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            data = self._load()
+            key = str(entry_id)
+            raw = data.get("shopping_item_metadata", {})
+            current = raw.get(key, {}) if isinstance(raw, dict) else {}
+            if not isinstance(current, dict):
+                current = {}
+            current.update(patch)
+            if not isinstance(data.get("shopping_item_metadata"), dict):
+                data["shopping_item_metadata"] = {}
+            data["shopping_item_metadata"][key] = current
+            self._save(data)
+            return deepcopy(current)
+
+    def delete_shopping_item_metadata(self, entry_id: int) -> None:
+        with self._lock:
+            data = self._load()
+            raw = data.get("shopping_item_metadata")
+            if isinstance(raw, dict):
+                raw.pop(str(entry_id), None)
+                self._save(data)
+
+    def get_shopping_item_metadata(self) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            data = self._load()
+            raw = data.get("shopping_item_metadata", {})
+            if not isinstance(raw, dict):
+                return {}
+            sanitized: dict[str, dict[str, Any]] = {}
+            for key, value in raw.items():
+                if isinstance(value, dict):
+                    sanitized[str(key)] = deepcopy(value)
+            return sanitized
+
+    def allocate_local_shopping_entry_id(self) -> int:
+        with self._lock:
+            data = self._load()
+            next_id = int(data.get("next_local_shopping_entry_id", -1))
+            if next_id >= 0:
+                next_id = -1
+            data["next_local_shopping_entry_id"] = next_id - 1
+            self._save(data)
+            return next_id
+
+    def list_local_shopping_entries(self) -> list[dict[str, Any]]:
+        with self._lock:
+            data = self._load()
+            raw = data.get("local_shopping_entries", {})
+            if not isinstance(raw, dict):
+                return []
+            items: list[dict[str, Any]] = []
+            for _, value in raw.items():
+                if isinstance(value, dict):
+                    items.append(deepcopy(value))
+            return items
+
+    def get_local_shopping_entry(self, entry_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            data = self._load()
+            raw = data.get("local_shopping_entries", {})
+            if not isinstance(raw, dict):
+                return None
+            entry = raw.get(str(entry_id))
+            if not isinstance(entry, dict):
+                return None
+            return deepcopy(entry)
+
+    def set_local_shopping_entry(self, entry_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            data = self._load()
+            if not isinstance(data.get("local_shopping_entries"), dict):
+                data["local_shopping_entries"] = {}
+            data["local_shopping_entries"][str(entry_id)] = deepcopy(payload)
+            self._save(data)
+            return deepcopy(payload)
+
+    def update_local_shopping_entry(self, entry_id: int, patch: dict[str, Any]) -> dict[str, Any] | None:
+        with self._lock:
+            data = self._load()
+            raw = data.get("local_shopping_entries", {})
+            if not isinstance(raw, dict):
+                return None
+            current = raw.get(str(entry_id))
+            if not isinstance(current, dict):
+                return None
+            current.update(deepcopy(patch))
+            raw[str(entry_id)] = current
+            self._save(data)
+            return deepcopy(current)
+
+    def delete_local_shopping_entry(self, entry_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            data = self._load()
+            raw = data.get("local_shopping_entries", {})
+            if not isinstance(raw, dict):
+                return None
+            removed = raw.pop(str(entry_id), None)
+            if not isinstance(removed, dict):
+                return None
+            self._save(data)
+            return deepcopy(removed)

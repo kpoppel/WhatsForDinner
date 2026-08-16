@@ -434,3 +434,102 @@ def test_stage2_write_route_blocked_when_read_only(monkeypatch, tmp_path) -> Non
         assert "disabled" in response.json()["detail"].lower()
     finally:
         api_module.settings.tandoor_write_enabled = True
+
+
+def test_stage2_ad_hoc_entries_persist_locally_and_merge(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    class FakeClient:
+        async def list_shopping_entries(self, limit=100):
+            return {
+                "results": [
+                    {
+                        "id": 100,
+                        "food": {"name": "Milk", "category": "Dairy"},
+                        "amount": 1,
+                        "checked": False,
+                    }
+                ]
+            }
+
+        async def update_shopping_entry(self, entry_id, payload):
+            return {"id": entry_id, **payload}
+
+        async def create_shopping_entry(self, payload):
+            return {"id": 200, **payload}
+
+        async def delete_shopping_entry(self, entry_id):
+            return {"deleted": entry_id}
+
+    monkeypatch.setattr("app.api.client", FakeClient())
+
+    create_res = client.post(
+        "/api/v1/shopping-list/entries",
+        json={
+            "ad_hoc": True,
+            "name": "Ice",
+            "amount": 2,
+            "ingredient_type": "Frozen",
+            "store_group": {"name": "General"},
+            "status": "remaining",
+            "reminder_enabled": True,
+            "reminder_date": "2026-08-21",
+            "reminder_text": "Move tray to freezer",
+        },
+    )
+    assert create_res.status_code == 200
+    created = create_res.json()["data"]
+    local_id = created["id"]
+    assert isinstance(local_id, int)
+    assert local_id < 0
+    assert created["source"] == "local"
+
+    view_res = client.get("/api/v1/shopping-list/view")
+    assert view_res.status_code == 200
+    remaining = view_res.json()["data"]["sections"]["remaining"]
+    names = {row["name"] for row in remaining}
+    assert "Milk" in names
+    assert "Ice" in names
+
+    local_row = next(row for row in remaining if row["id"] == local_id)
+    assert local_row["reminder_enabled"] is True
+    assert local_row["reminder_text"] == "Move tray to freezer"
+
+    patch_res = client.patch(
+        f"/api/v1/shopping-list/entries/{local_id}",
+        json={"amount": 2.5, "status": "completed", "reminder_enabled": False, "reminder_date": None},
+    )
+    assert patch_res.status_code == 200
+    assert patch_res.json()["data"]["amount"] == 2.5
+    assert patch_res.json()["effective_status"] == "completed"
+
+    delete_res = client.delete(f"/api/v1/shopping-list/entries/{local_id}")
+    assert delete_res.status_code == 200
+
+    after_delete = client.get("/api/v1/shopping-list/view")
+    assert after_delete.status_code == 200
+    remaining_after = after_delete.json()["data"]["sections"]["remaining"]
+    completed_after = after_delete.json()["data"]["sections"]["completed"]
+    ids_after = {row["id"] for row in remaining_after + completed_after}
+    assert local_id not in ids_after
+
+
+def test_stage2_ad_hoc_create_allowed_when_tandoor_writes_disabled(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+    from app import api as api_module
+
+    class FakeClient:
+        async def list_shopping_entries(self, limit=100):
+            return {"results": []}
+
+    monkeypatch.setattr("app.api.client", FakeClient())
+    api_module.settings.tandoor_write_enabled = False
+    try:
+        response = client.post(
+            "/api/v1/shopping-list/entries",
+            json={"ad_hoc": True, "name": "Paper Towels", "amount": 1},
+        )
+        assert response.status_code == 200
+        assert response.json()["source"] == "local-state"
+    finally:
+        api_module.settings.tandoor_write_enabled = True

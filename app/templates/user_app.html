@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#1d5c4f" />
   <title>WhatsForDinner</title>
-  <link rel="stylesheet" href="/static/shopping_app.css?v=20260817e" />
-  <link rel="stylesheet" href="/static/user_app.css?v=20260817e" />
+  <link rel="stylesheet" href="/static/shopping_app.css?v=20260817f" />
+  <link rel="stylesheet" href="/static/user_app.css?v=20260817f" />
 </head>
 <body>
   <main class="wf-shell">
@@ -76,10 +76,17 @@
       </section>
 
       <section id="wf-tab-shop-editor" class="wf-tab" data-tab-panel="shop-editor" aria-label="Shop Editor" hidden>
-        <article class="wf-card">
-          <h2>Shop Editor</h2>
-          <p>Phase 1 placeholder. Editor controls and modals arrive in Phase 2.</p>
-        </article>
+        <section class="wf-editor-toolbar">
+          <div class="wf-segment" role="tablist" aria-label="Shopping grouping">
+            <button id="wf-editor-view-store" class="wf-segment-btn is-active" type="button" role="tab" aria-selected="true" data-editor-view="store">By Store Group</button>
+            <button id="wf-editor-view-recipe" class="wf-segment-btn" type="button" role="tab" aria-selected="false" data-editor-view="recipe">By Recipe</button>
+          </div>
+          <button id="wf-editor-add-btn" class="wf-btn wf-btn-blue" type="button">+ Add Item</button>
+        </section>
+
+        <article id="wf-editor-due-banner" class="wf-editor-due-banner" hidden></article>
+        <p id="wf-editor-status" class="wf-editor-status" aria-live="polite"></p>
+        <section id="wf-editor-list" class="wf-editor-list" aria-label="Shopping editor list"></section>
       </section>
 
       <section id="wf-tab-shopping-mode" class="wf-tab" data-tab-panel="shopping-mode" aria-label="Shopping Mode" hidden>
@@ -124,8 +131,69 @@
     </nav>
   </main>
 
+  <div id="wf-editor-add-modal" class="wf-modal" hidden>
+    <div class="wf-modal-card" role="dialog" aria-modal="true" aria-labelledby="wf-editor-add-title">
+      <h2 id="wf-editor-add-title">Add Item</h2>
+      <label class="wf-field">Name
+        <input id="wf-add-name" type="text" maxlength="120" required />
+      </label>
+      <label class="wf-field">Quantity
+        <input id="wf-add-amount" type="number" min="0" step="0.5" value="0" />
+      </label>
+      <label class="wf-field">Category
+        <select id="wf-add-category"></select>
+      </label>
+      <label class="wf-field wf-checkbox-field">
+        <input id="wf-add-reminder-enabled" type="checkbox" />
+        Day-of thaw/prep reminder
+      </label>
+      <label class="wf-field">Reminder Date
+        <input id="wf-add-reminder-date" type="date" />
+      </label>
+      <label class="wf-field">Reminder Text
+        <input id="wf-add-reminder-text" type="text" maxlength="140" placeholder="Reminder" />
+      </label>
+      <div class="wf-modal-actions">
+        <button id="wf-add-cancel" class="wf-btn wf-btn-outline" type="button">Cancel</button>
+        <button id="wf-add-save" class="wf-btn wf-btn-blue" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="wf-editor-edit-modal" class="wf-modal" hidden>
+    <div class="wf-modal-card" role="dialog" aria-modal="true" aria-labelledby="wf-editor-edit-title">
+      <h2 id="wf-editor-edit-title">Edit Item</h2>
+      <input id="wf-edit-entry-id" type="hidden" />
+      <label class="wf-field">Name
+        <input id="wf-edit-name" type="text" maxlength="120" required />
+      </label>
+      <label class="wf-field">Quantity
+        <input id="wf-edit-amount" type="number" min="0" step="0.5" value="0" />
+      </label>
+      <label class="wf-field">Category
+        <select id="wf-edit-category"></select>
+      </label>
+      <label class="wf-field wf-checkbox-field">
+        <input id="wf-edit-reminder-enabled" type="checkbox" />
+        Day-of thaw/prep reminder
+      </label>
+      <label class="wf-field">Reminder Date
+        <input id="wf-edit-reminder-date" type="date" />
+      </label>
+      <label class="wf-field">Reminder Text
+        <input id="wf-edit-reminder-text" type="text" maxlength="140" placeholder="Reminder" />
+      </label>
+      <div class="wf-modal-actions">
+        <button id="wf-edit-delete" class="wf-btn wf-btn-danger" type="button">Delete</button>
+        <button id="wf-edit-cancel" class="wf-btn wf-btn-outline" type="button">Cancel</button>
+        <button id="wf-edit-save" class="wf-btn wf-btn-blue" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
   <script>window.WFD_API_PREFIX = {{ api_prefix_js }};</script>
-  <script type="module" src="/static/js/shopping.js?v=20260817e"></script>
-  <script type="module" src="/static/user_shell.js?v=20260817e"></script>
+  <script type="module" src="/static/js/shopping.js?v=20260817f"></script>
+  <script type="module" src="/static/shop_editor.js?v=20260817f"></script>
+  <script type="module" src="/static/user_shell.js?v=20260817f"></script>
 </body>
 </html>
