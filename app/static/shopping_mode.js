@@ -865,7 +865,8 @@
   window.addEventListener("online", () => {
     setApiReachable(true);
     updateStatusBadges();
-    run(() => refreshAndSyncIfNeeded());
+    // Delay sync: the 'online' event fires before routing is stable (e.g. after flight mode).
+    setTimeout(() => run(() => refreshAndSyncIfNeeded()), 2000);
   });
 
   window.addEventListener("offline", () => {
@@ -877,6 +878,22 @@
       pending_count: state.pendingChanges.length,
     });
   });
+
+  // navigator.onLine and the 'online' event are unreliable on LANs; probe the API directly.
+  setInterval(async () => {
+    if (isOnline()) {
+      return;
+    }
+    try {
+      const response = await fetch(`${apiPrefix}/health`, { cache: "no-store" });
+      if (response.ok) {
+        setApiReachable(true);
+        run(() => refreshAndSyncIfNeeded());
+      }
+    } catch {
+      // Still unreachable.
+    }
+  }, 5000);
 
   // Initial load
   wireCollapsibleSection("skipped");
