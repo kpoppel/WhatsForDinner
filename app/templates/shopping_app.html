@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#176b5a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Dinner" />
+  <link rel="manifest" href="/shopping.webmanifest" />
+  <link rel="apple-touch-icon" href="/static/pwa-icon-192.svg" />
+  <title>WhatsForDinner Shopping Mode</title>
+  <link rel="stylesheet" href="/static/shopping_app.css" />
+</head>
+<body>
+  <main class="shell">
+    <article class="card">
+      <div class="header-row">
+        <div class="title-wrap">
+          <h1>Shopping Mode</h1>
+          <button id="toggle-instructions" class="ghost">?</button>
+        </div>
+
+        <div class="status" aria-live="polite">
+          <span id="shop-mode-network" class="status-dot is-offline" role="status" aria-label="Offline" title="Offline"></span>
+          <span id="shop-mode-pending" class="badge pending-sync" role="status" aria-label="Pending sync: 0" title="Pending sync: 0"><span class="pending-sync-icon" aria-hidden="true">⟳</span><span id="shop-mode-pending-count">0</span></span>
+        </div>
+      </div>
+      <p id="shopping-mode-instructions" style="display: none;">Swipe right on any item to delete it. Tap a remaining item to complete it. Swipe left on a remaining item to postpone it. Tap postponed items to move them back to remaining. Swipe left on completed items to delete them.</p>
+
+      <section class="section">
+        <h2 id="shop-mode-remaining-title">Remaining by Category (0)</h2>
+        <div id="shop-mode-remaining"></div>
+      </section>
+
+      <section class="section">
+        <h2 id="shop-mode-skipped-title" class="section-toggle" role="button" tabindex="0" aria-controls="shop-mode-skipped" aria-expanded="false">Postponed / Skipped (0) ▸</h2>
+        <div id="shop-mode-skipped" hidden></div>
+      </section>
+
+      <section class="section">
+        <h2 id="shop-mode-completed-title" class="section-toggle" role="button" tabindex="0" aria-controls="shop-mode-completed" aria-expanded="false">Completed (0) ▸</h2>
+        <div id="shop-mode-completed" hidden></div>
+      </section>
+
+      <!-- DEBUG: Output area for debugging -->
+      <pre id="output"></pre>
+    </article>
+  </main>
+
+  <script>window.WFD_API_PREFIX = {{ api_prefix_js }};</script>
+  <script src="/static/shopping_mode.js"></script>
+</body>
+</html>

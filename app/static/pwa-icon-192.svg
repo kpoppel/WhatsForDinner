@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" role="img" aria-label="WhatsForDinner">
+  <defs>
+    <linearGradient id="bg192" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#176b5a"/>
+      <stop offset="100%" stop-color="#2f9d66"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="40" fill="url(#bg192)"/>
+  <circle cx="96" cy="96" r="56" fill="#f7fbf9"/>
+  <path d="M60 83h72v8H60zm0 18h52v8H60z" fill="#176b5a"/>
+  <circle cx="124" cy="105" r="10" fill="#ffb85c"/>
+</svg>

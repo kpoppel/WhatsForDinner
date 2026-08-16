@@ -47,6 +47,29 @@ def test_stage2_meal_plan_rules_default_and_update(monkeypatch, tmp_path) -> Non
     assert get_updated.json()["data"]["no_repeat_days"] == 0
 
 
+def test_stage2_meal_plan_uses_all_recipes_when_no_keywords_selected(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    class FakeClient:
+        async def list_recipes(self, search=None, limit=20, keyword_ids=None):
+            assert keyword_ids is None
+            return {"results": [{"id": 9, "name": "Default Pantry Pick"}]}
+
+    monkeypatch.setattr("app.api.client", FakeClient())
+
+    res = client.post(
+        "/api/v1/meal-plans/generate",
+        json={
+            "start_date": "2026-08-17",
+            "length_days": 1,
+            "diners": 2,
+        },
+    )
+
+    assert res.status_code == 200
+    assert res.json()["data"]["entries"][0]["recipe"]["id"] == 9
+
+
 def test_stage2_meal_plan_generate_and_entry_ops(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 
@@ -235,13 +258,31 @@ def test_stage2_shopping_view_and_sync(monkeypatch, tmp_path) -> None:
                 "results": [
                     {
                         "id": 1,
-                        "food": {"name": "Milk", "category": "Dairy", "supermarket_category": "Cold"},
+                        "food": {
+                            "name": "Milk",
+                            "category": "Dairy",
+                            "store_group": {"id": 6, "name": "Kød, fisk og fjerkræ"},
+                        },
                         "amount": 1,
                         "checked": False,
                     },
                     {
                         "id": 2,
-                        "food": {"name": "Apples", "category": "Fruit", "supermarket_category": "Produce"},
+                        "food": {
+                            "name": "Chicken",
+                            "category": "Protein",
+                            "store_group": {"id": 6, "name": "Kød, fisk og fjerkræ"},
+                        },
+                        "amount": 4,
+                        "checked": False,
+                    },
+                    {
+                        "id": 3,
+                        "food": {
+                            "name": "Apples",
+                            "category": "Fruit",
+                            "store_group": {"id": 9, "name": "Frugt og grøntsager"},
+                        },
                         "amount": 4,
                         "checked": True,
                     },
@@ -261,9 +302,17 @@ def test_stage2_shopping_view_and_sync(monkeypatch, tmp_path) -> None:
 
     view_res = client.get("/api/v1/shopping-list/view")
     assert view_res.status_code == 200
-    sections = view_res.json()["data"]["sections"]
-    assert len(sections["remaining"]) == 1
+    payload = view_res.json()["data"]
+    sections = payload["sections"]
+    assert len(sections["remaining"]) == 2
     assert len(sections["completed"]) == 1
+
+    store_layout = payload["grouped"]["store_layout"]["remaining"]
+    assert list(store_layout.keys()) == ["6"]
+    assert store_layout["6"][0]["store_group"]["name"] == "Kød, fisk og fjerkræ"
+
+    completed_store_layout = payload["grouped"]["store_layout"]["completed"]
+    assert list(completed_store_layout.keys()) == ["9"]
 
     patch_res = client.patch("/api/v1/shopping-list/entries/1", json={"status": "skipped"})
     assert patch_res.status_code == 200
@@ -281,6 +330,44 @@ def test_stage2_shopping_view_and_sync(monkeypatch, tmp_path) -> None:
     sync_res = client.get("/api/v1/shopping-list/sync?since=0")
     assert sync_res.status_code == 200
     assert sync_res.json()["server_cursor"] >= 1
+
+
+def test_stage2_shopping_view_uses_supermarket_category_name(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    class FakeClient:
+        async def list_shopping_entries(self, limit=100):
+            return {
+                "results": [
+                    {
+                        "id": 10,
+                        "food": {
+                            "name": "Beef",
+                            "category": "Protein",
+                            "supermarket_category": {"id": 6, "name": "Kød, fisk og fjerkræ"},
+                        },
+                        "amount": 2,
+                        "checked": False,
+                    }
+                ]
+            }
+
+        async def update_shopping_entry(self, entry_id, payload):
+            return {"id": entry_id, **payload}
+
+        async def create_shopping_entry(self, payload):
+            return {"id": 99, **payload}
+
+        async def delete_shopping_entry(self, entry_id):
+            return {"deleted": entry_id}
+
+    monkeypatch.setattr("app.api.client", FakeClient())
+
+    response = client.get("/api/v1/shopping-list/view")
+    assert response.status_code == 200
+    item = response.json()["data"]["sections"]["remaining"][0]
+    assert item["store_group"]["name"] == "Kød, fisk og fjerkræ"
+    assert item["store_group"]["id"] == 6
 
 
 def test_stage2_plan_shopping_uses_recipe_shopping_update(monkeypatch, tmp_path) -> None:

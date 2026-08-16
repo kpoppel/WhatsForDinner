@@ -121,18 +121,18 @@ def _normalize_shopping_entry(entry: dict[str, Any], status: str) -> dict[str, A
     food = entry.get("food") if isinstance(entry.get("food"), dict) else {}
     unit = entry.get("unit") if isinstance(entry.get("unit"), dict) else {}
 
-    ingredient_type = (
-        str(food.get("category") or food.get("food_type") or food.get("type") or "Other")
-    )
-    store_group = (
-        str(food.get("supermarket_category") or food.get("supermarket") or "General")
-    )
+    ingredient_type = str(food.get("category"))
+    raw_store_group = food.get("store_group")
+    if isinstance(raw_store_group, dict) and raw_store_group.get("name") is not None:
+        store_group = raw_store_group
+    else:
+        store_group = food.get("supermarket_category")
 
     return {
         "id": entry.get("id"),
-        "name": food.get("name") or entry.get("name") or "Unnamed",
+        "name": food.get("name"),
         "amount": entry.get("amount"),
-        "unit": unit.get("name") or entry.get("unit") or "",
+        "unit": unit.get("name"),
         "status": status,
         "ingredient_type": ingredient_type,
         "store_group": store_group,
@@ -143,7 +143,11 @@ def _normalize_shopping_entry(entry: dict[str, Any], status: str) -> dict[str, A
 def _group_section(items: list[dict[str, Any]], key: str) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for item in items:
-        group = str(item.get(key) or "Other")
+        value = item.get(key)
+        if isinstance(value, dict):
+            group = str(value.get("id"))
+        else:
+            group = str(value)
         grouped.setdefault(group, []).append(item)
     return grouped
 
@@ -507,18 +511,20 @@ async def generate_meal_plan(payload: dict[str, Any] = Body(...)) -> dict:
     empty_days = _parse_constraint_days(constraints.get("empty_days", []), start_day, length_days)
 
     raw_keyword_ids = payload.get("keyword_ids")
-    if isinstance(raw_keyword_ids, list) and raw_keyword_ids:
+    if isinstance(raw_keyword_ids, list):
         keyword_ids = [int(v) for v in raw_keyword_ids]
     else:
         keyword_ids = stage2_state.selected_keywords()
 
     recipe_candidates: list[dict[str, Any]] = []
-    if keyword_ids:
-        try:
-            result = await client.list_recipes(limit=max(20, length_days * 3), keyword_ids=keyword_ids)
-            recipe_candidates = _extract_results(result)
-        except TandoorError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    try:
+        result = await client.list_recipes(
+            limit=max(20, length_days * 3),
+            keyword_ids=keyword_ids or None,
+        )
+        recipe_candidates = _extract_results(result)
+    except TandoorError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     configured_rules = stage2_state.meal_plan_rules()
     raw_no_repeat = payload.get("no_repeat_days")

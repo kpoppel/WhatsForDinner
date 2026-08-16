@@ -1,4 +1,5 @@
 (() => {
+  const DEBUG_MODE = true;
   const apiPrefix = window.WFD_API_PREFIX;
   const output = document.getElementById("output");
   const SHOPPING_MODE_CACHE_KEY = "wfd.shopping-mode.v1";
@@ -12,7 +13,9 @@
   };
 
   function show(data) {
-    output.textContent = JSON.stringify(data, null, 2);
+    if (DEBUG_MODE) {
+      output.textContent = JSON.stringify(data, null, 2);
+    }
   }
 
   function parseCommaIntList(value) {
@@ -50,7 +53,7 @@
     try {
       await action();
     } catch (err) {
-      output.textContent = `Request failed: ${err}`;
+      show({ message: "Request failed", status: `Error: ${err}` });
     }
   }
 
@@ -473,6 +476,17 @@
 
     const status = SHOPPING_STATUSES.has(item?.status) ? item.status : fallbackStatus;
     const unit = item?.unit ? String(item.unit) : "";
+    const storeGroup = item?.store_group;
+    const normalizedStoreGroup =
+      storeGroup && typeof storeGroup === "object"
+        ? {
+            id: storeGroup.id ?? storeGroup.name ?? "General",
+            name: storeGroup.name ?? String(storeGroup.id ?? "General"),
+          }
+        : {
+            id: String(storeGroup || "General"),
+            name: String(storeGroup || "General"),
+          };
     return {
       id,
       name: String(item?.name || "Unnamed"),
@@ -480,7 +494,7 @@
       unit,
       status: SHOPPING_STATUSES.has(status) ? status : "remaining",
       ingredient_type: String(item?.ingredient_type || "Other"),
-      store_group: String(item?.store_group || "General"),
+      store_group: normalizedStoreGroup,
     };
   }
 
@@ -684,25 +698,25 @@
 
     const grouped = {};
     for (const item of items) {
-      const key = String(item.ingredient_type || "Other");
-      if (!grouped[key]) {
-        grouped[key] = [];
+      const categoryName = item.store_group.name;
+      if (!grouped[categoryName]) {
+        grouped[categoryName] = [];
       }
-      grouped[key].push(item);
+      grouped[categoryName].push(item);
     }
 
     const categories = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
-    for (const category of categories) {
+    for (const categoryName of categories) {
       const group = document.createElement("section");
       group.className = "shop-category";
 
       const title = document.createElement("div");
       title.className = "shop-category-title";
-      title.textContent = category;
+      title.textContent = categoryName;
       group.appendChild(title);
 
-      grouped[category]
-        .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+      grouped[categoryName]
+        .sort((a, b) => a.name.localeCompare(b.name))
         .forEach((item) => group.appendChild(createShopCard(item, "remaining")));
 
       container.appendChild(group);

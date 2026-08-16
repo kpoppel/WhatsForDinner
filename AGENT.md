@@ -14,6 +14,7 @@ If any rule conflicts with your default behavior, follow this file.
 1. No fallback code.
 - Do not add alternate execution paths, backup behaviors, silent defaults, or compatibility-only branches.
 - If a fallback seems necessary, stop and ask the user how to proceed.
+- NEVER introduce || [],  || {}, ? or ?? (nullable coalescing, papering over root cause issues)
 
 2. Minimal scope only.
 - Change only what is required for the requested outcome.
