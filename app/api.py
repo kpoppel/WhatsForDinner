@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import re
 from datetime import date, timedelta
 from typing import Any
 
@@ -15,6 +16,7 @@ client = TandoorClient()
 stage2_state = Stage2State(settings.stage2_state_file)
 
 SHOPPING_STATUSES = {"remaining", "skipped", "completed"}
+TIME_24H_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 def _ensure_tandoor_writes_enabled(operation: str) -> None:
@@ -427,6 +429,33 @@ def _extract_recipe_ingredient_ids(recipe_payload: dict[str, Any]) -> list[int]:
     return sorted(set(ids))
 
 
+def _parse_plan_start_date(value: Any) -> date | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def _stored_plan_sort_key(plan: dict[str, Any]) -> tuple[int, int, int, int]:
+    today = date.today()
+    start = _parse_plan_start_date(plan.get("start_date"))
+    raw_id = plan.get("plan_id")
+    plan_id = raw_id if isinstance(raw_id, int) else 0
+
+    if start is None:
+        return (10**9, 1, 0, -plan_id)
+
+    diff_days = (start - today).days
+    distance = abs(diff_days)
+    is_future_or_today = 0 if diff_days >= 0 else 1
+    return (distance, is_future_or_today, -start.toordinal(), -plan_id)
+
+
 def _collect_recipe_history_dates() -> dict[int, list[date]]:
     history: dict[int, list[date]] = {}
     for plan in stage2_state.list_meal_plans():
@@ -581,6 +610,41 @@ async def get_meal_plan_rules() -> dict:
     }
 
 
+@router.get("/config/user-settings")
+async def get_user_settings() -> dict:
+    settings_data = stage2_state.user_settings()
+    return {
+        "source": "local-state",
+        "data": settings_data,
+    }
+
+
+@router.put("/config/user-settings")
+async def set_user_settings(payload: dict[str, Any] = Body(...)) -> dict:
+    raw_default_diners = payload.get("default_diners")
+    try:
+        default_diners = int(raw_default_diners)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="default_diners must be an integer.") from exc
+
+    if default_diners < 1 or default_diners > 20:
+        raise HTTPException(status_code=400, detail="default_diners must be within 1..20.")
+
+    raw_notification_time = payload.get("default_notification_time")
+    if not isinstance(raw_notification_time, str):
+        raise HTTPException(status_code=400, detail="default_notification_time must be a string in HH:MM format.")
+
+    default_notification_time = raw_notification_time.strip()
+    if TIME_24H_RE.match(default_notification_time) is None:
+        raise HTTPException(status_code=400, detail="default_notification_time must be HH:MM (24-hour).")
+
+    saved = stage2_state.set_user_settings(default_diners, default_notification_time)
+    return {
+        "source": "local-state",
+        "data": saved,
+    }
+
+
 @router.put("/config/meal-plan-rules")
 async def set_meal_plan_rules(payload: dict[str, Any] = Body(...)) -> dict:
     raw_value = payload.get("no_repeat_days")
@@ -618,7 +682,22 @@ async def generate_meal_plan(payload: dict[str, Any] = Body(...)) -> dict:
     if length_days < 1 or length_days > 31:
         raise HTTPException(status_code=400, detail="length_days must be within 1..31.")
 
-    diners = int(payload.get("diners") or 2)
+    configured_user_settings = stage2_state.user_settings()
+    configured_default_diners = configured_user_settings.get("default_diners")
+    if not isinstance(configured_default_diners, int):
+        configured_default_diners = 2
+
+    raw_diners = payload.get("diners")
+    if raw_diners is None:
+        diners = configured_default_diners
+    else:
+        try:
+            diners = int(raw_diners)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="diners must be an integer.") from exc
+
+    if diners < 1 or diners > 20:
+        raise HTTPException(status_code=400, detail="diners must be within 1..20.")
 
     constraints = payload.get("constraints")
     if not isinstance(constraints, dict):
@@ -723,6 +802,8 @@ async def generate_meal_plan(payload: dict[str, Any] = Body(...)) -> dict:
                 "mode": mode,
                 "recipe": recipe_obj,
                 "servings": diners,
+                "reminder_enabled": False,
+                "reminder_text": "",
                 "notes": "",
             }
         )
@@ -763,6 +844,8 @@ async def list_stored_meal_plans() -> dict:
                 "keyword_ids": plan.get("keyword_ids", []),
             }
         )
+
+    summary.sort(key=_stored_plan_sort_key)
 
     return {
         "source": "local-state",
@@ -846,6 +929,8 @@ async def add_meal_plan_entry(plan_id: int, payload: dict[str, Any] = Body(...))
         "mode": mode,
         "recipe": recipe,
         "servings": int(payload.get("servings") or plan.get("diners") or 2),
+        "reminder_enabled": bool(payload.get("reminder_enabled", False)),
+        "reminder_text": str(payload.get("reminder_text") or ""),
         "notes": str(payload.get("notes") or ""),
     }
 
@@ -872,13 +957,61 @@ async def patch_meal_plan_entry(
     if entry is None:
         raise HTTPException(status_code=404, detail="Meal plan entry not found.")
 
-    for key in ("day_index", "date", "mode", "recipe", "servings", "notes"):
+    for key in (
+        "day_index",
+        "date",
+        "mode",
+        "recipe",
+        "servings",
+        "reminder_enabled",
+        "reminder_text",
+        "notes",
+    ):
         if key in payload:
             entry[key] = payload[key]
 
     target_day_index = payload.get("target_day_index")
     if target_day_index is not None:
-        entry["day_index"] = int(target_day_index)
+        entries_for_reorder = plan.get("entries")
+        if not isinstance(entries_for_reorder, list):
+            raise HTTPException(status_code=404, detail="Meal plan entry not found.")
+
+        ordered_entries = [
+            row for row in entries_for_reorder if isinstance(row, dict)
+        ]
+        ordered_entries.sort(key=lambda row: int(row.get("day_index", 0)))
+
+        from_index = -1
+        for idx, row in enumerate(ordered_entries):
+            if int(row.get("entry_id", -1)) == entry_id:
+                from_index = idx
+                break
+
+        if from_index < 0:
+            raise HTTPException(status_code=404, detail="Meal plan entry not found.")
+
+        moved_entry = ordered_entries.pop(from_index)
+
+        target_index = int(target_day_index)
+        if target_index < 0:
+            target_index = 0
+        if target_index > len(ordered_entries):
+            target_index = len(ordered_entries)
+
+        ordered_entries.insert(target_index, moved_entry)
+
+        start_day: date | None
+        try:
+            start_day = date.fromisoformat(str(plan.get("start_date")))
+        except ValueError:
+            start_day = None
+
+        for idx, row in enumerate(ordered_entries):
+            row["day_index"] = idx
+            if start_day is not None:
+                row["date"] = (start_day + timedelta(days=idx)).isoformat()
+
+        plan["entries"] = ordered_entries
 
     entries = plan.get("entries", [])
     if isinstance(entries, list):

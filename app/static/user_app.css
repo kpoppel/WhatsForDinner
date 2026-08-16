@@ -241,6 +241,18 @@ body {
   text-transform: uppercase;
 }
 
+.wf-home-reminders {
+  margin-top: 0.6rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.wf-home-reminder-line {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #1565c0;
+}
+
 .wf-day-card {
   background: var(--wf-panel);
   border-radius: 12px;
@@ -283,6 +295,21 @@ body {
 .wf-day-arrow {
   font-size: 1.2rem;
   font-weight: 700;
+}
+
+#wf-home-upcoming-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.wf-home-empty {
+  margin: 0;
+  border: 1px dashed var(--wf-line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.8rem;
+  font-size: 0.9rem;
+  color: var(--wf-muted);
 }
 
 .wf-bottom-nav {
@@ -355,6 +382,402 @@ body {
 
 #wf-tab-shopping-mode #output {
   min-height: 0;
+}
+
+.wf-plan-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.65rem;
+}
+
+.wf-plan-status {
+  margin: 0 0 0.6rem;
+  color: var(--wf-muted);
+  font-size: 0.84rem;
+}
+
+.wf-plan-layout {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.wf-plan-screen {
+  display: grid;
+  gap: 0.75rem;
+  animation: wf-fade-in 180ms ease-out;
+}
+
+.wf-plan-list-panel,
+.wf-plan-detail-panel {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.wf-settings-panel {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.wf-settings-selected {
+  margin: 0;
+  color: var(--wf-muted);
+  font-size: 0.82rem;
+}
+
+.wf-keyword-list {
+  display: grid;
+  gap: 0.45rem;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--wf-line);
+  border-radius: 10px;
+  background: #fff;
+  padding: 0.45rem;
+}
+
+.wf-keyword-option {
+  width: 100%;
+  border: 1px solid var(--wf-line);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--wf-ink);
+  font: inherit;
+  font-size: 0.84rem;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  cursor: pointer;
+}
+
+.wf-keyword-option.is-selected {
+  border-color: #90caf9;
+  background: #f2f8ff;
+}
+
+.wf-keyword-check {
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 4px;
+  border: 1px solid #90a4ae;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  line-height: 1;
+  color: transparent;
+  flex: 0 0 auto;
+}
+
+.wf-keyword-option.is-selected .wf-keyword-check {
+  border-color: #1565c0;
+  background: #1565c0;
+  color: #fff;
+}
+
+.wf-plan-detail-head {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.wf-plan-detail-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.wf-plan-generate-shopping-btn {
+  margin-left: auto;
+}
+
+.wf-plan-detail-meta {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--wf-muted);
+}
+
+.wf-plan-heading {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--wf-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.wf-plan-list,
+.wf-plan-detail {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.wf-plan-card {
+  border: 1px solid var(--wf-line);
+  border-radius: 11px;
+  background: #fff;
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.45rem;
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.wf-plan-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+}
+
+.wf-plan-card.is-active {
+  border-color: var(--wf-primary);
+  background: #f4fbf5;
+  box-shadow: 0 0 0 1px rgba(27, 94, 32, 0.2);
+}
+
+.wf-plan-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.wf-plan-card-title {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.wf-plan-active-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.16rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #1b5e20;
+  background: #c8e6c9;
+  border: 1px solid #a5d6a7;
+}
+
+.wf-plan-card-meta {
+  margin: 0;
+  color: var(--wf-muted);
+  font-size: 0.82rem;
+}
+
+.wf-plan-card-open {
+  margin: 0;
+  color: #1565c0;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.wf-plan-empty {
+  margin: 0;
+  border: 1px dashed var(--wf-line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.8rem;
+  font-size: 0.9rem;
+  color: var(--wf-muted);
+}
+
+.wf-plan-days {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.wf-plan-back-btn {
+  justify-self: start;
+}
+
+#wf-plan-detail-title {
+  color: var(--wf-ink);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 1.05rem;
+}
+
+.wf-plan-day {
+  border: 1px solid var(--wf-line);
+  border-radius: 11px;
+  background: #fff;
+  padding: 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: pan-y;
+  transition: box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.wf-plan-day:hover {
+  border-color: #cfd8d3;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.wf-plan-day.is-dragging {
+  opacity: 0.55;
+}
+
+.wf-plan-day.is-drop-target {
+  border-color: #42a5f5;
+  box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.22);
+}
+
+.wf-plan-drag-handle {
+  border: none;
+  background: transparent;
+  color: var(--wf-muted);
+  font-size: 1.05rem;
+  line-height: 1;
+  padding: 0;
+  width: 1.3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+}
+
+.wf-plan-drag-handle:active {
+  cursor: grabbing;
+}
+
+.wf-plan-day-body {
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+
+.wf-plan-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.wf-plan-day-kicker {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--wf-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.wf-plan-day-title {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.wf-meal-search-results {
+  display: grid;
+  gap: 0.35rem;
+  max-height: 170px;
+  overflow-y: auto;
+  margin-top: -0.15rem;
+}
+
+.wf-meal-search-empty {
+  margin: 0;
+  color: var(--wf-muted);
+  font-size: 0.8rem;
+}
+
+.wf-meal-search-option {
+  border: 1px solid var(--wf-line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.45rem 0.55rem;
+  color: var(--wf-ink);
+  text-align: left;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.wf-meal-search-option:hover {
+  border-color: #90caf9;
+  background: #f2f8ff;
+}
+
+.wf-pill-group {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.wf-pill-btn {
+  border: 1px solid var(--wf-line);
+  background: #fff;
+  color: var(--wf-ink);
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wf-pill-btn.is-active {
+  border-color: var(--wf-accent);
+  background: var(--wf-accent);
+  color: #fff;
+}
+
+.wf-reminder-box {
+  border: 1px solid #bbdefb;
+  background: #f0f7ff;
+  border-radius: 10px;
+  padding: 0.6rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.wf-reminder-head {
+  margin: 0;
+}
+
+.wf-reminder-input {
+  width: 100%;
+  border: 1px solid var(--wf-line);
+  border-radius: 9px;
+  min-height: 2.15rem;
+  padding: 0.38rem 0.55rem;
+  font: inherit;
+  color: var(--wf-ink);
+  background: #fff;
+}
+
+.wf-plan-mode {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.wf-plan-mode-cook {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.wf-plan-mode-leftover {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.wf-plan-mode-takeout {
+  background: #fff3e0;
+  color: #ef6c00;
+}
+
+.wf-plan-mode-empty {
+  background: #eceff1;
+  color: #455a64;
 }
 
 .wf-editor-toolbar {
@@ -561,6 +984,29 @@ body {
   gap: 0.5rem;
 }
 
+.wf-sheet-modal {
+  align-items: flex-end;
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+
+.wf-sheet-modal.wf-plan-sheet-open {
+  opacity: 1;
+}
+
+.wf-sheet-card {
+  width: min(100%, 420px);
+  border-radius: 16px 16px 0 0;
+  transform: translateY(105%);
+  transition: transform 230ms ease;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.wf-sheet-modal.wf-plan-sheet-open .wf-sheet-card {
+  transform: translateY(0);
+}
+
 .wf-modal-card h2 {
   margin: 0 0 0.2rem;
   font-size: 1.05rem;
@@ -641,6 +1087,19 @@ body {
   .wf-editor-toolbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .wf-plan-toolbar {
+    justify-content: stretch;
+  }
+
+  .wf-plan-toolbar .wf-btn {
+    width: 100%;
+  }
+
+  .wf-plan-card-head {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .wf-editor-item {

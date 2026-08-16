@@ -154,10 +154,10 @@ def test_shopping_entry_write_routes(monkeypatch) -> None:
 def test_rudimentary_user_app_route() -> None:
     response = client.get("/app")
     assert response.status_code == 200
-    assert "WhatsForDinner User App" in response.text
-
-
-def test_standalone_shopping_app_route() -> None:
-    response = client.get("/shopping")
-    assert response.status_code == 200
+    assert "WhatsForDinner" in response.text
     assert "Shopping Mode" in response.text
+
+
+def test_standalone_shopping_app_route_removed() -> None:
+    response = client.get("/shopping")
+    assert response.status_code == 404

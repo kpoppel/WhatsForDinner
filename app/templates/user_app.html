@@ -26,53 +26,78 @@
     <section class="wf-content" id="wf-content">
       <section id="wf-tab-home" class="wf-tab is-active" data-tab-panel="home" aria-label="Home">
         <article class="wf-card wf-card-today">
-          <p class="wf-card-kicker">Today • Monday, Aug 17</p>
-          <h2>Grillsandwich with Salad</h2>
+          <p id="wf-home-today-kicker" class="wf-card-kicker">Today</p>
+          <h2 id="wf-home-today-title">No meal planned</h2>
 
-          <div class="wf-meta-row">
-            <span>👥 2 Diners</span>
-            <span class="wf-badge wf-badge-cook">Cook</span>
-            <span class="wf-badge wf-badge-notify">🔔 Thaw Bread @ 08:00 AM</span>
-          </div>
+          <div id="wf-home-today-meta" class="wf-meta-row"></div>
+          <div id="wf-home-today-reminders" class="wf-home-reminders"></div>
 
           <div class="wf-action-row">
-            <button class="wf-btn wf-btn-blue" type="button">View Recipe</button>
-            <button class="wf-btn wf-btn-outline" type="button">Edit</button>
+            <button id="wf-home-view-plan" class="wf-btn wf-btn-blue" type="button">Open Meal Plans</button>
+            <button id="wf-home-edit-plan" class="wf-btn wf-btn-outline" type="button">Edit Day</button>
           </div>
         </article>
 
         <p class="wf-section-title">Upcoming This Week</p>
 
-        <article class="wf-day-card">
-          <div class="wf-day-date">
-            <span>Tue</span>
-            <span>18</span>
-          </div>
-          <div class="wf-day-main">
-            <h3>Lasagne</h3>
-            <p>👥 2 diners • <span class="wf-badge wf-badge-leftovers">Leftovers</span></p>
-          </div>
-          <span class="wf-day-arrow">❯</span>
-        </article>
+        <section id="wf-home-upcoming-list" aria-label="Upcoming meals"></section>
+      </section>
 
-        <article class="wf-day-card">
-          <div class="wf-day-date">
-            <span>Wed</span>
-            <span>19</span>
+      <section id="wf-tab-settings" class="wf-tab" data-tab-panel="settings" aria-label="Settings" hidden>
+        <section class="wf-settings-panel">
+          <h2 class="wf-plan-heading">App Settings</h2>
+
+          <label class="wf-field">Default diner count
+            <input id="wf-settings-default-diners" type="number" min="1" max="20" />
+          </label>
+
+          <label class="wf-field">Default reminder time (24h)
+            <input id="wf-settings-reminder-time" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM" aria-label="Default reminder time in 24-hour format" />
+          </label>
+
+          <label class="wf-field">Recipe repeat constraint (days)
+            <input id="wf-settings-no-repeat-days" type="number" min="0" max="365" />
+          </label>
+
+          <label class="wf-field">Tandoor search keywords
+            <div id="wf-settings-keywords" class="wf-keyword-list" role="group" aria-label="Tandoor search keywords"></div>
+          </label>
+
+          <p id="wf-settings-selected" class="wf-settings-selected"></p>
+          <p id="wf-settings-status" class="wf-plan-status" aria-live="polite"></p>
+
+          <div class="wf-action-row">
+            <button id="wf-settings-refresh" class="wf-btn wf-btn-outline" type="button">Refresh</button>
+            <button id="wf-settings-save" class="wf-btn wf-btn-blue" type="button">Save Settings</button>
           </div>
-          <div class="wf-day-main">
-            <h3>Sushi Takeout</h3>
-            <p>👥 2 diners • <span class="wf-badge wf-badge-takeout">Takeout</span></p>
-          </div>
-          <span class="wf-day-arrow">❯</span>
-        </article>
+        </section>
       </section>
 
       <section id="wf-tab-meal-plans" class="wf-tab" data-tab-panel="meal-plans" aria-label="Meal Plans" hidden>
-        <article class="wf-card">
-          <h2>Meal Plans</h2>
-          <p>Phase 1 placeholder. Generator and schedule editing arrive in Phase 3.</p>
-        </article>
+        <section class="wf-plan-toolbar">
+          <button id="wf-plan-generate-btn" class="wf-btn wf-btn-blue" type="button">+ Generate New Meal Plan</button>
+        </section>
+
+        <p id="wf-plan-status" class="wf-plan-status" aria-live="polite"></p>
+
+        <section class="wf-plan-list-panel">
+          <h2 class="wf-plan-heading">SAVED MEAL PLANS</h2>
+          <section id="wf-plan-list" class="wf-plan-list" aria-label="Stored meal plans"></section>
+        </section>
+      </section>
+
+      <section id="wf-tab-meal-plan-detail" class="wf-tab" data-tab-panel="meal-plan-detail" aria-label="Meal Plan Detail" hidden>
+        <section class="wf-plan-detail-panel">
+          <div class="wf-plan-detail-head">
+            <div class="wf-plan-detail-actions">
+              <button id="wf-plan-back-btn" class="wf-btn wf-btn-outline wf-plan-back-btn" type="button">← Back to plans</button>
+              <button id="wf-plan-generate-shopping-btn" class="wf-btn wf-btn-blue wf-plan-generate-shopping-btn" type="button">Generate Shopping List 🛒</button>
+            </div>
+            <p class="wf-plan-detail-meta">Viewing Plan: <strong id="wf-plan-detail-range">-</strong></p>
+            <h2 id="wf-plan-detail-title" class="wf-plan-heading">Plan Detail</h2>
+          </div>
+          <section id="wf-plan-detail" class="wf-plan-detail" aria-label="Selected meal plan detail"></section>
+        </section>
       </section>
 
       <section id="wf-tab-shop-editor" class="wf-tab" data-tab-panel="shop-editor" aria-label="Shop Editor" hidden>
@@ -151,7 +176,7 @@
         <input id="wf-add-reminder-date" type="date" />
       </label>
       <label class="wf-field">Reminder Text
-        <input id="wf-add-reminder-text" type="text" maxlength="140" placeholder="Reminder" />
+        <input id="wf-add-reminder-text" type="text" maxlength="140" placeholder="Reminder (use 24h time, e.g. 08:00)" />
       </label>
       <div class="wf-modal-actions">
         <button id="wf-add-cancel" class="wf-btn wf-btn-outline" type="button">Cancel</button>
@@ -181,7 +206,7 @@
         <input id="wf-edit-reminder-date" type="date" />
       </label>
       <label class="wf-field">Reminder Text
-        <input id="wf-edit-reminder-text" type="text" maxlength="140" placeholder="Reminder" />
+        <input id="wf-edit-reminder-text" type="text" maxlength="140" placeholder="Reminder (use 24h time, e.g. 08:00)" />
       </label>
       <div class="wf-modal-actions">
         <button id="wf-edit-delete" class="wf-btn wf-btn-danger" type="button">Delete</button>
@@ -191,9 +216,79 @@
     </div>
   </div>
 
+  <div id="wf-plan-generate-modal" class="wf-modal wf-sheet-modal" hidden>
+    <div class="wf-modal-card wf-sheet-card" role="dialog" aria-modal="true" aria-labelledby="wf-plan-generate-title">
+      <h2 id="wf-plan-generate-title">Generate New Meal Plan</h2>
+      <label class="wf-field">Start Date
+        <input id="wf-plan-start-date" type="date" required />
+      </label>
+      <label class="wf-field">Duration (days)
+        <input id="wf-plan-length-days" type="number" min="1" max="31" value="7" required />
+      </label>
+      <label class="wf-field">Diners
+        <input id="wf-plan-diners" type="number" min="1" max="20" value="2" required />
+      </label>
+      <div class="wf-modal-actions">
+        <button id="wf-plan-generate-cancel" class="wf-btn wf-btn-outline" type="button">Cancel</button>
+        <button id="wf-plan-generate-save" class="wf-btn wf-btn-blue" type="button">Generate</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="wf-meal-editor-modal" class="wf-modal" hidden>
+    <div class="wf-modal-card" role="dialog" aria-modal="true" aria-labelledby="wf-meal-editor-title">
+      <h2 id="wf-meal-editor-title">Edit Meal Day</h2>
+      <input id="wf-meal-editor-entry-id" type="hidden" />
+
+      <label class="wf-field">Meal / Recipe Name
+        <input id="wf-meal-editor-name" type="text" maxlength="140" />
+      </label>
+
+      <label class="wf-field">Swap with Tandoor Recipe
+        <input id="wf-meal-editor-search" type="text" maxlength="120" placeholder="Search recipes..." />
+      </label>
+      <section id="wf-meal-editor-search-results" class="wf-meal-search-results" aria-label="Recipe search results"></section>
+
+      <section class="wf-field">
+        <span>Meal Action Type</span>
+        <div id="wf-meal-editor-modes" class="wf-pill-group" role="group" aria-label="Meal mode">
+          <button class="wf-pill-btn is-active" type="button" data-mode="planned">Cook</button>
+          <button class="wf-pill-btn" type="button" data-mode="leftover">Leftovers</button>
+          <button class="wf-pill-btn" type="button" data-mode="takeout">Takeout</button>
+          <button class="wf-pill-btn" type="button" data-mode="empty">Empty</button>
+        </div>
+      </section>
+
+      <section class="wf-field">
+        <span>Number of Diners</span>
+        <div class="wf-stepper" role="group" aria-label="Diners controls">
+          <button id="wf-meal-editor-diners-down" class="wf-stepper-btn" type="button">-</button>
+          <span id="wf-meal-editor-diners-value" class="wf-stepper-value">2</span>
+          <button id="wf-meal-editor-diners-up" class="wf-stepper-btn" type="button">+</button>
+        </div>
+      </section>
+
+      <section class="wf-reminder-box">
+        <label class="wf-field wf-checkbox-field wf-reminder-head">
+          <input id="wf-meal-editor-reminder-enabled" type="checkbox" />
+          🔔 Day-of Prep / Thaw Reminder
+        </label>
+        <input id="wf-meal-editor-reminder-text" class="wf-reminder-input" type="text" maxlength="160" placeholder="Reminder details (24h, e.g. 08:00)" />
+      </section>
+
+      <div class="wf-modal-actions">
+        <button id="wf-meal-editor-cancel" class="wf-btn wf-btn-outline" type="button">Cancel</button>
+        <button id="wf-meal-editor-save" class="wf-btn wf-btn-blue" type="button">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
   <script>window.WFD_API_PREFIX = {{ api_prefix_js }};</script>
   <script type="module" src="/static/js/shopping.js?v=20260817f"></script>
   <script type="module" src="/static/shop_editor.js?v=20260817f"></script>
+  <script type="module" src="/static/meal_plans.js?v=20260817f"></script>
+  <script type="module" src="/static/home_tab.js?v=20260817f"></script>
+  <script type="module" src="/static/settings_tab.js?v=20260817f"></script>
   <script type="module" src="/static/user_shell.js?v=20260817f"></script>
 </body>
 </html>

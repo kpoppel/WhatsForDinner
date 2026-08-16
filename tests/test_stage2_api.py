@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -47,6 +49,28 @@ def test_stage2_meal_plan_rules_default_and_update(monkeypatch, tmp_path) -> Non
     assert get_updated.json()["data"]["no_repeat_days"] == 0
 
 
+def test_stage2_user_settings_roundtrip(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    get_default = client.get("/api/v1/config/user-settings")
+    assert get_default.status_code == 200
+    assert get_default.json()["data"]["default_diners"] == 2
+    assert get_default.json()["data"]["default_notification_time"] == "08:00"
+
+    put_res = client.put(
+        "/api/v1/config/user-settings",
+        json={"default_diners": 4, "default_notification_time": "07:30"},
+    )
+    assert put_res.status_code == 200
+    assert put_res.json()["data"]["default_diners"] == 4
+    assert put_res.json()["data"]["default_notification_time"] == "07:30"
+
+    get_updated = client.get("/api/v1/config/user-settings")
+    assert get_updated.status_code == 200
+    assert get_updated.json()["data"]["default_diners"] == 4
+    assert get_updated.json()["data"]["default_notification_time"] == "07:30"
+
+
 def test_stage2_meal_plan_uses_all_recipes_when_no_keywords_selected(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 
@@ -68,6 +92,33 @@ def test_stage2_meal_plan_uses_all_recipes_when_no_keywords_selected(monkeypatch
 
     assert res.status_code == 200
     assert res.json()["data"]["entries"][0]["recipe"]["id"] == 9
+
+
+def test_stage2_meal_plan_uses_default_diners_when_missing(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    class FakeClient:
+        async def list_recipes(self, search=None, limit=20, keyword_ids=None):
+            return {"results": [{"id": 19, "name": "Default Diners Recipe"}]}
+
+    monkeypatch.setattr("app.api.client", FakeClient())
+
+    settings_res = client.put(
+        "/api/v1/config/user-settings",
+        json={"default_diners": 5, "default_notification_time": "08:15"},
+    )
+    assert settings_res.status_code == 200
+
+    gen_res = client.post(
+        "/api/v1/meal-plans/generate",
+        json={
+            "start_date": "2026-08-17",
+            "length_days": 1,
+        },
+    )
+    assert gen_res.status_code == 200
+    assert gen_res.json()["data"]["diners"] == 5
+    assert gen_res.json()["data"]["entries"][0]["servings"] == 5
 
 
 def test_stage2_meal_plan_generate_and_entry_ops(monkeypatch, tmp_path) -> None:
@@ -247,6 +298,49 @@ def test_stage2_stored_meal_plan_list_and_delete(monkeypatch, tmp_path) -> None:
     list_after_delete = client.get("/api/v1/meal-plans/stored")
     assert list_after_delete.status_code == 200
     assert list_after_delete.json()["count"] == 0
+
+
+def test_stage2_stored_meal_plans_sorted_by_start_date_proximity(monkeypatch, tmp_path) -> None:
+    state = use_temp_state(monkeypatch, tmp_path)
+
+    today = date.today()
+    start_today = today.isoformat()
+    start_plus_two = (today + timedelta(days=2)).isoformat()
+    start_plus_ten = (today + timedelta(days=10)).isoformat()
+
+    state.create_meal_plan(
+        {
+            "start_date": start_plus_ten,
+            "length_days": 3,
+            "diners": 2,
+            "keyword_ids": [],
+            "entries": [],
+        }
+    )
+    state.create_meal_plan(
+        {
+            "start_date": start_today,
+            "length_days": 3,
+            "diners": 2,
+            "keyword_ids": [],
+            "entries": [],
+        }
+    )
+    state.create_meal_plan(
+        {
+            "start_date": start_plus_two,
+            "length_days": 3,
+            "diners": 2,
+            "keyword_ids": [],
+            "entries": [],
+        }
+    )
+
+    list_res = client.get("/api/v1/meal-plans/stored")
+    assert list_res.status_code == 200
+
+    starts = [row["start_date"] for row in list_res.json()["data"]]
+    assert starts == [start_today, start_plus_two, start_plus_ten]
 
 
 def test_stage2_shopping_view_and_sync(monkeypatch, tmp_path) -> None:

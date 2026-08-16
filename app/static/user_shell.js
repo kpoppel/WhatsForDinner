@@ -1,7 +1,9 @@
 (() => {
   const TAB_META = {
     home: { title: "Today's Dinner" },
+    settings: { title: "Settings" },
     "meal-plans": { title: "Saved Meal Plans" },
+    "meal-plan-detail": { title: "Meal Plan Schedule" },
     "shop-editor": { title: "Shopping List Editor" },
     "shopping-mode": { title: "🛒 Shopping Mode" },
   };
@@ -29,7 +31,8 @@
     activeTab = nextTab;
 
     for (const button of navButtons) {
-      const isActive = button.dataset.tab === nextTab;
+      const isMealPlansBucket = nextTab === "meal-plan-detail" && button.dataset.tab === "meal-plans";
+      const isActive = button.dataset.tab === nextTab || isMealPlansBucket;
       button.classList.toggle("is-active", isActive);
       button.setAttribute("aria-current", isActive ? "page" : "false");
     }
@@ -64,8 +67,10 @@
   });
 
   settingsButton.addEventListener("click", () => {
-    window.alert("Settings panel is planned for Phase 4.");
+    setActiveTab("settings");
   });
+
+  window.WFD_setActiveTab = setActiveTab;
 
   setActiveTab(activeTab);
 })();

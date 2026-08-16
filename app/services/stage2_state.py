@@ -9,6 +9,10 @@ from typing import Any
 DEFAULT_STATE: dict[str, Any] = {
     "selected_keyword_ids": [],
     "meal_plan_rules": {"no_repeat_days": 30},
+    "user_settings": {
+        "default_diners": 2,
+        "default_notification_time": "08:00",
+    },
     "meal_plans": {},
     "next_meal_plan_id": 1,
     "next_entry_id": 1,
@@ -53,6 +57,19 @@ class Stage2State:
             merged["meal_plan_rules"] = {"no_repeat_days": 30}
         elif not isinstance(rules.get("no_repeat_days"), int):
             merged["meal_plan_rules"]["no_repeat_days"] = 30
+        settings = merged.get("user_settings")
+        if not isinstance(settings, dict):
+            merged["user_settings"] = {
+                "default_diners": 2,
+                "default_notification_time": "08:00",
+            }
+        else:
+            if not isinstance(settings.get("default_diners"), int):
+                settings["default_diners"] = 2
+            if not isinstance(settings.get("default_notification_time"), str):
+                settings["default_notification_time"] = "08:00"
+            elif len(settings["default_notification_time"].strip()) == 0:
+                settings["default_notification_time"] = "08:00"
         return merged
 
     def _save(self, data: dict[str, Any]) -> None:
@@ -88,6 +105,47 @@ class Stage2State:
             data["meal_plan_rules"] = {"no_repeat_days": no_repeat_days}
             self._save(data)
         return {"no_repeat_days": no_repeat_days}
+
+    def user_settings(self) -> dict[str, Any]:
+        with self._lock:
+            data = self._load()
+            raw = data.get("user_settings")
+            if not isinstance(raw, dict):
+                return {
+                    "default_diners": 2,
+                    "default_notification_time": "08:00",
+                }
+
+            default_diners = raw.get("default_diners")
+            if not isinstance(default_diners, int):
+                default_diners = 2
+
+            default_notification_time = raw.get("default_notification_time")
+            if not isinstance(default_notification_time, str):
+                default_notification_time = "08:00"
+            else:
+                default_notification_time = default_notification_time.strip()
+                if len(default_notification_time) == 0:
+                    default_notification_time = "08:00"
+
+            return {
+                "default_diners": default_diners,
+                "default_notification_time": default_notification_time,
+            }
+
+    def set_user_settings(self, default_diners: int, default_notification_time: str) -> dict[str, Any]:
+        with self._lock:
+            data = self._load()
+            data["user_settings"] = {
+                "default_diners": default_diners,
+                "default_notification_time": default_notification_time,
+            }
+            self._save(data)
+
+        return {
+            "default_diners": default_diners,
+            "default_notification_time": default_notification_time,
+        }
 
     def create_meal_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:

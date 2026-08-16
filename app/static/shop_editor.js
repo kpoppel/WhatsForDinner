@@ -35,6 +35,10 @@ function setStatus(message) {
   statusNode.textContent = message;
 }
 
+function publishDataChanged() {
+  window.dispatchEvent(new CustomEvent("wfd:data-changed", { detail: { source: "shop-editor" } }));
+}
+
 function activeView() {
   const value = localStorage.getItem(VIEW_KEY);
   return value === "recipe" ? "recipe" : SEGMENT_DEFAULT;
@@ -260,6 +264,7 @@ async function adjustAmount(entryId, nextAmount) {
     setStatus("Minimum for synced items is 0.1 to avoid upstream removal.");
   }
   renderEditor();
+  publishDataChanged();
 }
 
 function deriveReminderDate(item) {
@@ -303,6 +308,7 @@ async function toggleReminder(item) {
     });
     setStatus("Reminder enabled.");
     renderEditor();
+    publishDataChanged();
     return;
   }
 
@@ -312,6 +318,7 @@ async function toggleReminder(item) {
   });
   setStatus("Reminder cleared.");
   renderEditor();
+  publishDataChanged();
 }
 
 function openAddModal() {
@@ -367,8 +374,10 @@ async function saveAddModal() {
     await refresh();
     renderEditor();
     setStatus("Item added.");
+    publishDataChanged();
   } else {
     setStatus("Offline: item queued and will sync when online.");
+    publishDataChanged();
   }
 
   closeAddModal();
@@ -424,6 +433,7 @@ async function saveEditModal() {
   closeEditModal();
   renderEditor();
   setStatus("Item updated.");
+  publishDataChanged();
 }
 
 async function deleteFromEditModal() {
@@ -443,6 +453,7 @@ async function deleteFromEditModal() {
   closeEditModal();
   renderEditor();
   setStatus(isOnline() ? "Item deleted." : "Offline: delete queued.");
+  publishDataChanged();
 }
 
 async function queueAndSyncUpdate(entryId, patch) {
