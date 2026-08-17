@@ -13,7 +13,7 @@ from app.services.tandoor_client import TandoorClient, TandoorError
 
 router = APIRouter(tags=["mobile-api"])
 client = TandoorClient()
-stage2_state = Stage2State(settings.stage2_state_file)
+stage2_state = Stage2State(settings.stage2_data_dir)
 
 SHOPPING_STATUSES = {"remaining", "skipped", "completed"}
 TIME_24H_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")

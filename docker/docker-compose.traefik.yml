@@ -6,7 +6,7 @@ services:
     env_file:
       - ../.env
     volumes:
-      - ./state.json:/data/state.json
+      - ../data:/data
     labels:
       - traefik.enable=true
       - traefik.http.services.whatsfordinner.loadbalancer.server.port=8000

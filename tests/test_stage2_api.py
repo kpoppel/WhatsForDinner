@@ -15,10 +15,19 @@ def setup_module(module) -> None:
 
 
 def use_temp_state(monkeypatch, tmp_path):
-    state_file = tmp_path / "stage2_state.json"
-    state = Stage2State(str(state_file))
+    state = Stage2State(str(tmp_path))
     monkeypatch.setattr("app.api.stage2_state", state)
     return state
+
+
+def test_stage2_state_accepts_directory_path(tmp_path) -> None:
+    state_dir = tmp_path / "state-dir"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    state = Stage2State(str(state_dir))
+
+    assert state.state_file == state_dir / "state.json"
+    assert state.state_file.exists()
 
 
 def test_stage2_keyword_selection_roundtrip(monkeypatch, tmp_path) -> None:

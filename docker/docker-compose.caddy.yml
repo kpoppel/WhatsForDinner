@@ -5,6 +5,8 @@ services:
       dockerfile: docker/Dockerfile
     env_file:
       - ../.env
+    volumes:
+      - ../data:/data
     restart: unless-stopped
 
   caddy:

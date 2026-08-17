@@ -23,11 +23,12 @@ DEFAULT_STATE: dict[str, Any] = {
     "shopping_sync_events": [],
     "next_sync_event_id": 1,
 }
+DEFAULT_STATE_FILENAME = "state.json"
 
 
 class Stage2State:
-    def __init__(self, state_file: str) -> None:
-        self.state_file = Path(state_file)
+    def __init__(self, data_dir: str) -> None:
+        self.state_file = Path(data_dir) / DEFAULT_STATE_FILENAME
         self._lock = Lock()
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         if not self.state_file.exists():
