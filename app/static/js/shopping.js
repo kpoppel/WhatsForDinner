@@ -45,7 +45,7 @@ setInterval(async () => {
   }
 }, 5000);
 
-if (window.location.pathname === "/shopping") {
+if (["/app", "/app/"].includes(window.location.pathname)) {
   setupServiceWorker();
 }
 setupPullToRefresh({ isOnline, run, refreshAndSyncIfNeeded });

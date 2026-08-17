@@ -1,9 +1,13 @@
-const CACHE_NAME = "wfd-shopping-pwa-v4";
-const HOME_FALLBACK_PATH = "/";
+const CACHE_NAME = "wfd-shopping-pwa-v5";
+const APP_FALLBACK_PATH = "/app";
 const APP_SHELL = [
-  "/",
-  "/shopping",
+  "/app",
   "/static/js/shopping.js",
+  "/static/shop_editor.js",
+  "/static/meal_plans.js",
+  "/static/home_tab.js",
+  "/static/settings_tab.js",
+  "/static/user_shell.js",
   "/static/js/state.js",
   "/static/js/api.js",
   "/static/js/render.js",
@@ -13,6 +17,7 @@ const APP_SHELL = [
   "/static/js/sw-setup.js",
   "/static/js/utils.js",
   "/static/shopping_app.css",
+  "/static/user_app.css",
   "/static/home_app.css",
   "/shopping.webmanifest",
   "/static/pwa-icon-192.svg",
@@ -66,8 +71,7 @@ self.addEventListener("fetch", (event) => {
     // Cache-first for navigate: serve shell immediately offline, update cache in background.
     event.respondWith(
       (async () => {
-        const url = new URL(request.url);
-        const fallbackPath = url.pathname === "/shopping" ? "/shopping" : HOME_FALLBACK_PATH;
+        const fallbackPath = APP_FALLBACK_PATH;
         const cachedShell = await caches.match(fallbackPath);
         const networkFetch = fetch(request)
           .then(async (response) => {
@@ -89,12 +93,11 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  const isShoppingRoute = url.pathname === "/shopping" || url.pathname === "/shopping/";
-  const isHomeRoute = url.pathname === "/" || url.pathname === "";
+  const isAppRoute = url.pathname === "/app" || url.pathname === "/app/";
   const isStaticAsset = url.pathname.startsWith("/static/") || url.pathname === "/shopping.webmanifest";
 
-  if (isHomeRoute || isShoppingRoute) {
-    const cachePath = isHomeRoute ? "/" : "/shopping";
+  if (isAppRoute) {
+    const cachePath = "/app";
     event.respondWith(
       fetch(request)
         .then((response) => {
@@ -112,19 +115,23 @@ self.addEventListener("fetch", (event) => {
 
   if (isStaticAsset) {
     event.respondWith(
-      caches.match(request).then((cached) => {
+      (async () => {
+        const cache = await caches.open(CACHE_NAME);
+        const cacheKey = url.pathname;
+        const cached = await cache.match(cacheKey);
         if (cached) {
           return cached;
         }
-        return fetch(request).then((response) => {
-          if (!response || response.status !== 200) {
-            return response;
+        try {
+          const response = await fetch(request);
+          if (response && response.ok) {
+            await cache.put(cacheKey, response.clone());
           }
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
           return response;
-        });
-      })
+        } catch {
+          return cached || Response.error();
+        }
+      })()
     );
   }
 });

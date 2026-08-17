@@ -4,9 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#1d5c4f" />
+  <link rel="manifest" href="/shopping.webmanifest" />
   <title>WhatsForDinner</title>
-  <link rel="stylesheet" href="/static/shopping_app.css?v=20260817f" />
-  <link rel="stylesheet" href="/static/user_app.css?v=20260817f" />
+  <link rel="stylesheet" href="/static/shopping_app.css?v=20260817m" />
+  <link rel="stylesheet" href="/static/user_app.css?v=20260817m" />
 </head>
 <body>
   <main class="wf-shell">
@@ -193,7 +194,10 @@
         <input id="wf-edit-name" type="text" maxlength="120" required />
       </label>
       <label class="wf-field">Quantity
-        <input id="wf-edit-amount" type="number" min="0" step="0.5" value="0" />
+        <div class="wf-field-inline">
+          <input id="wf-edit-amount" type="number" min="0" step="0.5" value="0" />
+          <span id="wf-edit-unit-label" class="wf-inline-unit" aria-live="polite"></span>
+        </div>
       </label>
       <label class="wf-field">Category
         <select id="wf-edit-category"></select>
@@ -209,9 +213,19 @@
         <input id="wf-edit-reminder-text" type="text" maxlength="140" placeholder="Reminder (use 24h time, e.g. 08:00)" />
       </label>
       <div class="wf-modal-actions">
-        <button id="wf-edit-delete" class="wf-btn wf-btn-danger" type="button">Delete</button>
         <button id="wf-edit-cancel" class="wf-btn wf-btn-outline" type="button">Cancel</button>
         <button id="wf-edit-save" class="wf-btn wf-btn-blue" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="wf-editor-merge-pick-modal" class="wf-modal" hidden>
+    <div class="wf-modal-card wf-merge-pick-card" role="dialog" aria-modal="true" aria-labelledby="wf-editor-merge-pick-title">
+      <h2 id="wf-editor-merge-pick-title">Select Item to Edit</h2>
+      <p class="wf-merge-pick-help">This merged row contains multiple items. Choose one to edit.</p>
+      <div id="wf-merge-pick-list" class="wf-merge-pick-list" role="list"></div>
+      <div class="wf-modal-actions">
+        <button id="wf-merge-pick-cancel" class="wf-btn wf-btn-outline" type="button">Cancel</button>
       </div>
     </div>
   </div>
@@ -284,11 +298,11 @@
   </div>
 
   <script>window.WFD_API_PREFIX = {{ api_prefix_js }};</script>
-  <script type="module" src="/static/js/shopping.js?v=20260817f"></script>
-  <script type="module" src="/static/shop_editor.js?v=20260817f"></script>
-  <script type="module" src="/static/meal_plans.js?v=20260817f"></script>
-  <script type="module" src="/static/home_tab.js?v=20260817f"></script>
-  <script type="module" src="/static/settings_tab.js?v=20260817f"></script>
-  <script type="module" src="/static/user_shell.js?v=20260817f"></script>
+  <script type="module" src="/static/js/shopping.js?v=20260817m"></script>
+  <script type="module" src="/static/shop_editor.js?v=20260817m"></script>
+  <script type="module" src="/static/meal_plans.js?v=20260817m"></script>
+  <script type="module" src="/static/home_tab.js?v=20260817m"></script>
+  <script type="module" src="/static/settings_tab.js?v=20260817m"></script>
+  <script type="module" src="/static/user_shell.js?v=20260817m"></script>
 </body>
 </html>

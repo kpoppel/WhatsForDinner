@@ -1,8 +1,8 @@
 {
   "name": "WhatsForDinner",
   "short_name": "Dinner",
-  "description": "Offline-capable shopping mode for WhatsForDinner.",
-  "start_url": "/",
+  "description": "Offline-capable WhatsForDinner app for meal planning and shopping.",
+  "start_url": "/app",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f0f6f3",

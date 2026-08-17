@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import router as api_router
@@ -46,3 +47,20 @@ async def user_app() -> object:
 @app.get("/inspect", include_in_schema=False)
 async def inspect() -> object:
     return render_inspector(settings.api_v1_prefix)
+
+
+@app.get("/shopping-sw.js", include_in_schema=False)
+async def shopping_service_worker() -> FileResponse:
+    return FileResponse(
+        "app/static/shopping-sw.js",
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/"},
+    )
+
+
+@app.get("/shopping.webmanifest", include_in_schema=False)
+async def shopping_webmanifest() -> FileResponse:
+    return FileResponse(
+        "app/static/shopping.webmanifest",
+        media_type="application/manifest+json",
+    )
