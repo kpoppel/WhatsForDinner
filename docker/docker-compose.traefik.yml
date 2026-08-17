@@ -5,6 +5,8 @@ services:
       dockerfile: docker/Dockerfile
     env_file:
       - ../.env
+    volumes:
+      - ./state.json:/data/state.json
     labels:
       - traefik.enable=true
       - traefik.http.services.whatsfordinner.loadbalancer.server.port=8000

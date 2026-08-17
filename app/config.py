@@ -10,7 +10,10 @@ class Settings(BaseSettings):
     tandoor_auth_scheme: str = "Bearer"
     tandoor_timeout_seconds: float = 15.0
     tandoor_write_enabled: bool = True
-    stage2_state_file: str = "app/state/stage2_state.json"
+    stage2_state_file: str = Field(
+        default="data/state.json",
+        validation_alias="STATE_FILE",
+    )
     tandoor_token_valid_date: str | None = Field(
         default=None,
         validation_alias="TANDOOR_TOKEN_VALID_DATE",

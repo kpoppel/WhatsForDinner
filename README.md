@@ -169,8 +169,8 @@ Important: `env_file` in the compose service only populates container environmen
 
 Stage 2 stores local app state (selected keywords, meal-plan drafts, and shopping sync event cursors) in a JSON file:
 
-- default path: `app/state/stage2_state.json`
-- configurable with: `STAGE2_STATE_FILE`
+- default path: `./data/state.json`
+- configurable with: `STATE_FILE`
 
 This local state is app-managed metadata; recipe and shopping list data still come from Tandoor APIs.
 
