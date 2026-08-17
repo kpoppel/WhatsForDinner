@@ -89,6 +89,7 @@
   let draggedEntryId = null;
   let touchDraggedEntryId = null;
   let touchDropEntryId = null;
+  let touchDropPlacement = "before";
 
   function setStatus(message) {
     statusNode.textContent = message;
@@ -358,12 +359,14 @@
   }
 
   function clearDayDropTargets() {
-    detailNode.querySelectorAll(".wf-plan-day.is-drop-target").forEach((node) => {
+    detailNode.querySelectorAll(".wf-plan-day.is-drop-target, .wf-plan-day.is-drop-before, .wf-plan-day.is-drop-after").forEach((node) => {
       node.classList.remove("is-drop-target");
+      node.classList.remove("is-drop-before");
+      node.classList.remove("is-drop-after");
     });
   }
 
-  function setDropTarget(entryId) {
+  function setDropTarget(entryId, placement = "before") {
     clearDayDropTargets();
     if (!Number.isInteger(entryId)) {
       return;
@@ -372,6 +375,11 @@
     const target = detailNode.querySelector(`.wf-plan-day[data-entry-id="${entryId}"]`);
     if (target instanceof HTMLElement) {
       target.classList.add("is-drop-target");
+      if (placement === "after") {
+        target.classList.add("is-drop-after");
+      } else {
+        target.classList.add("is-drop-before");
+      }
     }
   }
 
@@ -396,7 +404,7 @@
     return null;
   }
 
-  async function reorderEntry(dragEntryId, dropEntryId) {
+  async function reorderEntry(dragEntryId, dropEntryId, dropPlacement = "before") {
     if (!Number.isInteger(selectedPlanId)) {
       return;
     }
@@ -435,9 +443,16 @@
       return;
     }
 
+    const moveAfter = dropPlacement === "after";
+    let targetDayIndex = moveAfter ? (toIndex + 1) : toIndex;
+    if (fromIndex < targetDayIndex) {
+      targetDayIndex -= 1;
+    }
+    targetDayIndex = Math.max(0, Math.min(targetDayIndex, ordered.length - 1));
+
     await api(`/meal-plans/${selectedPlanId}/entries/${dragEntryId}`, {
       method: "PATCH",
-      body: JSON.stringify({ target_day_index: toIndex }),
+      body: JSON.stringify({ target_day_index: targetDayIndex }),
     });
 
     await reloadSelectedPlan();
@@ -518,20 +533,24 @@
       dayCard.addEventListener("dragover", (event) => {
         event.preventDefault();
         if (draggedEntryId !== null && draggedEntryId !== entryId) {
-          setDropTarget(entryId);
+          const rect = dayCard.getBoundingClientRect();
+          const offsetY = event.clientY - rect.top;
+          const placement = offsetY > (rect.height / 2) ? "after" : "before";
+          setDropTarget(entryId, placement);
         }
       });
 
       dayCard.addEventListener("drop", (event) => {
         event.preventDefault();
         const sourceId = draggedEntryId;
+        const placement = dayCard.classList.contains("is-drop-after") ? "after" : "before";
         clearDayDropTargets();
         draggedEntryId = null;
         detailNode.querySelectorAll(".wf-plan-day.is-dragging").forEach((node) => {
           node.classList.remove("is-dragging");
         });
         if (Number.isInteger(sourceId)) {
-          void runAction(() => reorderEntry(sourceId, entryId));
+          void runAction(() => reorderEntry(sourceId, entryId, placement));
         }
       });
 
@@ -582,7 +601,10 @@
 
         if (targetId !== touchDraggedEntryId) {
           touchDropEntryId = targetId;
-          setDropTarget(targetId);
+          const rect = card.getBoundingClientRect();
+          const offsetY = touch.clientY - rect.top;
+          touchDropPlacement = offsetY > (rect.height / 2) ? "after" : "before";
+          setDropTarget(targetId, touchDropPlacement);
         }
 
         event.preventDefault();
@@ -595,14 +617,16 @@
 
         const sourceId = touchDraggedEntryId;
         const targetId = touchDropEntryId;
+        const placement = touchDropPlacement;
 
         touchDraggedEntryId = null;
         touchDropEntryId = null;
+        touchDropPlacement = "before";
         clearDayDropTargets();
         dayCard.classList.remove("is-dragging");
 
         if (Number.isInteger(targetId)) {
-          void runAction(() => reorderEntry(sourceId, targetId));
+          void runAction(() => reorderEntry(sourceId, targetId, placement));
         }
       });
 

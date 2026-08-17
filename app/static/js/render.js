@@ -26,6 +26,98 @@ const SECTION_CONFIG = {
 // Set by initRender() to break the render ↔ gestures circular dependency.
 let _createCard;
 
+function formatAmount(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return String(value ?? "").trim();
+  }
+  const rounded = Math.round((numeric + Number.EPSILON) * 1000) / 1000;
+  if (Number.isInteger(rounded)) {
+    return String(rounded);
+  }
+  return String(rounded)
+    .replace(/\.0+$/, "")
+    .replace(/(\.\d*?)0+$/, "$1");
+}
+
+function amountLine(amount, unit) {
+  const amountText = formatAmount(amount);
+  const unitText = String(unit || "").trim();
+  if (!amountText) {
+    return unitText;
+  }
+  return unitText ? `${amountText} ${unitText}` : amountText;
+}
+
+function aggregateByFood(items) {
+  const groups = new Map();
+
+  for (const item of items) {
+    const foodId = Number.isInteger(item.food_id) ? item.food_id : null;
+    const key = foodId !== null ? `food:${foodId}` : `entry:${item.id}`;
+    let bucket = groups.get(key);
+    if (!bucket) {
+      bucket = {
+        sample: item,
+        entryIds: [],
+        units: new Map(),
+        fallbackLines: [],
+      };
+      groups.set(key, bucket);
+    }
+
+    if (Number.isInteger(item.id)) {
+      bucket.entryIds.push(item.id);
+    }
+
+    const unitLabel = String(item.unit || "").trim();
+    const unitKey = unitLabel.toLowerCase();
+    const numericAmount = Number(item.amount);
+    if (Number.isFinite(numericAmount)) {
+      const current = bucket.units.get(unitKey) || { amount: 0, unit: unitLabel };
+      current.amount += numericAmount;
+      if (!current.unit && unitLabel) {
+        current.unit = unitLabel;
+      }
+      bucket.units.set(unitKey, current);
+    } else {
+      const line = amountLine(item.amount, unitLabel);
+      if (line) {
+        bucket.fallbackLines.push(line);
+      }
+    }
+  }
+
+  const merged = [];
+  for (const bucket of groups.values()) {
+    const sample = bucket.sample;
+    const unitLines = Array.from(bucket.units.values())
+      .sort((a, b) => String(a.unit || "").localeCompare(String(b.unit || "")))
+      .map((row) => amountLine(row.amount, row.unit));
+
+    const amountLines = unitLines.length > 0
+      ? unitLines
+      : (bucket.fallbackLines.length > 0
+        ? bucket.fallbackLines
+        : [amountLine(sample.amount, sample.unit)].filter(Boolean));
+
+    const [firstLine = ""] = amountLines;
+    const entryIds = bucket.entryIds.length > 0
+      ? bucket.entryIds
+      : (Number.isInteger(sample.id) ? [sample.id] : []);
+
+    merged.push({
+      ...sample,
+      amount_lines: amountLines,
+      amount: firstLine,
+      entry_ids: entryIds,
+      food_id: Number.isInteger(sample.food_id) ? sample.food_id : null,
+    });
+  }
+
+  return merged.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+}
+
 export function initRender(createCardFn) {
   _createCard = createCardFn;
 }
@@ -139,18 +231,19 @@ export function wireCollapsibleSection(key) {
 export function renderSection(containerId, items, mode, groupByCategory = false) {
   const container = document.getElementById(containerId);
   container.innerHTML = "";
-  if (items.length === 0) {
+  const mergedItems = aggregateByFood(items);
+  if (mergedItems.length === 0) {
     container.innerHTML = '<div class="empty">No items.</div>';
-    return;
+    return 0;
   }
   if (!groupByCategory) {
-    for (const item of items) {
+    for (const item of mergedItems) {
       container.appendChild(_createCard(item, mode));
     }
-    return;
+    return mergedItems.length;
   }
   const grouped = {};
-  for (const item of items) {
+  for (const item of mergedItems) {
     const groupName = item.store_group.name;
     if (!grouped[groupName]) {
       grouped[groupName] = [];
@@ -170,6 +263,7 @@ export function renderSection(containerId, items, mode, groupByCategory = false)
       .forEach((item) => group.appendChild(_createCard(item, mode)));
     container.appendChild(group);
   }
+  return mergedItems.length;
 }
 
 export function render() {
@@ -181,13 +275,13 @@ export function render() {
   const skipped = sortedByStatus("skipped");
   const completed = sortedByStatus("completed");
 
-  renderSection("shop-mode-remaining", remaining, "remaining", true);
-  renderSection("shop-mode-skipped", skipped, "skipped");
-  renderSection("shop-mode-completed", completed, "completed");
+  const remainingCount = renderSection("shop-mode-remaining", remaining, "remaining", true);
+  const skippedCount = renderSection("shop-mode-skipped", skipped, "skipped");
+  const completedCount = renderSection("shop-mode-completed", completed, "completed");
 
-  updateSectionTitle("remaining", remaining.length);
-  updateSectionTitle("skipped", skipped.length);
-  updateSectionTitle("completed", completed.length);
+  updateSectionTitle("remaining", remainingCount);
+  updateSectionTitle("skipped", skippedCount);
+  updateSectionTitle("completed", completedCount);
 
   updateStatusBadges();
 }

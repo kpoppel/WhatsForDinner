@@ -600,6 +600,7 @@ body {
   border-radius: 11px;
   background: #fff;
   padding: 0.6rem;
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.55rem;
@@ -623,6 +624,26 @@ body {
 .wf-plan-day.is-drop-target {
   border-color: #42a5f5;
   box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.22);
+}
+
+.wf-plan-day.is-drop-before::before,
+.wf-plan-day.is-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  height: 3px;
+  border-radius: 999px;
+  background: #1976d2;
+  box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.18);
+}
+
+.wf-plan-day.is-drop-before::before {
+  top: -2px;
+}
+
+.wf-plan-day.is-drop-after::after {
+  bottom: -2px;
 }
 
 .wf-plan-drag-handle {
@@ -857,15 +878,156 @@ body {
   border: 1px solid var(--wf-line);
   border-radius: 12px;
   padding: 0.65rem;
+  position: relative;
+  overflow: hidden;
   display: flex;
   gap: 0.6rem;
   align-items: center;
   justify-content: space-between;
   cursor: pointer;
+  touch-action: pan-y;
+  transition: transform 120ms ease, border-color 120ms ease;
+  --wf-editor-delete-progress: 0;
 }
 
 .wf-editor-item:hover {
   border-color: #c7d4cc;
+}
+
+.wf-editor-item.is-grouped {
+  cursor: default;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+}
+
+.wf-editor-item.is-grouped:hover {
+  border-color: var(--wf-line);
+}
+
+.wf-editor-item.is-grouped .wf-editor-main {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 0.14rem;
+  min-width: 0;
+}
+
+.wf-editor-item.is-grouped .wf-editor-meta {
+  margin: 0;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wf-editor-item.is-grouped .wf-editor-actions {
+  align-items: flex-start;
+  justify-content: flex-end;
+  margin-left: 0.35rem;
+}
+
+.wf-editor-item.swiping-delete-right {
+  border-color: #e87474;
+}
+
+.wf-editor-swipe-delete-right-hint {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 0.7rem;
+  gap: 0.45rem;
+  background: linear-gradient(90deg, #ffc0c0 0%, #ffd6d6 50%, rgba(255, 232, 232, 0.92) 100%);
+  opacity: var(--wf-editor-delete-progress);
+  transition: opacity 80ms linear;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.wf-editor-swipe-delete-right-icon {
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: #2d1212;
+  background: #f8a9a9;
+  box-shadow: inset 0 0 0 1px rgba(45, 18, 18, 0.2);
+}
+
+.wf-editor-swipe-delete-right-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #542020;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.wf-editor-main,
+.wf-editor-actions {
+  position: relative;
+  z-index: 3;
+}
+
+.wf-editor-item.wf-editor-item-compact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+}
+
+.wf-editor-item.wf-editor-item-compact .wf-editor-main {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 0.14rem;
+  min-width: 0;
+}
+
+.wf-editor-item.wf-editor-item-compact .wf-editor-name {
+  margin: 0;
+}
+
+.wf-editor-item.wf-editor-item-compact .wf-editor-meta {
+  margin: 0;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wf-editor-item.wf-editor-item-compact .wf-editor-meta-store {
+  color: color-mix(in oklab, var(--wf-muted) 88%, #000 12%);
+}
+
+.wf-editor-item.is-grouped .wf-editor-meta-store {
+  color: color-mix(in oklab, var(--wf-muted) 88%, #000 12%);
+}
+
+.wf-editor-item.wf-editor-item-compact .wf-editor-actions {
+  display: grid;
+  grid-template-rows: auto auto;
+  justify-items: end;
+  align-content: space-between;
+  gap: 0.35rem;
+  margin-left: 0.35rem;
+}
+
+.wf-editor-item.wf-editor-item-compact .wf-stepper {
+  gap: 0.28rem;
+}
+
+.wf-editor-item.wf-editor-item-compact .wf-stepper-value {
+  min-width: 2.8rem;
+  text-align: right;
 }
 
 .wf-editor-main {
@@ -949,6 +1111,17 @@ body {
   color: var(--wf-ink);
 }
 
+.wf-stepper-value-stacked {
+  min-width: 4.4rem;
+  text-align: right;
+}
+
+.wf-editor-amount-line {
+  display: block;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
 .wf-editor-empty {
   margin: 0;
   border: 1px dashed var(--wf-line);
@@ -1012,6 +1185,57 @@ body {
   font-size: 1.05rem;
 }
 
+.wf-merge-pick-card {
+  width: min(100%, 440px);
+}
+
+.wf-merge-pick-help {
+  margin: 0;
+  color: var(--wf-muted);
+  font-size: 0.82rem;
+}
+
+.wf-merge-pick-list {
+  display: grid;
+  gap: 0.45rem;
+  max-height: min(52vh, 360px);
+  overflow-y: auto;
+  padding-right: 0.15rem;
+}
+
+.wf-merge-pick-item {
+  border: 1px solid var(--wf-line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--wf-ink);
+  text-align: left;
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.6rem 0.65rem;
+  cursor: pointer;
+}
+
+.wf-merge-pick-item:hover {
+  border-color: #c7d4cc;
+  background: #f9fcfa;
+}
+
+.wf-merge-pick-main {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.wf-merge-pick-meta {
+  color: var(--wf-muted);
+  font-size: 0.78rem;
+}
+
+.wf-merge-pick-amount {
+  color: var(--wf-ink);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 .wf-field {
   display: grid;
   gap: 0.3rem;
@@ -1029,6 +1253,24 @@ body {
   font: inherit;
   color: var(--wf-ink);
   background: #fff;
+}
+
+.wf-field-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.wf-field-inline input {
+  min-width: 0;
+}
+
+.wf-inline-unit {
+  min-width: 2.6rem;
+  color: var(--wf-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .wf-checkbox-field {
@@ -1085,8 +1327,29 @@ body {
   }
 
   .wf-editor-toolbar {
-    flex-direction: column;
-    align-items: stretch;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+  }
+
+  .wf-segment {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .wf-segment-btn {
+    flex: 1 1 0;
+    padding: 0.42rem 0.5rem;
+    font-size: 0.76rem;
+    white-space: nowrap;
+  }
+
+  #wf-editor-add-btn {
+    flex: 0 0 auto;
+    padding: 0.42rem 0.62rem;
+    font-size: 0.78rem;
+    white-space: nowrap;
   }
 
   .wf-plan-toolbar {
@@ -1105,6 +1368,17 @@ body {
   .wf-editor-item {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .wf-editor-item.wf-editor-item-compact {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .wf-editor-item.wf-editor-item-compact .wf-editor-actions {
+    justify-content: initial;
   }
 
   .wf-editor-actions {

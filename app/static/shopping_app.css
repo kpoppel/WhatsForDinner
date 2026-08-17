@@ -355,7 +355,15 @@
       font-size: 0.95rem;
       font-weight: 600;
       text-align: right;
+      white-space: normal;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.12rem;
+    }
+    .shop-item-amount-line {
       white-space: nowrap;
+      line-height: 1.2;
     }
     .muted { color: var(--muted); font-size: 0.88rem; }
     .empty { color: var(--muted); font-size: 0.9rem; }

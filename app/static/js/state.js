@@ -61,6 +61,7 @@ export function applyPendingChanges() {
       }
       state.itemsById[String(tempId)] = {
         id: tempId,
+        food_id: Number.isInteger(payload.food_id) ? payload.food_id : null,
         name: String(payload.name || "Unnamed"),
         amount: payload.amount ?? 0,
         unit: String(payload.unit || ""),
@@ -69,6 +70,9 @@ export function applyPendingChanges() {
         store_group: payload.store_group && typeof payload.store_group === "object"
           ? payload.store_group
           : { id: null, name: "General" },
+        recipe: payload.recipe && typeof payload.recipe === "object"
+          ? payload.recipe
+          : { id: null, name: String(payload.recipe_context || "Unassigned"), image: "" },
         recipe_context: String(payload.recipe_context || "Unassigned"),
         reminder_enabled: Boolean(payload.reminder_enabled),
         reminder_date: payload.reminder_date || null,

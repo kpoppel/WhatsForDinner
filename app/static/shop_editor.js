@@ -15,8 +15,12 @@ const segmentButtons = Array.from(document.querySelectorAll("[data-editor-view]"
 
 const addModal = document.getElementById("wf-editor-add-modal");
 const editModal = document.getElementById("wf-editor-edit-modal");
+const editUnitLabel = document.getElementById("wf-edit-unit-label");
+const mergePickModal = document.getElementById("wf-editor-merge-pick-modal");
+const mergePickList = document.getElementById("wf-merge-pick-list");
+const mergePickTitle = document.getElementById("wf-editor-merge-pick-title");
 
-if (!listNode || !statusNode || !dueBannerNode || !addButton || !addModal || !editModal) {
+if (!listNode || !statusNode || !dueBannerNode || !addButton || !addModal || !editModal || !editUnitLabel || !mergePickModal || !mergePickList || !mergePickTitle) {
   // Shop Editor UI is not mounted on this page.
 } else {
   initShopEditor();
@@ -122,6 +126,13 @@ function bindModalControls() {
     run(saveAddModal);
   });
 
+  document.getElementById("wf-merge-pick-cancel")?.addEventListener("click", closeMergePickModal);
+  mergePickModal.addEventListener("click", (event) => {
+    if (event.target === mergePickModal) {
+      closeMergePickModal();
+    }
+  });
+
   document.getElementById("wf-edit-cancel")?.addEventListener("click", closeEditModal);
   document.getElementById("wf-edit-save")?.addEventListener("click", () => {
     run(saveEditModal);
@@ -137,28 +148,174 @@ function allItems() {
     .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
 }
 
-function groupKey(item, view) {
-  if (view === "recipe") {
-    return String(item.recipe_context || "Unassigned");
+function formatMergedAmount(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return String(value ?? "").trim();
   }
-  const group = item.store_group;
+  const rounded = Math.round((numeric + Number.EPSILON) * 1000) / 1000;
+  if (Number.isInteger(rounded)) {
+    return String(rounded);
+  }
+  return String(rounded)
+    .replace(/\.0+$/, "")
+    .replace(/(\.\d*?)0+$/, "$1");
+}
+
+function amountLine(amount, unit) {
+  const amountText = formatMergedAmount(amount);
+  const unitText = String(unit || "").trim();
+  if (!amountText) {
+    return unitText;
+  }
+  return unitText ? `${amountText} ${unitText}` : amountText;
+}
+
+function recipeInfo(item) {
+  const raw = item && typeof item.recipe === "object" ? item.recipe : null;
+  const recipeId = Number.isInteger(raw?.id) ? raw.id : null;
+  const recipeName = String(raw?.name || item?.recipe_context || "Unassigned").trim() || "Unassigned";
+  const recipeImage = String(raw?.image || "");
+  return {
+    id: recipeId,
+    name: recipeName,
+    image: recipeImage,
+  };
+}
+
+function recipeGroup(item) {
+  const recipe = recipeInfo(item);
+  if (recipe.id !== null) {
+    return {
+      key: `recipe:${recipe.id}`,
+      label: recipe.name,
+      sortLabel: recipe.name,
+    };
+  }
+  const normalized = recipe.name.toLowerCase();
+  return {
+    key: `recipe-name:${normalized}`,
+    label: recipe.name,
+    sortLabel: recipe.name,
+  };
+}
+
+function storeGroupName(item) {
+  const group = item?.store_group;
   if (group && typeof group === "object") {
-    return String(group.name || "General");
+    const text = String(group.name || "").trim();
+    if (text) {
+      return text;
+    }
   }
   return "General";
 }
 
+function aggregateStoreItems(items) {
+  const buckets = new Map();
+
+  for (const item of items) {
+    const foodId = Number.isInteger(item.food_id) ? item.food_id : null;
+    const status = String(item.status || "remaining");
+    const key = foodId !== null ? `food:${foodId}|status:${status}` : `entry:${item.id}|status:${status}`;
+
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = {
+        sample: item,
+        entryIds: [],
+        units: new Map(),
+        recipeSet: new Set(),
+      };
+      buckets.set(key, bucket);
+    }
+
+    if (Number.isInteger(item.id)) {
+      bucket.entryIds.push(item.id);
+    }
+    bucket.recipeSet.add(recipeInfo(item).name);
+
+    const unitLabel = String(item.unit || "").trim();
+    const unitKey = unitLabel.toLowerCase();
+    const numericAmount = Number(item.amount);
+    if (Number.isFinite(numericAmount)) {
+      const current = bucket.units.get(unitKey) || { amount: 0, unit: unitLabel };
+      current.amount += numericAmount;
+      if (!current.unit && unitLabel) {
+        current.unit = unitLabel;
+      }
+      bucket.units.set(unitKey, current);
+    }
+  }
+
+  const merged = [];
+  for (const bucket of buckets.values()) {
+    const sample = bucket.sample;
+    const amountLines = Array.from(bucket.units.values())
+      .sort((a, b) => String(a.unit || "").localeCompare(String(b.unit || "")))
+      .map((row) => amountLine(row.amount, row.unit));
+
+    const recipeContexts = Array.from(bucket.recipeSet);
+    const mixedRecipes = recipeContexts.length > 1;
+
+    merged.push({
+      ...sample,
+      recipe_context: mixedRecipes ? "Multiple recipes" : (recipeContexts[0] || String(sample.recipe_context || "Unassigned")),
+      amount_lines: amountLines,
+      entry_ids: bucket.entryIds.length > 0
+        ? bucket.entryIds
+        : (Number.isInteger(sample.id) ? [sample.id] : []),
+      grouped_count: bucket.entryIds.length,
+    });
+  }
+
+  return merged.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+}
+
+function groupKey(item, view) {
+  if (view === "recipe") {
+    return recipeGroup(item);
+  }
+  const group = item.store_group;
+  if (group && typeof group === "object") {
+    const label = String(group.name || "General");
+    return {
+      key: `store:${label.toLowerCase()}`,
+      label,
+      sortLabel: label,
+    };
+  }
+  return {
+    key: "store:general",
+    label: "General",
+    sortLabel: "General",
+  };
+}
+
 function groupedItems() {
   const view = activeView();
-  const groups = {};
+  const groups = new Map();
   for (const item of allItems()) {
-    const key = groupKey(item, view);
-    if (!groups[key]) {
-      groups[key] = [];
+    const group = groupKey(item, view);
+    if (!groups.has(group.key)) {
+      groups.set(group.key, {
+        label: group.label,
+        sortLabel: group.sortLabel,
+        items: [],
+      });
     }
-    groups[key].push(item);
+    groups.get(group.key).items.push(item);
   }
-  return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]));
+
+  return Array.from(groups.values())
+    .map(({ label, sortLabel, items }) => {
+      if (view === "store") {
+        return [label, aggregateStoreItems(items), sortLabel];
+      }
+      return [label, items, sortLabel];
+    })
+    .sort((a, b) => String(a[2] || "").localeCompare(String(b[2] || "")))
+    .map(([label, items]) => [label, items]);
 }
 
 function updateDueBanner() {
@@ -201,31 +358,234 @@ function renderEditor() {
   }
 }
 
+function suppressNextRowClick(row) {
+  row.dataset.suppressNextClick = "1";
+}
+
+function consumeSuppressedRowClick(row) {
+  if (row.dataset.suppressNextClick === "1") {
+    row.dataset.suppressNextClick = "0";
+    return true;
+  }
+  return false;
+}
+
+async function deleteEditorEntries(entryIds) {
+  const ids = Array.from(new Set(entryIds.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value !== 0)));
+  if (ids.length === 0) {
+    return;
+  }
+
+  for (const entryId of ids) {
+    queueDeleteChange(entryId);
+  }
+  renderEditor();
+
+  if (isOnline()) {
+    await syncPending(false);
+    await refresh();
+  }
+
+  renderEditor();
+  setStatus(isOnline()
+    ? (ids.length === 1 ? "Item deleted." : `${ids.length} items deleted.`)
+    : "Offline: delete queued.");
+  publishDataChanged();
+}
+
+function attachSwipeRightDeleteGesture(row, entryIds) {
+  let startX = 0;
+  let startY = 0;
+  let deltaX = 0;
+  let isDragging = false;
+
+  row.addEventListener("touchstart", (event) => {
+    const touch = event.changedTouches?.[0];
+    if (!touch) {
+      return;
+    }
+    startX = touch.clientX;
+    startY = touch.clientY;
+    deltaX = 0;
+    isDragging = false;
+    row.classList.remove("swiping-delete-right");
+    row.style.setProperty("--wf-editor-delete-progress", "0");
+  });
+
+  row.addEventListener("touchmove", (event) => {
+    const touch = event.changedTouches?.[0];
+    if (!touch) {
+      return;
+    }
+    deltaX = touch.clientX - startX;
+    const deltaY = touch.clientY - startY;
+    if (Math.abs(deltaX) <= Math.abs(deltaY) || deltaX <= 0) {
+      return;
+    }
+    isDragging = true;
+    const clamped = Math.max(Math.min(deltaX, 130), 0);
+    row.style.transform = `translateX(${clamped}px)`;
+    row.classList.toggle("swiping-delete-right", clamped > 18);
+    const progress = Math.min(Math.abs(clamped) / 130, 1);
+    row.style.setProperty("--wf-editor-delete-progress", String(progress));
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+  }, { passive: false });
+
+  row.addEventListener("touchend", () => {
+    const shouldDelete = isDragging && deltaX > 78;
+    row.style.transform = "";
+    row.classList.remove("swiping-delete-right");
+    row.style.setProperty("--wf-editor-delete-progress", "0");
+    if (shouldDelete) {
+      suppressNextRowClick(row);
+      run(() => deleteEditorEntries(entryIds));
+    }
+    isDragging = false;
+    deltaX = 0;
+  });
+}
+
+function itemAmountLabel(item) {
+  const amount = Number(item?.amount ?? 0);
+  const safeAmount = Number.isFinite(amount) ? amount : 0;
+  const unit = String(item?.unit || "").trim();
+  return `${formatAmount(safeAmount)}${unit ? ` ${unit}` : ""}`.trim();
+}
+
+function openMergedItemPicker(groupedItem, entryIds) {
+  const items = Array.from(new Set(entryIds))
+    .map((entryId) => state.itemsById[String(entryId)])
+    .filter((item) => item && item.id !== undefined && item.id !== null)
+    .sort((a, b) => {
+      const recipeA = recipeInfo(a).name;
+      const recipeB = recipeInfo(b).name;
+      const recipeCmp = recipeA.localeCompare(recipeB);
+      if (recipeCmp !== 0) {
+        return recipeCmp;
+      }
+      return itemAmountLabel(a).localeCompare(itemAmountLabel(b));
+    });
+
+  if (items.length === 0) {
+    setStatus("No editable entries found for this merged item.");
+    return;
+  }
+  if (items.length === 1) {
+    openEditModal(items[0]);
+    return;
+  }
+
+  mergePickTitle.textContent = `Select Item to Edit (${String(groupedItem.name || "Item")})`;
+  mergePickList.innerHTML = "";
+
+  for (const item of items) {
+    const recipe = recipeInfo(item);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "wf-merge-pick-item";
+    button.setAttribute("role", "listitem");
+    button.innerHTML = `
+      <span class="wf-merge-pick-main">${escapeHtml(item.name || "Unnamed")}</span>
+      <span class="wf-merge-pick-meta">${escapeHtml(recipe.name)} • ${escapeHtml(storeGroupName(item))}</span>
+      <span class="wf-merge-pick-amount">${escapeHtml(itemAmountLabel(item))}</span>
+    `;
+    button.addEventListener("click", () => {
+      closeMergePickModal();
+      openEditModal(item);
+    });
+    mergePickList.appendChild(button);
+  }
+
+  mergePickModal.hidden = false;
+}
+
+function closeMergePickModal() {
+  mergePickModal.hidden = true;
+  mergePickList.innerHTML = "";
+}
+
 function createEditorRow(item) {
   const row = document.createElement("article");
   row.className = "wf-editor-item";
 
+  const entryIds = Array.isArray(item.entry_ids) && item.entry_ids.length > 0
+    ? item.entry_ids
+    : [item.id];
+  const isGrouped = entryIds.length > 1;
+
   const amount = Number(item.amount ?? 0);
   const safeAmount = Number.isFinite(amount) ? amount : 0;
   const unit = String(item.unit || "").trim();
-  const status = String(item.status || "remaining");
   const reminderOn = Boolean(item.reminder_enabled);
+  const recipe = recipeInfo(item);
+
+  const amountLines = Array.isArray(item.amount_lines) && item.amount_lines.length > 0
+    ? item.amount_lines
+    : [`${formatAmount(safeAmount)}${unit ? ` ${unit}` : ""}`.trim()];
+  const amountMarkup = amountLines
+    .map((line) => `<span class="wf-editor-amount-line">${escapeHtml(line)}</span>`)
+    .join("");
+
+  if (isGrouped) {
+    const groupedRecipeNames = Array.from(new Set(
+      entryIds
+        .map((entryId) => recipeInfo(state.itemsById[String(entryId)]).name)
+        .filter((name) => String(name || "").trim().length > 0)
+    )).sort((a, b) => a.localeCompare(b));
+    const firstRecipeName = groupedRecipeNames[0] || recipe.name;
+    const extraRecipeCount = Math.max(0, groupedRecipeNames.length - 1);
+    const recipeSummary = extraRecipeCount > 0
+      ? `${firstRecipeName}, +${extraRecipeCount}`
+      : firstRecipeName;
+
+    row.classList.add("is-grouped");
+    row.innerHTML = `
+      <div class="wf-editor-swipe-delete-right-hint" aria-hidden="true">
+        <span class="wf-editor-swipe-delete-right-icon">x</span>
+        <span class="wf-editor-swipe-delete-right-label">Delete</span>
+      </div>
+      <div class="wf-editor-main">
+        <p class="wf-editor-name">${escapeHtml(item.name || "Unnamed")}</p>
+        <p class="wf-editor-meta">${escapeHtml(recipeSummary)}</p>
+        <p class="wf-editor-meta wf-editor-meta-store">${escapeHtml(storeGroupName(item))}</p>
+      </div>
+      <div class="wf-editor-actions">
+        <div class="wf-stepper-value wf-stepper-value-stacked">${amountMarkup}</div>
+      </div>
+    `;
+
+    row.addEventListener("click", () => {
+      if (consumeSuppressedRowClick(row)) {
+        return;
+      }
+      openMergedItemPicker(item, entryIds);
+    });
+    attachSwipeRightDeleteGesture(row, entryIds);
+    return row;
+  }
 
   row.innerHTML = `
+    <div class="wf-editor-swipe-delete-right-hint" aria-hidden="true">
+      <span class="wf-editor-swipe-delete-right-icon">x</span>
+      <span class="wf-editor-swipe-delete-right-label">Delete</span>
+    </div>
     <div class="wf-editor-main">
       <p class="wf-editor-name">${escapeHtml(item.name || "Unnamed")}</p>
-      <p class="wf-editor-meta">${escapeHtml(item.recipe_context || "Unassigned")} • ${escapeHtml(item.ingredient_type || "Other")}</p>
-      <p class="wf-editor-meta wf-editor-meta-light">${escapeHtml(status)}</p>
+      <p class="wf-editor-meta">${escapeHtml(recipe.name)}</p>
+      <p class="wf-editor-meta wf-editor-meta-store">${escapeHtml(storeGroupName(item))}</p>
     </div>
     <div class="wf-editor-actions">
       <button class="wf-bell-btn ${reminderOn ? "is-on" : ""}" type="button" data-action="toggle-reminder">🔔</button>
       <div class="wf-stepper" role="group" aria-label="Quantity controls">
         <button class="wf-stepper-btn" type="button" data-action="decrement">-</button>
-        <span class="wf-stepper-value">${formatAmount(safeAmount)}${unit ? ` ${escapeHtml(unit)}` : ""}</span>
+        <span class="wf-stepper-value">${amountMarkup}</span>
         <button class="wf-stepper-btn" type="button" data-action="increment">+</button>
       </div>
     </div>
   `;
+  row.classList.add("wf-editor-item-compact");
 
   row.querySelector('[data-action="increment"]')?.addEventListener("click", () => {
     run(() => adjustAmount(item.id, safeAmount + STEP));
@@ -240,6 +600,11 @@ function createEditorRow(item) {
   });
 
   row.addEventListener("click", (event) => {
+    if (consumeSuppressedRowClick(row)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     const target = event.target;
     if (!(target instanceof Element)) {
       return;
@@ -249,6 +614,8 @@ function createEditorRow(item) {
     }
     openEditModal(item);
   });
+
+  attachSwipeRightDeleteGesture(row, entryIds);
 
   return row;
 }
@@ -388,6 +755,9 @@ function openEditModal(item) {
   setInputValue("wf-edit-entry-id", String(item.id));
   setInputValue("wf-edit-name", String(item.name || ""));
   setInputValue("wf-edit-amount", String(item.amount ?? 0));
+  const unitText = String(item.unit || "").trim();
+  editUnitLabel.textContent = unitText;
+  editUnitLabel.hidden = !unitText;
   populateCategorySelect("wf-edit-category", String(item.store_group?.name || "Other"));
   setChecked("wf-edit-reminder-enabled", Boolean(item.reminder_enabled));
   setInputValue("wf-edit-reminder-date", item.reminder_date || "");

@@ -182,6 +182,48 @@ def _recipe_context_from_entry(entry: dict[str, Any]) -> str:
     return "Unassigned"
 
 
+def _normalize_recipe_payload(raw_recipe: Any, fallback_name: str) -> dict[str, Any]:
+    recipe_id: int | None = None
+    recipe_name = fallback_name
+    recipe_image = ""
+
+    if isinstance(raw_recipe, dict):
+        raw_id = raw_recipe.get("id")
+        if isinstance(raw_id, int):
+            recipe_id = raw_id
+
+        raw_name = raw_recipe.get("name") or raw_recipe.get("title")
+        if isinstance(raw_name, str) and raw_name.strip():
+            recipe_name = raw_name.strip()
+
+        raw_image = raw_recipe.get("image")
+        if isinstance(raw_image, str):
+            recipe_image = raw_image
+        elif raw_image is not None:
+            recipe_image = str(raw_image)
+
+    return {
+        "id": recipe_id,
+        "name": recipe_name,
+        "image": recipe_image,
+    }
+
+
+def _recipe_from_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    fallback_name = _recipe_context_from_entry(entry)
+    list_recipe_data = entry.get("list_recipe_data") if isinstance(entry.get("list_recipe_data"), dict) else {}
+    recipe_data = list_recipe_data.get("recipe_data") if isinstance(list_recipe_data.get("recipe_data"), dict) else None
+    if isinstance(recipe_data, dict):
+        return _normalize_recipe_payload(recipe_data, fallback_name)
+
+    for key in ("recipe", "meal"):
+        candidate = entry.get(key)
+        if isinstance(candidate, dict):
+            return _normalize_recipe_payload(candidate, fallback_name)
+
+    return _normalize_recipe_payload(None, fallback_name)
+
+
 def _normalize_shopping_entry(
     entry: dict[str, Any],
     status: str,
@@ -199,15 +241,20 @@ def _normalize_shopping_entry(
     reminder_enabled = bool(reminder_meta.get("reminder_enabled", False))
     reminder_date = _iso_date_or_none(reminder_meta.get("reminder_date"))
     reminder_text = str(reminder_meta.get("reminder_text") or "")
+    raw_food_id = food.get("id")
+    food_id = raw_food_id if isinstance(raw_food_id, int) else None
+    recipe = _recipe_from_entry(entry)
 
     return {
         "id": entry.get("id"),
+        "food_id": food_id,
         "name": food.get("name") or entry.get("name") or "Unnamed",
         "amount": entry.get("amount"),
         "unit": unit.get("name") or entry.get("unit") or "",
         "status": status,
         "ingredient_type": ingredient_type,
         "store_group": store_group,
+        "recipe": recipe,
         "recipe_context": _recipe_context_from_entry(entry),
         "reminder_enabled": reminder_enabled,
         "reminder_date": reminder_date,
@@ -304,14 +351,20 @@ def _build_local_entry_payload(entry_id: int, payload: dict[str, Any]) -> dict[s
     else:
         raise HTTPException(status_code=400, detail="recipe_context must be a non-empty string.")
 
+    raw_food_id = payload.get("food_id")
+    food_id = raw_food_id if isinstance(raw_food_id, int) else None
+    recipe = _normalize_recipe_payload(payload.get("recipe"), recipe_context)
+
     return {
         "id": entry_id,
         "source": "local",
+        "food_id": food_id,
         "name": raw_name.strip(),
         "amount": amount,
         "unit": unit,
         "ingredient_type": ingredient_type,
         "store_group": _local_store_group_payload(payload.get("store_group")),
+        "recipe": recipe,
         "recipe_context": recipe_context,
     }
 
@@ -324,15 +377,21 @@ def _normalize_local_shopping_entry(
     reminder_enabled = bool(reminder_meta.get("reminder_enabled", False))
     reminder_date = _iso_date_or_none(reminder_meta.get("reminder_date"))
     reminder_text = str(reminder_meta.get("reminder_text") or "")
+    raw_food_id = entry.get("food_id")
+    food_id = raw_food_id if isinstance(raw_food_id, int) else None
+    recipe_context = str(entry.get("recipe_context") or "Unassigned")
+    recipe = _normalize_recipe_payload(entry.get("recipe"), recipe_context)
     return {
         "id": entry.get("id"),
+        "food_id": food_id,
         "name": str(entry.get("name") or "Unnamed"),
         "amount": entry.get("amount"),
         "unit": str(entry.get("unit") or ""),
         "status": status,
         "ingredient_type": str(entry.get("ingredient_type") or "Other"),
         "store_group": _normalize_store_group(entry.get("store_group")),
-        "recipe_context": str(entry.get("recipe_context") or "Unassigned"),
+        "recipe": recipe,
+        "recipe_context": recipe_context,
         "reminder_enabled": reminder_enabled,
         "reminder_date": reminder_date,
         "reminder_text": reminder_text,

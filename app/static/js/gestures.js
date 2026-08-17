@@ -10,7 +10,29 @@ export function initGestures({ run, setStatus, deleteEntry }) {
   _deleteEntry = deleteEntry;
 }
 
-export function attachSwipeRightDeleteGesture(card, entryId) {
+function normalizeEntryIds(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entryId) => Number(entryId))
+      .filter((entryId) => Number.isInteger(entryId) && entryId !== 0);
+  }
+  const single = Number(value);
+  return Number.isInteger(single) && single !== 0 ? [single] : [];
+}
+
+async function setStatusForEntries(entryIds, status) {
+  for (const entryId of normalizeEntryIds(entryIds)) {
+    await _setStatus(entryId, status);
+  }
+}
+
+async function deleteEntries(entryIds) {
+  for (const entryId of normalizeEntryIds(entryIds)) {
+    await _deleteEntry(entryId);
+  }
+}
+
+export function attachSwipeRightDeleteGesture(card, entryIds) {
   let startX = 0;
   let startY = 0;
   let deltaX = 0;
@@ -57,7 +79,7 @@ export function attachSwipeRightDeleteGesture(card, entryId) {
     card.style.setProperty("--swipe-delete-right-progress", "0");
     if (shouldDelete) {
       suppressNextCardClick(card);
-      _run(() => _deleteEntry(entryId));
+      _run(() => deleteEntries(entryIds));
     }
     isDragging = false;
     deltaX = 0;
@@ -71,16 +93,16 @@ export function attachSwipeRightDeleteGesture(card, entryId) {
   }, true);
 }
 
-export function attachRestoreToRemainingClick(card, entryId) {
+export function attachRestoreToRemainingClick(card, entryIds) {
   card.addEventListener("click", () => {
     if (consumeSuppressedCardClick(card)) {
       return;
     }
-    _run(() => _setStatus(entryId, "remaining"));
+    _run(() => setStatusForEntries(entryIds, "remaining"));
   });
 }
 
-export function attachRemainingCardGestures(card, entryId) {
+export function attachRemainingCardGestures(card, entryIds) {
   let startX = 0;
   let startY = 0;
   let deltaX = 0;
@@ -127,7 +149,7 @@ export function attachRemainingCardGestures(card, entryId) {
     card.style.setProperty("--swipe-skip-progress", "0");
     if (shouldSkip) {
       suppressNextCardClick(card);
-      _run(() => _setStatus(entryId, "skipped"));
+      _run(() => setStatusForEntries(entryIds, "skipped"));
     }
     isDragging = false;
     deltaX = 0;
@@ -137,11 +159,11 @@ export function attachRemainingCardGestures(card, entryId) {
     if (consumeSuppressedCardClick(card)) {
       return;
     }
-    _run(() => _setStatus(entryId, "completed"));
+    _run(() => setStatusForEntries(entryIds, "completed"));
   });
 }
 
-export function attachCompletedCardGestures(card, entryId) {
+export function attachCompletedCardGestures(card, entryIds) {
   let startX = 0;
   let startY = 0;
   let deltaX = 0;
@@ -188,7 +210,7 @@ export function attachCompletedCardGestures(card, entryId) {
     card.style.setProperty("--swipe-delete-progress", "0");
     if (shouldDelete) {
       suppressNextCardClick(card);
-      _run(() => _deleteEntry(entryId));
+      _run(() => deleteEntries(entryIds));
     }
     isDragging = false;
     deltaX = 0;
@@ -198,7 +220,7 @@ export function attachCompletedCardGestures(card, entryId) {
     if (consumeSuppressedCardClick(card)) {
       return;
     }
-    _run(() => _setStatus(entryId, "remaining"));
+    _run(() => setStatusForEntries(entryIds, "remaining"));
   });
 }
 
@@ -206,8 +228,15 @@ export function createCard(item, mode) {
   const card = document.createElement("div");
   card.className = "shop-card";
 
+  const entryIds = normalizeEntryIds(item.entry_ids && item.entry_ids.length ? item.entry_ids : item.id);
   const unitPart = item.unit ? ` ${item.unit}` : "";
   const quantityText = `${item.amount}${unitPart}`.trim();
+  const amountLines = Array.isArray(item.amount_lines) && item.amount_lines.length > 0
+    ? item.amount_lines
+    : [quantityText];
+  const amountMarkup = amountLines
+    .map((line) => `<span class="shop-item-amount-line">${escapeAttr(line)}</span>`)
+    .join("");
 
   const deleteRightHint = `
     <div class="shop-swipe-delete-right-hint" aria-hidden="true">
@@ -238,18 +267,18 @@ export function createCard(item, mode) {
         <strong class="shop-item-name">${escapeAttr(item.name)}</strong>
         <span class="shop-item-category muted">${escapeAttr(item.ingredient_type)}</span>
       </div>
-      <span class="shop-item-amount muted">${escapeAttr(quantityText)}</span>
+      <div class="shop-item-amount muted">${amountMarkup}</div>
     </div>
   `;
 
   if (mode === "remaining") {
-    attachRemainingCardGestures(card, item.id);
+    attachRemainingCardGestures(card, entryIds);
   } else if (mode === "completed") {
-    attachCompletedCardGestures(card, item.id);
+    attachCompletedCardGestures(card, entryIds);
   } else {
-    attachRestoreToRemainingClick(card, item.id);
+    attachRestoreToRemainingClick(card, entryIds);
   }
-  attachSwipeRightDeleteGesture(card, item.id);
+  attachSwipeRightDeleteGesture(card, entryIds);
 
   return card;
 }

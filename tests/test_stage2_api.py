@@ -89,7 +89,6 @@ def test_stage2_meal_plan_uses_all_recipes_when_no_keywords_selected(monkeypatch
             "diners": 2,
         },
     )
-
     assert res.status_code == 200
     assert res.json()["data"]["entries"][0]["recipe"]["id"] == 9
 
@@ -353,6 +352,7 @@ def test_stage2_shopping_view_and_sync(monkeypatch, tmp_path) -> None:
                     {
                         "id": 1,
                         "food": {
+                            "id": 500,
                             "name": "Milk",
                             "category": "Dairy",
                             "store_group": {"id": 6, "name": "Kød, fisk og fjerkræ"},
@@ -362,7 +362,15 @@ def test_stage2_shopping_view_and_sync(monkeypatch, tmp_path) -> None:
                     },
                     {
                         "id": 2,
+                        "list_recipe_data": {
+                            "recipe_data": {
+                                "id": 911,
+                                "name": "Chicken Casserole",
+                                "image": "https://example.test/recipe-911.jpg",
+                            }
+                        },
                         "food": {
+                            "id": 501,
                             "name": "Chicken",
                             "category": "Protein",
                             "store_group": {"id": 6, "name": "Kød, fisk og fjerkræ"},
@@ -373,6 +381,7 @@ def test_stage2_shopping_view_and_sync(monkeypatch, tmp_path) -> None:
                     {
                         "id": 3,
                         "food": {
+                            "id": 702,
                             "name": "Apples",
                             "category": "Fruit",
                             "store_group": {"id": 9, "name": "Frugt og grøntsager"},
@@ -400,6 +409,14 @@ def test_stage2_shopping_view_and_sync(monkeypatch, tmp_path) -> None:
     sections = payload["sections"]
     assert len(sections["remaining"]) == 2
     assert len(sections["completed"]) == 1
+    assert {row["food_id"] for row in sections["remaining"]} == {500, 501}
+    assert sections["completed"][0]["food_id"] == 702
+    chicken_row = next(row for row in sections["remaining"] if row["id"] == 2)
+    assert chicken_row["recipe"] == {
+        "id": 911,
+        "name": "Chicken Casserole",
+        "image": "https://example.test/recipe-911.jpg",
+    }
 
     store_layout = payload["grouped"]["store_layout"]["remaining"]
     assert list(store_layout.keys()) == ["6"]
@@ -436,6 +453,7 @@ def test_stage2_shopping_view_uses_supermarket_category_name(monkeypatch, tmp_pa
                     {
                         "id": 10,
                         "food": {
+                            "id": 919,
                             "name": "Beef",
                             "category": "Protein",
                             "supermarket_category": {"id": 6, "name": "Kød, fisk og fjerkræ"},
@@ -462,6 +480,7 @@ def test_stage2_shopping_view_uses_supermarket_category_name(monkeypatch, tmp_pa
     item = response.json()["data"]["sections"]["remaining"][0]
     assert item["store_group"]["name"] == "Kød, fisk og fjerkræ"
     assert item["store_group"]["id"] == 6
+    assert item["food_id"] == 919
 
 
 def test_stage2_plan_shopping_uses_recipe_shopping_update(monkeypatch, tmp_path) -> None:
@@ -588,6 +607,7 @@ def test_stage2_ad_hoc_entries_persist_locally_and_merge(monkeypatch, tmp_path) 
     local_row = next(row for row in remaining if row["id"] == local_id)
     assert local_row["reminder_enabled"] is True
     assert local_row["reminder_text"] == "Move tray to freezer"
+    assert local_row["food_id"] is None
 
     patch_res = client.patch(
         f"/api/v1/shopping-list/entries/{local_id}",
