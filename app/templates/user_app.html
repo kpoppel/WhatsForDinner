@@ -20,7 +20,7 @@
         <button id="toggle-instructions" class="wf-icon-btn wf-shop-control" type="button" aria-label="Shopping mode instructions" hidden>?</button>
         <span id="shop-mode-network" class="status-dot is-offline wf-shop-control" role="status" aria-label="Offline" title="Offline" hidden></span>
         <span id="shop-mode-pending" class="badge pending-sync wf-shop-control" role="status" aria-label="Pending sync: 0" title="Pending sync: 0" hidden><span class="pending-sync-icon" aria-hidden="true">⟳</span><span id="shop-mode-pending-count">0</span></span>
-        <button id="wf-settings-btn" class="wf-icon-btn" type="button" aria-label="Settings">⚙</button>
+        <button id="wf-settings-btn" class="wf-icon-btn" type="button" aria-label="Settings">⚙️</button>
       </div>
     </header>
 
@@ -45,20 +45,31 @@
       </section>
 
       <section id="wf-tab-settings" class="wf-tab" data-tab-panel="settings" aria-label="Settings" hidden>
-        <section class="wf-settings-panel">
-          <h2 class="wf-plan-heading">App Settings</h2>
+        <section class="wf-settings-panel wf-card">
+          <h2 class="wf-settings-title">App Settings</h2>
 
-          <label class="wf-field">Default diner count
-            <input id="wf-settings-default-diners" type="number" min="1" max="20" />
+          <section class="wf-field wf-settings-stepper-field" aria-label="Default diner count">
+            <span class="wf-settings-label">Standard Number of Diners</span>
+            <div class="wf-stepper" role="group" aria-label="Default diners controls">
+              <button id="wf-settings-diners-down" class="wf-stepper-btn" type="button" aria-label="Decrease default diners">-</button>
+              <span id="wf-settings-default-diners" class="wf-stepper-value wf-settings-stepper-value">2</span>
+              <button id="wf-settings-diners-up" class="wf-stepper-btn" type="button" aria-label="Increase default diners">+</button>
+            </div>
+          </section>
+
+          <label class="wf-field">Default Prep/Thaw Notification Time
+            <input id="wf-settings-reminder-time" type="time" step="60" lang="en-GB" aria-label="Default reminder time" />
+            <span class="wf-settings-help">Time of day to push notifications on the scheduled usage date.</span>
           </label>
 
-          <label class="wf-field">Default reminder time (24h)
-            <input id="wf-settings-reminder-time" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM" aria-label="Default reminder time in 24-hour format" />
-          </label>
-
-          <label class="wf-field">Recipe repeat constraint (days)
-            <input id="wf-settings-no-repeat-days" type="number" min="0" max="365" />
-          </label>
+          <section class="wf-field wf-settings-stepper-field" aria-label="Recipe repeat constraint">
+            <span class="wf-settings-label">Don't repeat a recipe within</span>
+            <div class="wf-stepper" role="group" aria-label="No-repeat days controls">
+              <button id="wf-settings-repeat-down" class="wf-stepper-btn" type="button" aria-label="Decrease no-repeat days">-</button>
+              <span id="wf-settings-no-repeat-days" class="wf-stepper-value wf-settings-stepper-value">14 days</span>
+              <button id="wf-settings-repeat-up" class="wf-stepper-btn" type="button" aria-label="Increase no-repeat days">+</button>
+            </div>
+          </section>
 
           <label class="wf-field">Tandoor search keywords
             <div id="wf-settings-keywords" class="wf-keyword-list" role="group" aria-label="Tandoor search keywords"></div>
@@ -68,8 +79,8 @@
           <p id="wf-settings-status" class="wf-plan-status" aria-live="polite"></p>
 
           <div class="wf-action-row">
-            <button id="wf-settings-refresh" class="wf-btn wf-btn-outline" type="button">Refresh</button>
-            <button id="wf-settings-save" class="wf-btn wf-btn-blue" type="button">Save Settings</button>
+            <button id="wf-settings-refresh" class="wf-btn wf-btn-outline" type="button" hidden>Refresh</button>
+            <button id="wf-settings-save" class="wf-btn wf-btn-blue" type="button">Save &amp; Close</button>
           </div>
         </section>
       </section>
@@ -283,10 +294,10 @@
       </section>
 
       <section class="wf-reminder-box">
-        <label class="wf-field wf-checkbox-field wf-reminder-head">
-          <input id="wf-meal-editor-reminder-enabled" type="checkbox" />
-          🔔 Day-of Prep / Thaw Reminder
-        </label>
+        <div class="wf-reminder-head">
+          <label class="wf-reminder-label" for="wf-meal-editor-reminder-enabled">🔔 Day-of Prep / Thaw Reminder</label>
+          <input id="wf-meal-editor-reminder-enabled" class="wf-reminder-check" type="checkbox" />
+        </div>
         <input id="wf-meal-editor-reminder-text" class="wf-reminder-input" type="text" maxlength="160" placeholder="Reminder details (24h, e.g. 08:00)" />
       </section>
 

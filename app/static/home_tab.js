@@ -36,7 +36,7 @@
   }
 
   const dayLabel = new Intl.DateTimeFormat("en-US", {
-    weekday: "short",
+    weekday: "long",
     month: "short",
     day: "numeric",
   });
@@ -251,6 +251,8 @@
       todayTitle.textContent = "No meal planned";
       todayMeta.innerHTML = '<span>Set up a plan to populate this card.</span>';
       todayReminders.innerHTML = "";
+      openPlansButton.textContent = "Open Meal Plans";
+      editDayButton.textContent = "Edit Day";
       editDayButton.disabled = true;
       return;
     }
@@ -258,6 +260,8 @@
     const entryId = Number(entry.entry_id);
     if (!Number.isInteger(entryId)) {
       todayEntryId = null;
+      openPlansButton.textContent = "Open Meal Plans";
+      editDayButton.textContent = "Edit Day";
       editDayButton.disabled = true;
       return;
     }
@@ -265,9 +269,9 @@
 
     const parsedDate = parseIsoDate(String(entry.date));
     if (parsedDate === null) {
-      todayKicker.textContent = "Today";
+      todayKicker.textContent = "TODAY";
     } else {
-      todayKicker.textContent = `Today • ${dayLabel.format(parsedDate)}`;
+      todayKicker.textContent = `TODAY • ${dayLabel.format(parsedDate).toUpperCase()}`;
     }
 
     todayTitle.textContent = titleFromEntry(entry);
@@ -276,25 +280,32 @@
     const servingsText = Number.isInteger(servings) ? `${servings} Diners` : "- Diners";
     const mode = String(entry.mode || "planned");
 
-    todayMeta.innerHTML = `
-      <span>👥 ${escapeHtml(servingsText)}</span>
-      <span class="${modeBadgeClass(mode)}">${escapeHtml(modeBadgeLabel(mode))}</span>
-    `;
-
     const reminders = [];
 
     const mealReminder = normalizeTimeTo24hInText(entryReminder(entry));
     if (mealReminder.length > 0) {
-      reminders.push(`Meal: ${mealReminder}`);
+      reminders.push(mealReminder);
     }
 
     for (const reminder of shoppingReminderTexts) {
-      reminders.push(`Shopping: ${reminder}`);
+      reminders.push(reminder);
     }
 
+    const firstReminder = reminders[0] || "";
+    const reminderBadge = firstReminder.length > 0
+      ? `<span class="wf-badge wf-badge-notify">🔔 ${escapeHtml(firstReminder)}</span>`
+      : "";
+
+    todayMeta.innerHTML = `
+      <span>👥 ${escapeHtml(servingsText)}</span>
+      <span class="${modeBadgeClass(mode)}">${escapeHtml(modeBadgeLabel(mode))}</span>
+      ${reminderBadge}
+    `;
+
     todayReminders.innerHTML = "";
-    if (reminders.length > 0) {
-      for (const reminderText of reminders) {
+    if (reminders.length > 1) {
+      for (let index = 1; index < reminders.length; index += 1) {
+        const reminderText = reminders[index];
         const line = document.createElement("p");
         line.className = "wf-home-reminder-line";
         line.textContent = `🔔 ${reminderText}`;
@@ -302,6 +313,8 @@
       }
     }
 
+    openPlansButton.textContent = "View Recipe";
+    editDayButton.textContent = "Edit";
     editDayButton.disabled = false;
   }
 
@@ -441,6 +454,8 @@
       todayTitle.textContent = "Unable to load meal data";
       todayMeta.innerHTML = '<span>Open Meal Plans to refresh.</span>';
       todayReminders.innerHTML = "";
+      openPlansButton.textContent = "Open Meal Plans";
+      editDayButton.textContent = "Edit Day";
       upcomingList.innerHTML = '<p class="wf-home-empty">Unable to load upcoming meals right now.</p>';
       editDayButton.disabled = true;
     }

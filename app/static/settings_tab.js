@@ -2,9 +2,13 @@
   const apiPrefix = window.WFD_API_PREFIX;
 
   const panel = document.getElementById("wf-tab-settings");
-  const dinersInput = document.getElementById("wf-settings-default-diners");
+  const dinersValueNode = document.getElementById("wf-settings-default-diners");
+  const dinersDownButton = document.getElementById("wf-settings-diners-down");
+  const dinersUpButton = document.getElementById("wf-settings-diners-up");
   const reminderTimeInput = document.getElementById("wf-settings-reminder-time");
-  const noRepeatInput = document.getElementById("wf-settings-no-repeat-days");
+  const noRepeatValueNode = document.getElementById("wf-settings-no-repeat-days");
+  const repeatDownButton = document.getElementById("wf-settings-repeat-down");
+  const repeatUpButton = document.getElementById("wf-settings-repeat-up");
   const keywordsContainer = document.getElementById("wf-settings-keywords");
   const selectedNode = document.getElementById("wf-settings-selected");
   const statusNode = document.getElementById("wf-settings-status");
@@ -17,13 +21,25 @@
   if (!(panel instanceof HTMLElement)) {
     return;
   }
-  if (!(dinersInput instanceof HTMLInputElement)) {
+  if (!(dinersValueNode instanceof HTMLElement)) {
+    return;
+  }
+  if (!(dinersDownButton instanceof HTMLButtonElement)) {
+    return;
+  }
+  if (!(dinersUpButton instanceof HTMLButtonElement)) {
     return;
   }
   if (!(reminderTimeInput instanceof HTMLInputElement)) {
     return;
   }
-  if (!(noRepeatInput instanceof HTMLInputElement)) {
+  if (!(noRepeatValueNode instanceof HTMLElement)) {
+    return;
+  }
+  if (!(repeatDownButton instanceof HTMLButtonElement)) {
+    return;
+  }
+  if (!(repeatUpButton instanceof HTMLButtonElement)) {
     return;
   }
   if (!(keywordsContainer instanceof HTMLElement)) {
@@ -35,15 +51,46 @@
   if (!(statusNode instanceof HTMLElement)) {
     return;
   }
-  if (!(refreshButton instanceof HTMLButtonElement)) {
-    return;
-  }
   if (!(saveButton instanceof HTMLButtonElement)) {
     return;
   }
 
+  const DINERS_MIN = 1;
+  const DINERS_MAX = 20;
+  const NO_REPEAT_MIN = 0;
+  const NO_REPEAT_MAX = 365;
+
+  let defaultDinersValue = 2;
+  let noRepeatDaysValue = 14;
+
   function setStatus(message) {
     statusNode.textContent = message;
+  }
+
+  function setAppTab(tabName) {
+    if (typeof window.WFD_setActiveTab === "function") {
+      window.WFD_setActiveTab(tabName);
+    }
+  }
+
+  function clampInteger(value, minValue, maxValue) {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed)) {
+      return minValue;
+    }
+    if (parsed < minValue) {
+      return minValue;
+    }
+    if (parsed > maxValue) {
+      return maxValue;
+    }
+    return parsed;
+  }
+
+  function renderStepperValues() {
+    dinersValueNode.textContent = String(defaultDinersValue);
+    const dayText = noRepeatDaysValue === 1 ? "day" : "days";
+    noRepeatValueNode.textContent = `${noRepeatDaysValue} ${dayText}`;
   }
 
   function normalize24hTime(rawValue) {
@@ -121,10 +168,14 @@
 
   function setSavingState(isSaving) {
     saveButton.disabled = isSaving;
-    refreshButton.disabled = isSaving;
-    dinersInput.disabled = isSaving;
+    if (refreshButton instanceof HTMLButtonElement) {
+      refreshButton.disabled = isSaving;
+    }
+    dinersDownButton.disabled = isSaving;
+    dinersUpButton.disabled = isSaving;
     reminderTimeInput.disabled = isSaving;
-    noRepeatInput.disabled = isSaving;
+    repeatDownButton.disabled = isSaving;
+    repeatUpButton.disabled = isSaving;
 
     for (const optionButton of keywordsContainer.querySelectorAll("button")) {
       if (optionButton instanceof HTMLButtonElement) {
@@ -137,7 +188,7 @@
       return;
     }
 
-    saveButton.textContent = "Save Settings";
+    saveButton.textContent = "Save & Close";
   }
 
   function keywordOptionNode(keywordId, label) {
@@ -249,7 +300,7 @@
     if (settingsData && typeof settingsData === "object") {
       const defaultDiners = Number(settingsData.default_diners);
       if (Number.isInteger(defaultDiners)) {
-        dinersInput.value = String(defaultDiners);
+        defaultDinersValue = clampInteger(defaultDiners, DINERS_MIN, DINERS_MAX);
       }
 
       const defaultReminderTime = settingsData.default_notification_time;
@@ -266,17 +317,19 @@
     if (rulesData && typeof rulesData === "object") {
       const noRepeat = Number(rulesData.no_repeat_days);
       if (Number.isInteger(noRepeat)) {
-        noRepeatInput.value = String(noRepeat);
+        noRepeatDaysValue = clampInteger(noRepeat, NO_REPEAT_MIN, NO_REPEAT_MAX);
       }
     }
+
+    renderStepperValues();
 
     assignKeywordOptions(keywordsPayload);
     applySelectedKeywords(selectedPayload);
   }
 
   async function saveSettings() {
-    const defaultDiners = Number(dinersInput.value);
-    if (!Number.isInteger(defaultDiners) || defaultDiners < 1 || defaultDiners > 20) {
+    const defaultDiners = clampInteger(defaultDinersValue, DINERS_MIN, DINERS_MAX);
+    if (!Number.isInteger(defaultDiners) || defaultDiners < DINERS_MIN || defaultDiners > DINERS_MAX) {
       throw new Error("Default diners must be an integer from 1 to 20.");
     }
 
@@ -287,8 +340,8 @@
 
     reminderTimeInput.value = reminderTime;
 
-    const noRepeatDays = Number(noRepeatInput.value);
-    if (!Number.isInteger(noRepeatDays) || noRepeatDays < 0 || noRepeatDays > 365) {
+    const noRepeatDays = clampInteger(noRepeatDaysValue, NO_REPEAT_MIN, NO_REPEAT_MAX);
+    if (!Number.isInteger(noRepeatDays) || noRepeatDays < NO_REPEAT_MIN || noRepeatDays > NO_REPEAT_MAX) {
       throw new Error("No-repeat days must be an integer from 0 to 365.");
     }
 
@@ -315,6 +368,7 @@
       renderSelectedKeywords();
       setStatus("Settings saved.");
       window.dispatchEvent(new CustomEvent("wfd:data-changed", { detail: { source: "settings" } }));
+      setAppTab("home");
     } finally {
       setSavingState(false);
     }
@@ -332,8 +386,30 @@
     }
   }
 
-  refreshButton.addEventListener("click", () => {
-    void runAction(loadSettings);
+  if (refreshButton instanceof HTMLButtonElement) {
+    refreshButton.addEventListener("click", () => {
+      void runAction(loadSettings);
+    });
+  }
+
+  dinersDownButton.addEventListener("click", () => {
+    defaultDinersValue = clampInteger(defaultDinersValue - 1, DINERS_MIN, DINERS_MAX);
+    renderStepperValues();
+  });
+
+  dinersUpButton.addEventListener("click", () => {
+    defaultDinersValue = clampInteger(defaultDinersValue + 1, DINERS_MIN, DINERS_MAX);
+    renderStepperValues();
+  });
+
+  repeatDownButton.addEventListener("click", () => {
+    noRepeatDaysValue = clampInteger(noRepeatDaysValue - 1, NO_REPEAT_MIN, NO_REPEAT_MAX);
+    renderStepperValues();
+  });
+
+  repeatUpButton.addEventListener("click", () => {
+    noRepeatDaysValue = clampInteger(noRepeatDaysValue + 1, NO_REPEAT_MIN, NO_REPEAT_MAX);
+    renderStepperValues();
   });
 
   saveButton.addEventListener("click", () => {

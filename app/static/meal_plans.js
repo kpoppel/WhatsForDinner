@@ -78,6 +78,7 @@
   let activePlanId = null;
   let selectedPlanId = null;
   let selectedPlan = null;
+  const planPreviewTitlesById = new Map();
   let generateModalClosing = false;
 
   let editorSelectedRecipe = null;
@@ -177,12 +178,83 @@
     return `${shortDate.format(startDate)} - ${shortDate.format(endDate)}`;
   }
 
+  function toIsoDateLabel(sourceDate) {
+    const year = sourceDate.getFullYear();
+    const month = String(sourceDate.getMonth() + 1).padStart(2, "0");
+    const day = String(sourceDate.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function planListDateRangeLabel(plan) {
+    const startRaw = String(plan.start_date);
+    const startDate = parseIsoDate(startRaw);
+    if (startDate === null) {
+      return startRaw;
+    }
+
+    const lengthDays = Number(plan.length_days);
+    if (!Number.isInteger(lengthDays) || lengthDays < 1) {
+      return toIsoDateLabel(startDate);
+    }
+
+    const endDate = addDays(startDate, lengthDays - 1);
+    return `${toIsoDateLabel(startDate)} - ${toIsoDateLabel(endDate)}`;
+  }
+
   function planMetaText(plan) {
     const lengthDays = Number(plan.length_days);
-    const diners = Number(plan.diners);
     const entryCount = Number(plan.entry_count);
-    const dayText = lengthDays === 1 ? "day" : "days";
-    return `${lengthDays} ${dayText} • ${diners} diners • ${entryCount} entries`;
+    const dayText = lengthDays === 1 ? "Day" : "Days";
+    const mealText = entryCount === 1 ? "Meal Planned" : "Meals Planned";
+    return `${lengthDays} ${dayText} • ${entryCount} ${mealText}`;
+  }
+
+  function buildPlanPreviewTitles(entries) {
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return [];
+    }
+
+    const titles = [];
+    const seen = new Set();
+    for (const entry of entries) {
+      const title = entryRecipeTitle(entry).trim();
+      const key = title.toLowerCase();
+      if (title.length === 0 || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      titles.push(title);
+      if (titles.length >= 3) {
+        break;
+      }
+    }
+
+    return titles;
+  }
+
+  function cachePlanPreview(plan) {
+    const planId = Number(plan?.plan_id);
+    if (!Number.isInteger(planId)) {
+      return;
+    }
+
+    planPreviewTitlesById.set(planId, buildPlanPreviewTitles(plan?.entries));
+  }
+
+  function planIncludesText(plan) {
+    const planId = Number(plan?.plan_id);
+    const titles = Number.isInteger(planId) ? planPreviewTitlesById.get(planId) : null;
+
+    if (!Array.isArray(titles) || titles.length === 0) {
+      return "Includes: Open plan to view meals.";
+    }
+
+    const entryCount = Number(plan?.entry_count);
+    const preview = titles.join(", ");
+    if (Number.isInteger(entryCount) && entryCount > titles.length) {
+      return `Includes: ${preview}...`;
+    }
+    return `Includes: ${preview}`;
   }
 
   function sortPlansMostRecentFirst(plans) {
@@ -328,7 +400,7 @@
 
       const heading = document.createElement("h3");
       heading.className = "wf-plan-card-title";
-      heading.textContent = planDateRangeLabel(plan);
+      heading.textContent = planListDateRangeLabel(plan);
       header.appendChild(heading);
 
       if (planId === activePlanId) {
@@ -342,13 +414,13 @@
       meta.className = "wf-plan-card-meta";
       meta.textContent = planMetaText(plan);
 
-      const openHint = document.createElement("p");
-      openHint.className = "wf-plan-card-open";
-      openHint.textContent = "Open plan ›";
+      const includes = document.createElement("p");
+      includes.className = "wf-plan-card-includes";
+      includes.textContent = planIncludesText(plan);
 
       card.appendChild(header);
       card.appendChild(meta);
-      card.appendChild(openHint);
+      card.appendChild(includes);
 
       card.addEventListener("click", () => {
         void runAction(() => openPlanEditor(planId));
@@ -665,6 +737,22 @@
     const firstPlanId = Number(plans[0].plan_id);
     activePlanId = firstPlanId;
 
+    const planIds = new Set(plans.map((row) => Number(row.plan_id)).filter((id) => Number.isInteger(id)));
+    for (const cachedPlanId of Array.from(planPreviewTitlesById.keys())) {
+      if (!planIds.has(cachedPlanId)) {
+        planPreviewTitlesById.delete(cachedPlanId);
+      }
+    }
+
+    if (Number.isInteger(firstPlanId) && !planPreviewTitlesById.has(firstPlanId)) {
+      try {
+        const activePayload = await api(`/meal-plans/${firstPlanId}`);
+        cachePlanPreview(activePayload.data);
+      } catch {
+        // Keep list rendering resilient even if preview fetch fails.
+      }
+    }
+
     if (Number.isInteger(selectedPlanId)) {
       const selectedStillExists = plans.some((row) => Number(row.plan_id) === selectedPlanId);
       if (!selectedStillExists) {
@@ -683,6 +771,7 @@
 
     const payload = await api(`/meal-plans/${selectedPlanId}`);
     selectedPlan = payload.data;
+    cachePlanPreview(selectedPlan);
     renderPlanDetail(selectedPlan);
 
     const listPayload = await api("/meal-plans/stored");
@@ -696,6 +785,7 @@
 
     const payload = await api(`/meal-plans/${planId}`);
     selectedPlan = payload.data;
+    cachePlanPreview(selectedPlan);
     renderPlanDetail(selectedPlan);
     setAppTab("meal-plan-detail");
 
@@ -858,7 +948,7 @@
     setAppTab("meal-plans");
     selectedPlanId = null;
     selectedPlan = null;
-    setStatus("Choose a meal plan to edit.");
+    //setStatus("Choose a meal plan to edit.");
   }
 
   function renderMealEditorSearchResults(results) {
@@ -1191,6 +1281,6 @@
   }
 
   setAppTab("meal-plans");
-  setStatus("Choose a meal plan to edit.");
+  //setStatus("Choose a meal plan to edit.");
   void runAction(refreshPlans);
 })();
