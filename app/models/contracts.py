@@ -143,6 +143,7 @@ class ShoppingSyncChange(BaseModel):
     operation: SyncOperation
     entry_id: int | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
+    queued_at: str | None = None
 
     @model_validator(mode="after")
     def validate_entry_id(self) -> "ShoppingSyncChange":

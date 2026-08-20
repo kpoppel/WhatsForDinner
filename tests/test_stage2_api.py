@@ -135,6 +135,28 @@ def test_stage2_sync_update_requires_entry_id(monkeypatch, tmp_path) -> None:
     assert res.status_code == 422
 
 
+def test_stage2_sync_accepts_queued_at_metadata(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    res = client.post(
+        "/api/v1/shopping-list/sync",
+        json={
+            "changes": [
+                {
+                    "operation": "create",
+                    "queued_at": "2026-08-20T16:17:47.989Z",
+                    "payload": {"ad_hoc": True, "name": "Bread", "amount": 1},
+                }
+            ]
+        },
+    )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert len(payload["applied"]) == 1
+    assert payload["rejected"] == []
+
+
 def test_stage2_meal_plan_mutations_reject_unknown_fields(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 
