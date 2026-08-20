@@ -597,3 +597,65 @@ def test_generate_shopping_remove_then_readd_same_recipe_resyncs_when_tracked_en
     assert len(client.updated_shopping_calls) == 0
     readded_recipe_updates = [row for row in readded["data"]["created"] if row.get("operation") == "recipe_shopping_update"]
     assert readded_recipe_updates == []
+
+
+def test_sync_tandoor_meal_plan_includes_mode_only_rows_without_recipe(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+    client = FakeMealClient()
+    service = MealPlanService(state, client)
+
+    plan = state.create_meal_plan(
+        {
+            "start_date": "2026-08-10",
+            "length_days": 3,
+            "diners": 2,
+            "entries": [
+                {
+                    "entry_id": 1,
+                    "day_index": 0,
+                    "date": "2026-08-10",
+                    "mode": "leftover",
+                    "recipe": None,
+                    "extra_recipes": [],
+                    "servings": 2,
+                },
+                {
+                    "entry_id": 2,
+                    "day_index": 1,
+                    "date": "2026-08-11",
+                    "mode": "takeout",
+                    "recipe": None,
+                    "extra_recipes": [],
+                    "servings": 2,
+                },
+                {
+                    "entry_id": 3,
+                    "day_index": 2,
+                    "date": "2026-08-12",
+                    "mode": "empty",
+                    "recipe": None,
+                    "extra_recipes": [],
+                    "servings": 2,
+                },
+            ],
+            "keyword_ids": [],
+            "constraints": {"leftover_days": [], "takeout_days": [], "empty_days": []},
+            "no_repeat_days": 30,
+        }
+    )
+
+    asyncio.run(
+        service.patch_plan(
+            plan["plan_id"],
+            {"entries": plan["entries"]},
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+        )
+    )
+
+    rows = list(client.meal_plan_rows.values())
+    assert len(rows) == 3
+    titles = [str(row.get("title") or "") for row in rows]
+    assert any("Leftovers" in title for title in titles)
+    assert any("Takeout" in title for title in titles)
+    assert any("Eating Out" in title for title in titles)
+    assert all("recipe" not in row for row in rows)

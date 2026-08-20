@@ -34,7 +34,7 @@ class ShoppingInstanceSyncRowModel(BaseModel):
 
     instance_key: str
     entry_id: int
-    recipe_id: int
+    recipe_id: int | None = None
     role: Literal["primary", "extra"]
     slot_index: int | None = None
     purpose: str | None = None
