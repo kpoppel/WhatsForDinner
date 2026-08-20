@@ -295,17 +295,31 @@
         <input id="wf-meal-editor-name" type="text" maxlength="140" />
       </label>
 
-      <label class="wf-field" id="wf-meal-editor-search-field">Swap with Tandoor Recipe
-        <input id="wf-meal-editor-search" type="text" maxlength="120" placeholder="Search recipes..." />
-      </label>
-      <section id="wf-meal-editor-search-results" class="wf-meal-search-results" aria-label="Recipe search results"></section>
-
       <section class="wf-field" id="wf-meal-editor-diners-field">
         <span>Number of Diners</span>
         <div class="wf-stepper" role="group" aria-label="Diners controls">
           <button id="wf-meal-editor-diners-down" class="wf-stepper-btn" type="button">-</button>
           <span id="wf-meal-editor-diners-value" class="wf-stepper-value">2</span>
           <button id="wf-meal-editor-diners-up" class="wf-stepper-btn" type="button">+</button>
+        </div>
+      </section>
+
+      <section class="wf-extra-recipes-box" id="wf-meal-editor-recipes-field">
+        <div class="wf-extra-recipes-head">
+          <span>Recipes for This day</span>
+          <button id="wf-meal-editor-recipes-add-btn" class="wf-extra-add-btn" type="button">+ Add Recipe</button>
+        </div>
+        <div id="wf-meal-editor-recipes-list" class="wf-extra-list" aria-label="Recipes for this day"></div>
+        <div id="wf-meal-editor-recipes-add-row" class="wf-extra-new-row" hidden>
+          <input id="wf-meal-editor-recipes-search" type="text" maxlength="120" placeholder="Search recipes to add..." />
+          <div class="wf-extra-new-actions">
+            <div id="wf-meal-editor-recipes-purpose" class="wf-extra-new-purpose">
+              <button class="wf-pill-btn is-small is-active" type="button" data-purpose="meal" aria-pressed="true">Meal</button>
+              <button class="wf-pill-btn is-small" type="button" data-purpose="shopping_only" aria-pressed="false">Shopping only</button>
+            </div>
+            <button id="wf-meal-editor-recipes-add-cancel" class="wf-extra-new-cancel" type="button">Cancel</button>
+          </div>
+          <section id="wf-meal-editor-recipes-search-results" class="wf-meal-search-results" aria-label="Recipe search results"></section>
         </div>
       </section>
 
@@ -328,7 +342,7 @@
   <script>window.WFD_TANDOOR_BASE_URL = {{ tandoor_base_url_js }};</script>
   <script type="module" src="/static/js/shopping.js?v=20260817m"></script>
   <script type="module" src="/static/shop_editor.js?v=20260817m"></script>
-  <script type="module" src="/static/meal_plans.js?v=20260817m"></script>
+  <script type="module" src="/static/meal_plans.js?v=20260820b"></script>
   <script type="module" src="/static/home_tab.js?v=20260820a"></script>
   <script type="module" src="/static/settings_tab.js?v=20260817m"></script>
   <script type="module" src="/static/user_shell.js?v=20260817m"></script>

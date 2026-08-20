@@ -15,13 +15,25 @@ class StateSchemaError(ValueError):
     """Raised when Stage2 state is invalid for the configured schema."""
 
 
+def _migrate_v1_to_v2(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    if not isinstance(next_payload.get("meal_plan_instance_sync"), dict):
+        next_payload["meal_plan_instance_sync"] = {}
+    next_payload["schema_version"] = 2
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(raw)
 
     schema_version = payload.get("schema_version")
     if schema_version is None:
-        payload["schema_version"] = CURRENT_STATE_SCHEMA_VERSION
-        schema_version = CURRENT_STATE_SCHEMA_VERSION
+        payload["schema_version"] = 1
+        schema_version = 1
+
+    if schema_version == 1:
+        payload = _migrate_v1_to_v2(payload)
+        schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:
         raise StateSchemaError(

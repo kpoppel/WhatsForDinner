@@ -562,6 +562,12 @@ body {
 
 .wf-plan-generate-shopping-btn {
   margin-left: auto;
+  transition: background-color 140ms ease, transform 120ms ease;
+}
+
+.wf-plan-generate-shopping-btn.is-long-press-active {
+  background: #ef6c00;
+  transform: translateY(-1px);
 }
 
 .wf-plan-add-day-btn {
@@ -916,6 +922,124 @@ body {
   border-color: var(--wf-accent);
   background: var(--wf-accent);
   color: #fff;
+}
+
+.wf-pill-btn.is-small {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.wf-extra-recipes-box {
+  border: 1px solid var(--wf-line);
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.wf-extra-recipes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.wf-extra-recipes-head span {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--wf-ink);
+}
+
+.wf-extra-add-btn {
+  border: 1px dashed var(--wf-accent);
+  color: var(--wf-accent);
+  background: #eef3ff;
+  border-radius: 8px;
+  padding: 0.3rem 0.6rem;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wf-extra-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.wf-extra-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid var(--wf-line);
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
+  background: #fafafa;
+}
+
+.wf-extra-row-name {
+  font-size: 0.88rem;
+  min-width: 0;
+}
+
+.wf-extra-row-name-main {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wf-extra-row-name small {
+  display: block;
+  color: #888;
+  font-size: 0.72rem;
+}
+
+.wf-extra-row-purpose {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.wf-extra-remove-btn {
+  border: none;
+  background: none;
+  color: #b3261e;
+  font-size: 1rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0.1rem 0.3rem;
+}
+
+.wf-extra-new-row {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px dashed var(--wf-line);
+  border-radius: 8px;
+  padding: 0.5rem;
+}
+
+.wf-extra-new-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.wf-extra-new-purpose {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.wf-extra-new-cancel {
+  border: none;
+  background: none;
+  color: #888;
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 .wf-reminder-box {
@@ -1460,7 +1584,9 @@ body {
 
 .wf-field[hidden],
 .wf-reminder-box[hidden],
-.wf-meal-search-results[hidden] {
+.wf-meal-search-results[hidden],
+.wf-extra-recipes-box[hidden],
+.wf-extra-new-row[hidden] {
   display: none !important;
 }
 

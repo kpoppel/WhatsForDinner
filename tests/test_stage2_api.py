@@ -9,6 +9,41 @@ from app.services.stage2_state import Stage2State
 client = TestClient(app)
 
 
+class MealPlanRowStatefulClient:
+    def __init__(self) -> None:
+        self.meal_plan_rows: dict[int, dict] = {}
+        self.next_meal_plan_row_id = 1
+
+    async def list_meal_plans(self, limit=50):
+        rows = list(self.meal_plan_rows.values())
+        rows.sort(key=lambda row: int(row.get("id", 0)))
+        return {"results": rows[:limit]}
+
+    async def create_meal_plan(self, payload):
+        row_id = self.next_meal_plan_row_id
+        self.next_meal_plan_row_id += 1
+        row = {"id": row_id, **payload}
+        self.meal_plan_rows[row_id] = row
+        return row
+
+    async def delete_meal_plan(self, meal_id):
+        self.meal_plan_rows.pop(int(meal_id), None)
+        return {"deleted": int(meal_id)}
+
+    async def list_meal_types(self, limit=50):
+        return {
+            "results": [
+                {
+                    "id": 5,
+                    "name": "Aftensmad",
+                    "order": 0,
+                    "time": "18:00:00",
+                    "color": "#1F5ECD",
+                }
+            ]
+        }
+
+
 def setup_module(module) -> None:
     from app import api as api_module
 
@@ -19,6 +54,119 @@ def use_temp_state(monkeypatch, tmp_path):
     state = Stage2State(str(tmp_path))
     monkeypatch.setattr("app.api.stage2_state", state)
     return state
+
+
+class MealPlanShoppingStatefulClient:
+    def __init__(self) -> None:
+        self.entries: dict[int, dict] = {}
+        self.next_entry_id = 1
+        self.meal_plan_rows: dict[int, dict] = {}
+        self.next_meal_plan_row_id = 1
+
+    async def list_recipes(self, search=None, limit=20, keyword_ids=None):
+        return {
+            "results": [
+                {"id": 301, "name": "Enchiladas"},
+                {"id": 302, "name": "One Pot Pasta"},
+                {"id": 303, "name": "Pantry Refill"},
+            ]
+        }
+
+    async def get_recipe(self, recipe_id):
+        return {
+            "id": recipe_id,
+            "steps": [{"ingredients": [{"id": 1000 + int(recipe_id)}]}],
+            "ingredients": [],
+        }
+
+    async def update_recipe_shopping(self, recipe_id, payload):
+        ingredients = payload.get("ingredients")
+        servings = payload.get("servings")
+        if isinstance(ingredients, list):
+            for ingredient_id in ingredients:
+                if not isinstance(ingredient_id, int):
+                    continue
+                entry_id = self.next_entry_id
+                self.next_entry_id += 1
+                self.entries[entry_id] = {
+                    "id": entry_id,
+                    "food": {
+                        "id": ingredient_id,
+                        "name": f"Ingredient {ingredient_id}",
+                        "category": "Other",
+                    },
+                    "amount": servings,
+                    "checked": False,
+                    "list_recipe_data": {
+                        "recipe_data": {
+                            "id": recipe_id,
+                            "name": f"Recipe {recipe_id}",
+                        }
+                    },
+                }
+        return {"updated_for": recipe_id, "payload": payload}
+
+    async def delete_shopping_entry(self, entry_id):
+        self.entries.pop(entry_id, None)
+        return {"deleted": entry_id}
+
+    async def list_shopping_entries(self, limit=100):
+        rows = list(self.entries.values())
+        rows.sort(key=lambda row: int(row.get("id", 0)))
+        return {"results": rows[:limit]}
+
+    async def list_meal_plans(self, limit=50):
+        rows = list(self.meal_plan_rows.values())
+        rows.sort(key=lambda row: int(row.get("id", 0)))
+        return {"results": rows[:limit]}
+
+    async def create_meal_plan(self, payload):
+        row_id = self.next_meal_plan_row_id
+        self.next_meal_plan_row_id += 1
+        row = {"id": row_id, **payload}
+        self.meal_plan_rows[row_id] = row
+        return row
+
+    async def delete_meal_plan(self, meal_id):
+        self.meal_plan_rows.pop(int(meal_id), None)
+        return {"deleted": int(meal_id)}
+
+    async def list_meal_types(self, limit=50):
+        return {
+            "results": [
+                {
+                    "id": 5,
+                    "name": "Aftensmad",
+                    "order": 0,
+                    "time": "18:00:00",
+                    "color": "#1F5ECD",
+                }
+            ]
+        }
+
+
+def shopping_recipe_ids_from_view() -> set[int]:
+    view_res = client.get("/api/v1/shopping-list/view")
+    assert view_res.status_code == 200
+    sections = view_res.json()["data"]["sections"]
+    recipe_ids: set[int] = set()
+    for status in ("remaining", "skipped", "completed"):
+        rows = sections[status]
+        for row in rows:
+            recipe = row.get("recipe") if isinstance(row.get("recipe"), dict) else None
+            if not isinstance(recipe, dict):
+                continue
+            recipe_id = recipe.get("id")
+            if isinstance(recipe_id, int):
+                recipe_ids.add(recipe_id)
+    return recipe_ids
+
+
+def shopping_item_count_from_view() -> int:
+    view_res = client.get("/api/v1/shopping-list/view")
+    assert view_res.status_code == 200
+    sections = view_res.json()["data"]["sections"]
+    return len(sections["remaining"]) + len(sections["skipped"]) + len(sections["completed"])
 
 
 def test_stage2_state_accepts_directory_path(tmp_path) -> None:
@@ -160,7 +308,7 @@ def test_stage2_sync_accepts_queued_at_metadata(monkeypatch, tmp_path) -> None:
 def test_stage2_meal_plan_mutations_reject_unknown_fields(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 
-    class FakeClient:
+    class FakeClient(MealPlanRowStatefulClient):
         async def list_recipes(self, search=None, limit=20, keyword_ids=None):
             return {"results": [{"id": 9, "name": "Default Pantry Pick"}]}
 
@@ -217,7 +365,7 @@ def test_stage2_shopping_mutations_reject_unknown_fields(monkeypatch, tmp_path) 
 def test_stage2_meal_plan_uses_all_recipes_when_no_keywords_selected(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 
-    class FakeClient:
+    class FakeClient(MealPlanRowStatefulClient):
         async def list_recipes(self, search=None, limit=20, keyword_ids=None):
             assert keyword_ids is None
             return {"results": [{"id": 9, "name": "Default Pantry Pick"}]}
@@ -239,7 +387,7 @@ def test_stage2_meal_plan_uses_all_recipes_when_no_keywords_selected(monkeypatch
 def test_stage2_meal_plan_uses_default_diners_when_missing(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 
-    class FakeClient:
+    class FakeClient(MealPlanRowStatefulClient):
         async def list_recipes(self, search=None, limit=20, keyword_ids=None):
             return {"results": [{"id": 19, "name": "Default Diners Recipe"}]}
 
@@ -266,7 +414,11 @@ def test_stage2_meal_plan_uses_default_diners_when_missing(monkeypatch, tmp_path
 def test_stage2_meal_plan_generate_and_entry_ops(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 
-    class FakeClient:
+    class FakeClient(MealPlanRowStatefulClient):
+        def __init__(self) -> None:
+            self.meal_plan_rows: dict[int, dict] = {}
+            self.next_meal_plan_row_id = 1
+
         async def list_recipes(self, search=None, limit=20, keyword_ids=None):
             return {
                 "results": [
@@ -301,6 +453,22 @@ def test_stage2_meal_plan_generate_and_entry_ops(monkeypatch, tmp_path) -> None:
                     }
                 ]
             }
+
+        async def list_meal_plans(self, limit=50):
+            rows = list(self.meal_plan_rows.values())
+            rows.sort(key=lambda row: int(row.get("id", 0)))
+            return {"results": rows[:limit]}
+
+        async def create_meal_plan(self, payload):
+            row_id = self.next_meal_plan_row_id
+            self.next_meal_plan_row_id += 1
+            row = {"id": row_id, **payload}
+            self.meal_plan_rows[row_id] = row
+            return row
+
+        async def delete_meal_plan(self, meal_id):
+            self.meal_plan_rows.pop(int(meal_id), None)
+            return {"deleted": int(meal_id)}
 
     monkeypatch.setattr("app.api.client", FakeClient())
 
@@ -355,10 +523,258 @@ def test_stage2_meal_plan_generate_and_entry_ops(monkeypatch, tmp_path) -> None:
     assert shop_res.json()["data"]["shopping_view"] is not None
 
 
+def test_stage2_meal_plan_shopping_generate_add_remove_sequences(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+    monkeypatch.setattr("app.api.client", MealPlanShoppingStatefulClient())
+
+    gen_res = client.post(
+        "/api/v1/meal-plans/generate",
+        json={
+            "start_date": "2026-08-17",
+            "length_days": 1,
+            "diners": 2,
+        },
+    )
+    assert gen_res.status_code == 200
+    plan = gen_res.json()["data"]
+    plan_id = int(plan["plan_id"])
+    entry_id = int(plan["entries"][0]["entry_id"])
+
+    set_primary = client.patch(
+        f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
+        json={"recipe": {"id": 301, "title": "Enchiladas"}, "extra_recipes": []},
+    )
+    assert set_primary.status_code == 200
+
+    first_generate = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
+    assert first_generate.status_code == 200
+    assert shopping_item_count_from_view() > 0
+    assert shopping_recipe_ids_from_view() == {301}
+
+    remove_primary = client.patch(
+        f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
+        json={"recipe": None, "extra_recipes": []},
+    )
+    assert remove_primary.status_code == 200
+    second_generate = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
+    assert second_generate.status_code == 200
+    assert shopping_item_count_from_view() == 0
+
+    add_two_meal_recipes = client.patch(
+        f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
+        json={
+            "recipe": {"id": 301, "title": "Enchiladas"},
+            "extra_recipes": [
+                {"purpose": "meal", "recipe": {"id": 302, "title": "One Pot Pasta"}}
+            ],
+        },
+    )
+    assert add_two_meal_recipes.status_code == 200
+
+    third_generate = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
+    assert third_generate.status_code == 200
+    assert shopping_recipe_ids_from_view() == {301, 302}
+
+    remove_one_recipe = client.patch(
+        f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
+        json={
+            "recipe": {"id": 301, "title": "Enchiladas"},
+            "extra_recipes": [],
+        },
+    )
+    assert remove_one_recipe.status_code == 200
+
+    fourth_generate = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
+    assert fourth_generate.status_code == 200
+    assert shopping_recipe_ids_from_view() == {301}
+
+    remove_last_recipe = client.patch(
+        f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
+        json={"recipe": None, "extra_recipes": []},
+    )
+    assert remove_last_recipe.status_code == 200
+    fifth_generate = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
+    assert fifth_generate.status_code == 200
+    assert shopping_item_count_from_view() == 0
+
+
+def test_stage2_meal_plan_shopping_generate_with_shopping_only_and_removals(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+    monkeypatch.setattr("app.api.client", MealPlanShoppingStatefulClient())
+
+    gen_res = client.post(
+        "/api/v1/meal-plans/generate",
+        json={
+            "start_date": "2026-08-17",
+            "length_days": 1,
+            "diners": 2,
+        },
+    )
+    assert gen_res.status_code == 200
+    plan = gen_res.json()["data"]
+    plan_id = int(plan["plan_id"])
+    entry_id = int(plan["entries"][0]["entry_id"])
+
+    configure_mixed = client.patch(
+        f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
+        json={
+            "recipe": {"id": 301, "title": "Enchiladas"},
+            "extra_recipes": [
+                {"purpose": "shopping_only", "recipe": {"id": 303, "title": "Pantry Refill"}}
+            ],
+        },
+    )
+    assert configure_mixed.status_code == 200
+
+    first_generate = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
+    assert first_generate.status_code == 200
+    assert shopping_recipe_ids_from_view() == {301, 303}
+
+    remove_primary_keep_shopping = client.patch(
+        f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
+        json={
+            "recipe": None,
+            "extra_recipes": [
+                {"purpose": "shopping_only", "recipe": {"id": 303, "title": "Pantry Refill"}}
+            ],
+        },
+    )
+    assert remove_primary_keep_shopping.status_code == 200
+    second_generate = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
+    assert second_generate.status_code == 200
+    assert shopping_recipe_ids_from_view() == {303}
+
+    remove_shopping_only = client.patch(
+        f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
+        json={"recipe": None, "extra_recipes": []},
+    )
+    assert remove_shopping_only.status_code == 200
+    third_generate = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
+    assert third_generate.status_code == 200
+    assert shopping_item_count_from_view() == 0
+
+
+def test_stage2_meal_plan_shopping_list_rejects_invalid_mode(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+    monkeypatch.setattr("app.api.client", MealPlanShoppingStatefulClient())
+
+    gen_res = client.post(
+        "/api/v1/meal-plans/generate",
+        json={
+            "start_date": "2026-08-17",
+            "length_days": 1,
+            "diners": 2,
+        },
+    )
+    assert gen_res.status_code == 200
+    plan_id = int(gen_res.json()["data"]["plan_id"])
+
+    res = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list?mode=bad_mode")
+    assert res.status_code == 400
+
+
+def test_stage2_meal_plan_shopping_regenerate_missing_adds_only_missing(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+    monkeypatch.setattr("app.api.client", MealPlanShoppingStatefulClient())
+
+    gen_res = client.post(
+        "/api/v1/meal-plans/generate",
+        json={
+            "start_date": "2026-08-17",
+            "length_days": 1,
+            "diners": 2,
+        },
+    )
+    assert gen_res.status_code == 200
+    plan = gen_res.json()["data"]
+    plan_id = int(plan["plan_id"])
+    entry_id = int(plan["entries"][0]["entry_id"])
+
+    set_primary = client.patch(
+        f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
+        json={"recipe": {"id": 301, "title": "Enchiladas"}, "extra_recipes": []},
+    )
+    assert set_primary.status_code == 200
+
+    first = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
+    assert first.status_code == 200
+    assert first.json()["data"]["mode"] == "sync"
+
+    view_before = client.get("/api/v1/shopping-list/view")
+    assert view_before.status_code == 200
+    before_remaining = view_before.json()["data"]["sections"]["remaining"]
+    assert len(before_remaining) > 0
+    removed_id = int(before_remaining[0]["id"])
+
+    remove_entry = client.delete(f"/api/v1/shopping-list/entries/{removed_id}")
+    assert remove_entry.status_code == 200
+
+    second = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list?mode=regenerate_missing")
+    assert second.status_code == 200
+    second_data = second.json()["data"]
+    assert second_data["mode"] == "regenerate_missing"
+    assert second_data["created_count"] > 0
+
+    view_after = client.get("/api/v1/shopping-list/view")
+    assert view_after.status_code == 200
+    after_remaining = view_after.json()["data"]["sections"]["remaining"]
+    assert len(after_remaining) >= len(before_remaining)
+
+
+def test_stage2_meal_plan_remove_and_readd_same_recipe_on_day_regenerates_items(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+    monkeypatch.setattr("app.api.client", MealPlanShoppingStatefulClient())
+
+    gen_res = client.post(
+        "/api/v1/meal-plans/generate",
+        json={
+            "start_date": "2026-08-17",
+            "length_days": 1,
+            "diners": 2,
+        },
+    )
+    assert gen_res.status_code == 200
+    plan = gen_res.json()["data"]
+    plan_id = int(plan["plan_id"])
+    entry_id = int(plan["entries"][0]["entry_id"])
+
+    set_primary = client.patch(
+        f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
+        json={"recipe": {"id": 301, "title": "Enchiladas"}, "extra_recipes": []},
+    )
+    assert set_primary.status_code == 200
+
+    first_generate = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
+    assert first_generate.status_code == 200
+    assert shopping_recipe_ids_from_view() == {301}
+    assert shopping_item_count_from_view() > 0
+
+    remove_recipe = client.patch(
+        f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
+        json={"recipe": None, "extra_recipes": []},
+    )
+    assert remove_recipe.status_code == 200
+
+    second_generate = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
+    assert second_generate.status_code == 200
+    assert shopping_item_count_from_view() == 0
+
+    readd_recipe = client.patch(
+        f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
+        json={"recipe": {"id": 301, "title": "Enchiladas"}, "extra_recipes": []},
+    )
+    assert readd_recipe.status_code == 200
+
+    third_generate = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
+    assert third_generate.status_code == 200
+    assert shopping_recipe_ids_from_view() == {301}
+    assert shopping_item_count_from_view() > 0
+
+
 def test_stage2_patch_meal_plan_start_date_rebases_entries(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 
-    class FakeClient:
+    class FakeClient(MealPlanRowStatefulClient):
         async def list_recipes(self, search=None, limit=20, keyword_ids=None):
             return {"results": [{"id": 70, "name": "Sheet Pan"}]}
 
@@ -393,7 +809,7 @@ def test_stage2_patch_meal_plan_start_date_rebases_entries(monkeypatch, tmp_path
 def test_stage2_no_repeat_blocks_recent_recipe(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 
-    class FakeClient:
+    class FakeClient(MealPlanRowStatefulClient):
         async def list_recipes(self, search=None, limit=20, keyword_ids=None):
             return {"results": [{"id": 101, "name": "Repeat Candidate"}]}
 
@@ -427,7 +843,7 @@ def test_stage2_no_repeat_blocks_recent_recipe(monkeypatch, tmp_path) -> None:
 def test_stage2_no_repeat_zero_allows_reuse(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 
-    class FakeClient:
+    class FakeClient(MealPlanRowStatefulClient):
         async def list_recipes(self, search=None, limit=20, keyword_ids=None):
             return {"results": [{"id": 202, "name": "Always Allowed"}]}
 
@@ -462,7 +878,7 @@ def test_stage2_no_repeat_zero_allows_reuse(monkeypatch, tmp_path) -> None:
 def test_stage2_stored_meal_plan_list_and_delete(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 
-    class FakeClient:
+    class FakeClient(MealPlanRowStatefulClient):
         async def list_recipes(self, search=None, limit=20, keyword_ids=None):
             return {"results": [{"id": 77, "name": "Rice Bowl"}]}
 
@@ -541,7 +957,7 @@ def test_stage2_stored_meal_plans_sorted_by_start_date_proximity(monkeypatch, tm
 def test_stage2_shopping_view_and_sync(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 
-    class FakeClient:
+    class FakeClient(MealPlanRowStatefulClient):
         async def list_shopping_entries(self, limit=100):
             return {
                 "results": [
@@ -641,7 +1057,7 @@ def test_stage2_shopping_view_and_sync(monkeypatch, tmp_path) -> None:
 def test_stage2_shopping_view_uses_supermarket_category_name(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 
-    class FakeClient:
+    class FakeClient(MealPlanRowStatefulClient):
         async def list_shopping_entries(self, limit=100):
             return {
                 "results": [
@@ -825,7 +1241,11 @@ def test_stage2_plan_shopping_uses_recipe_shopping_update(monkeypatch, tmp_path)
 
     attempted_updates: list[dict] = []
 
-    class FakeClient:
+    class FakeClient(MealPlanRowStatefulClient):
+        def __init__(self) -> None:
+            self.meal_plan_rows: dict[int, dict] = {}
+            self.next_meal_plan_row_id = 1
+
         async def list_recipes(self, search=None, limit=20, keyword_ids=None):
             return {"results": [{"id": 88, "name": "Fallback Recipe"}]}
 
@@ -849,6 +1269,22 @@ def test_stage2_plan_shopping_uses_recipe_shopping_update(monkeypatch, tmp_path)
         async def list_shopping_entries(self, limit=100):
             return {"results": []}
 
+        async def list_meal_plans(self, limit=50):
+            rows = list(self.meal_plan_rows.values())
+            rows.sort(key=lambda row: int(row.get("id", 0)))
+            return {"results": rows[:limit]}
+
+        async def create_meal_plan(self, payload):
+            row_id = self.next_meal_plan_row_id
+            self.next_meal_plan_row_id += 1
+            row = {"id": row_id, **payload}
+            self.meal_plan_rows[row_id] = row
+            return row
+
+        async def delete_meal_plan(self, meal_id):
+            self.meal_plan_rows.pop(int(meal_id), None)
+            return {"deleted": int(meal_id)}
+
     monkeypatch.setattr("app.api.client", FakeClient())
     client.put("/api/v1/config/keywords/selected", json={"keyword_ids": [3]})
 
@@ -862,7 +1298,12 @@ def test_stage2_plan_shopping_uses_recipe_shopping_update(monkeypatch, tmp_path)
     shopping_res = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
     assert shopping_res.status_code == 200
     assert shopping_res.json()["data"]["failed"] == []
-    assert len(shopping_res.json()["data"]["created"]) == 1
+    created_recipe_updates = [
+        row
+        for row in shopping_res.json()["data"]["created"]
+        if row.get("operation") == "recipe_shopping_update"
+    ]
+    assert len(created_recipe_updates) == 1
     assert len(attempted_updates) == 1
     assert attempted_updates[0]["recipe_id"] == 88
     assert attempted_updates[0]["payload"]["servings"] == 2
@@ -889,7 +1330,7 @@ def test_stage2_write_route_blocked_when_read_only(monkeypatch, tmp_path) -> Non
 def test_stage2_ad_hoc_entries_persist_locally_and_merge(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 
-    class FakeClient:
+    class FakeClient(MealPlanRowStatefulClient):
         async def list_shopping_entries(self, limit=100):
             return {
                 "results": [
@@ -969,7 +1410,7 @@ def test_stage2_ad_hoc_create_allowed_when_tandoor_writes_disabled(monkeypatch, 
     use_temp_state(monkeypatch, tmp_path)
     from app import api as api_module
 
-    class FakeClient:
+    class FakeClient(MealPlanRowStatefulClient):
         async def list_shopping_entries(self, limit=100):
             return {"results": []}
 

@@ -685,6 +685,7 @@ async def generate_meal_plan(payload: GenerateMealPlanRequest = Body(...)) -> di
         },
         keyword_ids=keyword_ids,
         no_repeat_days=no_repeat_days,
+        ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
     )
 
 
@@ -724,18 +725,10 @@ async def get_meal_plan_stage2(plan_id: int) -> dict:
 
 @router.delete("/meal-plans/stored/{plan_id}")
 async def delete_stored_meal_plan(plan_id: int) -> dict:
-    deleted = stage2_state.delete_meal_plan(plan_id)
-    if deleted is None:
-        raise HTTPException(status_code=404, detail="Meal plan not found.")
-
-    stage2_state.append_sync_event("meal_plan_deleted", {"plan_id": plan_id})
-    return {
-        "source": "local-state",
-        "data": {
-            "deleted": True,
-            "plan_id": plan_id,
-        },
-    }
+    return await _meal_plan_service().delete_plan(
+        plan_id,
+        ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
+    )
 
 
 @router.patch("/meal-plans/{plan_id}")
@@ -743,6 +736,7 @@ async def patch_meal_plan_stage2(plan_id: int, payload: MealPlanPatchRequest = B
     return await _meal_plan_service().patch_plan(
         plan_id,
         payload.model_dump(mode="python", exclude_unset=True),
+        ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
     )
 
 
@@ -751,6 +745,7 @@ async def add_meal_plan_entry(plan_id: int, payload: MealPlanEntryCreateRequest 
     return await _meal_plan_service().add_entry(
         plan_id,
         payload.model_dump(mode="python", exclude_unset=True),
+        ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
     )
 
 
@@ -764,18 +759,30 @@ async def patch_meal_plan_entry(
         plan_id,
         entry_id,
         payload.model_dump(mode="python", exclude_unset=True),
+        ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
     )
 
 
 @router.delete("/meal-plans/{plan_id}/entries/{entry_id}")
 async def delete_meal_plan_entry(plan_id: int, entry_id: int) -> dict:
-    return await _meal_plan_service().delete_entry(plan_id, entry_id)
+    return await _meal_plan_service().delete_entry(
+        plan_id,
+        entry_id,
+        ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
+    )
 
 
 @router.post("/meal-plans/{plan_id}/shopping-list")
-async def meal_plan_to_shopping_list(plan_id: int) -> dict:
+async def meal_plan_to_shopping_list(
+    plan_id: int,
+    mode: str = Query(default="sync"),
+) -> dict:
+    if mode not in {"sync", "regenerate_missing"}:
+        raise HTTPException(status_code=400, detail="mode must be 'sync' or 'regenerate_missing'.")
+
     return await _meal_plan_service().generate_shopping_from_plan(
         plan_id=plan_id,
+        mode=mode,
         ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
         build_shopping_view=_build_shopping_view,
     )

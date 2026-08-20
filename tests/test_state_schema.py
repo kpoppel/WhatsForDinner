@@ -13,14 +13,14 @@ def test_stage2_state_writes_schema_version(tmp_path) -> None:
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
 
 
 def test_stage2_state_invalid_payload_fails_fast(tmp_path) -> None:
     state = Stage2State(str(tmp_path))
 
     invalid_payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "selected_keyword_ids": [],
         "meal_plan_rules": {"no_repeat_days": "bad"},
         "user_settings": {
@@ -34,6 +34,7 @@ def test_stage2_state_invalid_payload_fails_fast(tmp_path) -> None:
         "shopping_item_metadata": {},
         "local_shopping_entries": {},
         "next_local_shopping_entry_id": -1,
+        "meal_plan_instance_sync": {},
         "shopping_sync_events": [],
         "next_sync_event_id": 1,
     }
@@ -74,3 +75,34 @@ def test_stage2_state_sync_event_retention_by_max_age(tmp_path) -> None:
     parsed_new = datetime.fromisoformat(events[0]["created_at"].replace("Z", "+00:00"))
     assert parsed_new.tzinfo is not None
     assert parsed_new.astimezone(timezone.utc).year >= 2026
+
+
+def test_stage2_state_migrates_v1_payload_to_v2(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+
+    legacy_payload = {
+        "schema_version": 1,
+        "selected_keyword_ids": [],
+        "meal_plan_rules": {"no_repeat_days": 30},
+        "user_settings": {
+            "default_diners": 2,
+            "default_notification_time": "08:00",
+        },
+        "meal_plans": {},
+        "next_meal_plan_id": 1,
+        "next_entry_id": 1,
+        "shopping_status_overrides": {},
+        "shopping_item_metadata": {},
+        "local_shopping_entries": {},
+        "next_local_shopping_entry_id": -1,
+        "shopping_sync_events": [],
+        "next_sync_event_id": 1,
+    }
+    state.state_file.write_text(json.dumps(legacy_payload), encoding="utf-8")
+
+    assert state.selected_keywords() == []
+    state.set_selected_keywords([])
+    with state.state_file.open("r", encoding="utf-8") as fp:
+        payload = json.load(fp)
+    assert payload["schema_version"] == 2
+    assert payload["meal_plan_instance_sync"] == {}

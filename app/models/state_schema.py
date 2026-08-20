@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CURRENT_STATE_SCHEMA_VERSION = 1
+CURRENT_STATE_SCHEMA_VERSION = 2
 
 
 class MealPlanRulesModel(BaseModel):
@@ -29,6 +29,27 @@ class ShoppingSyncEventModel(BaseModel):
     created_at: str | None = None
 
 
+class ShoppingInstanceSyncRowModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    instance_key: str
+    entry_id: int
+    recipe_id: int
+    role: Literal["primary", "extra"]
+    slot_index: int | None = None
+    purpose: str | None = None
+    date: str
+    servings: int
+    entry_ids: list[int] = Field(default_factory=list)
+    meal_plan_row_id: int | None = None
+
+
+class MealPlanInstanceSyncModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    instances: dict[str, ShoppingInstanceSyncRowModel] = Field(default_factory=dict)
+
+
 class Stage2StateDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -43,6 +64,7 @@ class Stage2StateDocument(BaseModel):
     shopping_item_metadata: dict[str, dict[str, Any]]
     local_shopping_entries: dict[str, dict[str, Any]]
     next_local_shopping_entry_id: int
+    meal_plan_instance_sync: dict[str, MealPlanInstanceSyncModel] = Field(default_factory=dict)
     shopping_sync_events: list[ShoppingSyncEventModel]
     next_sync_event_id: int
 
@@ -63,6 +85,7 @@ def default_state_payload() -> dict[str, Any]:
         "shopping_item_metadata": {},
         "local_shopping_entries": {},
         "next_local_shopping_entry_id": -1,
+        "meal_plan_instance_sync": {},
         "shopping_sync_events": [],
         "next_sync_event_id": 1,
     }

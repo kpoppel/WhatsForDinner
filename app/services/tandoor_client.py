@@ -51,8 +51,11 @@ class TandoorClient:
                     return response.json()
                 return {"status": "ok"}
         except httpx.HTTPStatusError as exc:
+            body = exc.response.text.strip()
+            body_snippet = body[:300] if body else ""
             raise TandoorError(
                 f"Tandoor returned {exc.response.status_code} for {path}."
+                + (f" Response: {body_snippet}" if body_snippet else "")
             ) from exc
         except httpx.HTTPError as exc:
             raise TandoorError(f"Unable to reach Tandoor at {self.base_url}.") from exc
@@ -138,6 +141,9 @@ class TandoorClient:
 
     async def list_tags(self) -> Any:
         return await self._get("/api/keyword/")
+
+    async def list_meal_types(self, limit: int = 50) -> Any:
+        return await self._get("/api/meal-type/", params={"page_size": limit})
 
     @staticmethod
     def normalize_recipe(recipe: dict[str, Any]) -> dict[str, Any]:

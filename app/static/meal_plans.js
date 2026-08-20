@@ -33,10 +33,15 @@ import { assertRequiredFields } from "./js/contracts.js";
   const mealEditorModal = document.getElementById("wf-meal-editor-modal");
   const mealEditorEntryIdInput = document.getElementById("wf-meal-editor-entry-id");
   const mealEditorNameField = document.getElementById("wf-meal-editor-name-field");
-  const mealEditorSearchField = document.getElementById("wf-meal-editor-search-field");
   const mealEditorNameInput = document.getElementById("wf-meal-editor-name");
-  const mealEditorSearchInput = document.getElementById("wf-meal-editor-search");
-  const mealEditorSearchResults = document.getElementById("wf-meal-editor-search-results");
+  const mealEditorRecipesField = document.getElementById("wf-meal-editor-recipes-field");
+  const mealEditorRecipesList = document.getElementById("wf-meal-editor-recipes-list");
+  const mealEditorRecipesAddButton = document.getElementById("wf-meal-editor-recipes-add-btn");
+  const mealEditorRecipesAddRow = document.getElementById("wf-meal-editor-recipes-add-row");
+  const mealEditorRecipesSearchInput = document.getElementById("wf-meal-editor-recipes-search");
+  const mealEditorRecipesSearchResults = document.getElementById("wf-meal-editor-recipes-search-results");
+  const mealEditorRecipesPurpose = document.getElementById("wf-meal-editor-recipes-purpose");
+  const mealEditorRecipesAddCancel = document.getElementById("wf-meal-editor-recipes-add-cancel");
   const mealEditorModes = Array.from(document.querySelectorAll("#wf-meal-editor-modes [data-mode]"));
   const mealEditorDinersField = document.getElementById("wf-meal-editor-diners-field");
   const mealEditorDinersDown = document.getElementById("wf-meal-editor-diners-down");
@@ -71,10 +76,15 @@ import { assertRequiredFields } from "./js/contracts.js";
     !(mealEditorModal instanceof HTMLElement) ||
     !(mealEditorEntryIdInput instanceof HTMLInputElement) ||
     !(mealEditorNameField instanceof HTMLElement) ||
-    !(mealEditorSearchField instanceof HTMLElement) ||
     !(mealEditorNameInput instanceof HTMLInputElement) ||
-    !(mealEditorSearchInput instanceof HTMLInputElement) ||
-    !(mealEditorSearchResults instanceof HTMLElement) ||
+    !(mealEditorRecipesField instanceof HTMLElement) ||
+    !(mealEditorRecipesList instanceof HTMLElement) ||
+    !(mealEditorRecipesAddButton instanceof HTMLButtonElement) ||
+    !(mealEditorRecipesAddRow instanceof HTMLElement) ||
+    !(mealEditorRecipesSearchInput instanceof HTMLInputElement) ||
+    !(mealEditorRecipesSearchResults instanceof HTMLElement) ||
+    !(mealEditorRecipesPurpose instanceof HTMLElement) ||
+    !(mealEditorRecipesAddCancel instanceof HTMLButtonElement) ||
     !(mealEditorDinersField instanceof HTMLElement) ||
     !(mealEditorDinersDown instanceof HTMLButtonElement) ||
     !(mealEditorDinersUp instanceof HTMLButtonElement) ||
@@ -106,10 +116,12 @@ import { assertRequiredFields } from "./js/contracts.js";
   const planPreviewTitlesById = new Map();
   let generateModalClosing = false;
 
-  let editorSelectedRecipe = null;
+  let editorRecipes = [];
   let editorMode = "planned";
   let editorServings = 2;
   let editorSearchTimer = 0;
+  let editorAddRecipePurpose = "meal";
+  let editorMealTitleManuallySet = false;
   let mealEditorClosing = false;
 
   let draggedEntryId = null;
@@ -117,6 +129,12 @@ import { assertRequiredFields } from "./js/contracts.js";
   let touchDropEntryId = null;
   let touchDropPlacement = "before";
   let mealPlanApiReachable = true;
+  let generateShoppingInFlight = false;
+  let generateShoppingLongPressTimer = 0;
+  let generateShoppingLongPressTriggered = false;
+  let generateShoppingSuppressClick = false;
+
+  const GENERATE_SHOPPING_LONG_PRESS_MS = 700;
 
   function writeActiveMealPlanId(planId) {
     storeWriteActiveMealPlanId(planId);
@@ -184,6 +202,10 @@ import { assertRequiredFields } from "./js/contracts.js";
 
   function setStatus(message) {
     statusNode.textContent = message;
+  }
+
+  function setGenerateShoppingLongPressActive(isActive) {
+    generateShoppingButton.classList.toggle("is-long-press-active", isActive);
   }
 
   function publishDataChanged() {
@@ -1114,30 +1136,77 @@ import { assertRequiredFields } from "./js/contracts.js";
     setStatus(`Loaded meal plan ${planDateRangeLabel(selectedPlan)}.`);
   }
 
-  async function generateShoppingList() {
+  async function generateShoppingList(mode = "sync") {
     assertMealPlanWriteAllowed("generate a shopping list from meal plans");
     if (!Number.isInteger(selectedPlanId)) {
       throw new Error("Select a meal plan first.");
     }
+    if (generateShoppingInFlight) {
+      return;
+    }
+
+    generateShoppingInFlight = true;
 
     generateShoppingButton.disabled = true;
     const initialText = generateShoppingButton.textContent;
-    generateShoppingButton.textContent = "Generating...";
+    generateShoppingButton.textContent = mode === "regenerate_missing" ? "Re-generating..." : "Generating...";
 
     try {
-      const payload = await api(`/meal-plans/${selectedPlanId}/shopping-list`, {
+      const payload = await api(`/meal-plans/${selectedPlanId}/shopping-list?mode=${encodeURIComponent(mode)}`, {
         method: "POST",
       });
       assertRequiredFields(payload, ["data"], "Meal plan shopping response");
 
       const data = payload.data;
-      const createdCount = Number(data.created_count);
-      const failedCount = Number(data.failed_count);
-      setStatus(`Shopping list synced: ${createdCount} updates, ${failedCount} failures.`);
+      const createdCount = Number.isInteger(Number(data.created_count))
+        ? Number(data.created_count)
+        : (data.created instanceof Array ? data.created.length : 0);
+      const failedCount = Number.isInteger(Number(data.failed_count))
+        ? Number(data.failed_count)
+        : (data.failed instanceof Array ? data.failed.length : 0);
+      if (mode === "regenerate_missing") {
+        setStatus(`Shopping list regenerated: ${createdCount} updates, ${failedCount} failures.`);
+      } else {
+        setStatus(`Shopping list synced: ${createdCount} updates, ${failedCount} failures.`);
+      }
     } finally {
+      generateShoppingInFlight = false;
       generateShoppingButton.disabled = false;
       generateShoppingButton.textContent = initialText;
+      setGenerateShoppingLongPressActive(false);
     }
+  }
+
+  function clearGenerateShoppingLongPressTimer() {
+    if (generateShoppingLongPressTimer !== 0) {
+      clearTimeout(generateShoppingLongPressTimer);
+      generateShoppingLongPressTimer = 0;
+    }
+  }
+
+  function startGenerateShoppingLongPress() {
+    if (isMealPlanOfflineReadOnly()) {
+      return;
+    }
+    if (generateShoppingInFlight) {
+      return;
+    }
+    clearGenerateShoppingLongPressTimer();
+    generateShoppingLongPressTriggered = false;
+    generateShoppingSuppressClick = false;
+    generateShoppingLongPressTimer = window.setTimeout(() => {
+      generateShoppingLongPressTriggered = true;
+      generateShoppingSuppressClick = true;
+      generateShoppingLongPressTimer = 0;
+      setGenerateShoppingLongPressActive(true);
+      void runAction(async () => {
+        await generateShoppingList("regenerate_missing");
+      });
+    }, GENERATE_SHOPPING_LONG_PRESS_MS);
+  }
+
+  function endGenerateShoppingLongPress() {
+    clearGenerateShoppingLongPressTimer();
   }
 
   async function loadDefaultDinersForGenerateModal() {
@@ -1332,14 +1401,185 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
   }
 
+  function firstEditorRecipe() {
+    if (!Array.isArray(editorRecipes) || editorRecipes.length === 0) {
+      return null;
+    }
+    const first = editorRecipes[0];
+    if (!first || typeof first !== "object") {
+      return null;
+    }
+    return first;
+  }
+
+  function recipePurposeDescription(purpose, index) {
+    if (purpose === "shopping_only") {
+      return "Shopping list only";
+    }
+    if (index === 0) {
+      return "Part of tonight's meal";
+    }
+    return "Part of meal";
+  }
+
+  function syncMealTitleFromFirstRecipe() {
+    if (editorMealTitleManuallySet) {
+      return;
+    }
+    const first = firstEditorRecipe();
+    if (first && typeof first.title === "string") {
+      mealEditorNameInput.value = first.title;
+      return;
+    }
+    mealEditorNameInput.value = "";
+  }
+
+  function updateRecipePurposePills(container, selectedPurpose) {
+    const purposeButtons = Array.from(container.querySelectorAll("[data-purpose]"));
+    for (const button of purposeButtons) {
+      if (!(button instanceof HTMLButtonElement)) {
+        continue;
+      }
+      const purpose = String(button.dataset.purpose);
+      const selected = purpose === selectedPurpose;
+      button.classList.toggle("is-active", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    }
+  }
+
+  function setAddRecipePurpose(purpose) {
+    editorAddRecipePurpose = purpose === "shopping_only" ? "shopping_only" : "meal";
+    updateRecipePurposePills(mealEditorRecipesPurpose, editorAddRecipePurpose);
+  }
+
+  function renderEditorRecipeCards() {
+    mealEditorRecipesList.innerHTML = "";
+
+    if (!Array.isArray(editorRecipes) || editorRecipes.length === 0) {
+      return;
+    }
+
+    editorRecipes.forEach((recipe, index) => {
+      const row = document.createElement("div");
+      row.className = "wf-extra-row";
+
+      const name = document.createElement("div");
+      name.className = "wf-extra-row-name";
+      const main = document.createElement("span");
+      main.className = "wf-extra-row-name-main";
+      main.textContent = String(recipe.title);
+      const sub = document.createElement("small");
+      sub.textContent = recipePurposeDescription(String(recipe.purpose || "meal"), index);
+      name.appendChild(main);
+      name.appendChild(sub);
+
+      const purpose = document.createElement("div");
+      purpose.className = "wf-extra-row-purpose";
+
+      const mealButton = document.createElement("button");
+      mealButton.className = "wf-pill-btn is-small";
+      mealButton.type = "button";
+      mealButton.textContent = "Meal";
+      mealButton.dataset.purpose = "meal";
+
+      const shoppingButton = document.createElement("button");
+      shoppingButton.className = "wf-pill-btn is-small";
+      shoppingButton.type = "button";
+      shoppingButton.textContent = "Shopping only";
+      shoppingButton.dataset.purpose = "shopping_only";
+
+      purpose.appendChild(mealButton);
+      purpose.appendChild(shoppingButton);
+
+      const removeButton = document.createElement("button");
+      removeButton.className = "wf-extra-remove-btn";
+      removeButton.type = "button";
+      removeButton.setAttribute("aria-label", "Remove recipe");
+      removeButton.textContent = "x";
+
+      const selectedPurpose = String(recipe.purpose || "meal");
+      updateRecipePurposePills(purpose, selectedPurpose);
+
+      mealButton.addEventListener("click", () => {
+        editorRecipes[index].purpose = "meal";
+        renderEditorRecipeCards();
+      });
+
+      shoppingButton.addEventListener("click", () => {
+        editorRecipes[index].purpose = "shopping_only";
+        renderEditorRecipeCards();
+      });
+
+      removeButton.addEventListener("click", () => {
+        editorRecipes = editorRecipes.filter((_, recipeIndex) => recipeIndex !== index);
+        renderEditorRecipeCards();
+        syncMealTitleFromFirstRecipe();
+      });
+
+      row.appendChild(name);
+      row.appendChild(purpose);
+      row.appendChild(removeButton);
+      mealEditorRecipesList.appendChild(row);
+    });
+  }
+
+  function setEditorRecipes(recipes) {
+    if (!Array.isArray(recipes)) {
+      editorRecipes = [];
+      renderEditorRecipeCards();
+      syncMealTitleFromFirstRecipe();
+      return;
+    }
+
+    const normalized = [];
+    for (const recipe of recipes) {
+      if (!recipe || typeof recipe !== "object") {
+        continue;
+      }
+      const title = String(recipe.title || "").trim();
+      if (title.length === 0) {
+        continue;
+      }
+
+      const id = Number(recipe.id);
+      const purpose = recipe.purpose === "shopping_only" ? "shopping_only" : "meal";
+      normalized.push({
+        title,
+        purpose,
+        id: Number.isInteger(id) ? id : null,
+      });
+    }
+
+    editorRecipes = normalized;
+    renderEditorRecipeCards();
+    syncMealTitleFromFirstRecipe();
+  }
+
+  function setAddRecipeRowVisible(visible) {
+    const show = Boolean(visible);
+    mealEditorRecipesAddRow.hidden = !show;
+    mealEditorRecipesSearchResults.hidden = !show;
+    if (!show) {
+      mealEditorRecipesSearchInput.value = "";
+      mealEditorRecipesSearchResults.innerHTML = "";
+      if (editorSearchTimer) {
+        window.clearTimeout(editorSearchTimer);
+        editorSearchTimer = 0;
+      }
+      setAddRecipePurpose("meal");
+      return;
+    }
+    mealEditorRecipesSearchInput.focus();
+  }
+
   function renderMealEditorSearchResults(results) {
-    mealEditorSearchResults.innerHTML = "";
+    mealEditorRecipesSearchResults.innerHTML = "";
 
     if (!Array.isArray(results) || results.length === 0) {
       const empty = document.createElement("p");
       empty.className = "wf-meal-search-empty";
       empty.textContent = "No matching recipes.";
-      mealEditorSearchResults.appendChild(empty);
+      mealEditorRecipesSearchResults.appendChild(empty);
       return;
     }
 
@@ -1349,17 +1589,27 @@ import { assertRequiredFields } from "./js/contracts.js";
         continue;
       }
 
-      const title = String(result.title);
+      const title = String(result.title || "").trim();
+      if (title.length === 0) {
+        continue;
+      }
+
       const button = document.createElement("button");
       button.className = "wf-meal-search-option";
       button.type = "button";
       button.textContent = title;
       button.addEventListener("click", () => {
-        editorSelectedRecipe = { id, title };
-        mealEditorNameInput.value = title;
-        mealEditorSearchResults.innerHTML = "";
+        const existingIndex = editorRecipes.findIndex((row) => Number(row.id) === id);
+        if (existingIndex >= 0) {
+          editorRecipes[existingIndex].purpose = editorAddRecipePurpose;
+        } else {
+          editorRecipes.push({ id, title, purpose: editorAddRecipePurpose });
+        }
+        renderEditorRecipeCards();
+        syncMealTitleFromFirstRecipe();
+        setAddRecipeRowVisible(false);
       });
-      mealEditorSearchResults.appendChild(button);
+      mealEditorRecipesSearchResults.appendChild(button);
     }
   }
 
@@ -1398,10 +1648,14 @@ import { assertRequiredFields } from "./js/contracts.js";
   }
 
   async function searchRecipesLive() {
-    const query = mealEditorSearchInput.value.trim();
+    const query = mealEditorRecipesSearchInput.value.trim();
+
+    if (mealEditorRecipesAddRow.hidden) {
+      return;
+    }
 
     if (query.length < 2) {
-      mealEditorSearchResults.innerHTML = "";
+      mealEditorRecipesSearchResults.innerHTML = "";
       return;
     }
 
@@ -1431,25 +1685,19 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
 
     const showMealField = nextMode === "planned" || nextMode === "takeout" || nextMode === "empty";
-    const showSearchField = nextMode === "planned";
+    const showRecipesField = nextMode === "planned";
     const showDinersField = nextMode === "planned" || nextMode === "leftover" || nextMode === "takeout";
     const showReminderField = nextMode === "planned" || nextMode === "leftover";
 
     mealEditorNameField.hidden = !showMealField;
-    mealEditorSearchField.hidden = !showSearchField;
-    mealEditorSearchResults.hidden = !showSearchField;
+    mealEditorRecipesField.hidden = !showRecipesField;
     mealEditorDinersField.hidden = !showDinersField;
     mealEditorReminderField.hidden = !showReminderField;
 
     mealEditorNameInput.disabled = !showMealField;
-    mealEditorSearchInput.disabled = !showSearchField;
 
-    if (!showSearchField) {
-      mealEditorSearchInput.value = "";
-      mealEditorSearchResults.innerHTML = "";
-      if (nextMode !== "leftover") {
-        editorSelectedRecipe = null;
-      }
+    if (!showRecipesField) {
+      setAddRecipeRowVisible(false);
     }
 
     if (nextMode === "empty") {
@@ -1480,8 +1728,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     mealEditorClosing = true;
     mealEditorModal.hidden = true;
     mealEditorClosing = false;
-    mealEditorSearchResults.innerHTML = "";
-    mealEditorSearchInput.value = "";
+    setAddRecipeRowVisible(false);
   }
 
   function closeMealEditorIfBackdrop(event) {
@@ -1520,20 +1767,49 @@ import { assertRequiredFields } from "./js/contracts.js";
     mealEditorReminderText.value = reminder.text;
 
     const title = entryRecipeTitle(entry);
-    mealEditorNameInput.value = title === "No recipe" ? "" : title;
+    const baseRecipe = entry.recipe;
+    const extraRecipes = Array.isArray(entry.extra_recipes) ? entry.extra_recipes : [];
+    const recipeRows = [];
 
-    const recipe = entry.recipe;
-    if (recipe && typeof recipe === "object") {
-      const recipeId = Number(recipe.id);
-      const recipeTitle = typeof recipe.title === "string" ? recipe.title : "";
-      if (Number.isInteger(recipeId) && recipeTitle.trim().length > 0) {
-        editorSelectedRecipe = { id: recipeId, title: recipeTitle.trim() };
-      } else {
-        editorSelectedRecipe = null;
+    if (baseRecipe && typeof baseRecipe === "object") {
+      const baseTitle = String(baseRecipe.title || "").trim();
+      const baseId = Number(baseRecipe.id);
+      if (baseTitle.length > 0 || Number.isInteger(baseId)) {
+        recipeRows.push({
+          id: Number.isInteger(baseId) ? baseId : null,
+          title: baseTitle.length > 0 ? baseTitle : "Untitled recipe",
+          purpose: "meal",
+        });
       }
-    } else {
-      editorSelectedRecipe = null;
     }
+
+    for (const extraRecipe of extraRecipes) {
+      if (!extraRecipe || typeof extraRecipe !== "object") {
+        continue;
+      }
+      const recipe = extraRecipe.recipe;
+      if (!recipe || typeof recipe !== "object") {
+        continue;
+      }
+      const recipeTitle = String(recipe.title || "").trim();
+      if (recipeTitle.length === 0) {
+        continue;
+      }
+      const recipeId = Number(recipe.id);
+      const purpose = extraRecipe.purpose === "shopping_only" ? "shopping_only" : "meal";
+      recipeRows.push({
+        id: Number.isInteger(recipeId) ? recipeId : null,
+        title: recipeTitle,
+        purpose,
+      });
+    }
+
+    const normalizedTitle = title === "No recipe" ? "" : title;
+    const firstRecipeTitle = recipeRows.length > 0 ? String(recipeRows[0].title) : "";
+    editorMealTitleManuallySet = normalizedTitle.trim().length > 0 && normalizedTitle.trim() !== firstRecipeTitle.trim();
+    mealEditorNameInput.value = normalizedTitle;
+    setEditorRecipes(recipeRows);
+    setAddRecipeRowVisible(false);
 
     openMealEditorModal();
     mealEditorSaveButton.disabled = isMealPlanOfflineReadOnly();
@@ -1542,32 +1818,16 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
   }
 
-  function buildRecipePayloadFromEditor() {
-    if (editorMode === "leftover") {
-      if (editorSelectedRecipe && Number.isInteger(editorSelectedRecipe.id)) {
-        return {
-          id: editorSelectedRecipe.id,
-          title: editorSelectedRecipe.title,
-        };
-      }
+  function toEditorRecipePayload(recipe) {
+    const title = String(recipe.title || "").trim();
+    if (title.length === 0) {
       return null;
     }
-
-    if (editorMode === "planned" && editorSelectedRecipe && Number.isInteger(editorSelectedRecipe.id)) {
-      return {
-        id: editorSelectedRecipe.id,
-        title: editorSelectedRecipe.title,
-      };
+    const id = Number(recipe.id);
+    if (Number.isInteger(id)) {
+      return { id, title };
     }
-
-    const rawName = mealEditorNameInput.value.trim();
-    if (rawName.length === 0) {
-      return null;
-    }
-
-    return {
-      title: rawName,
-    };
+    return { title };
   }
 
   function buildLegacyNotes(reminderEnabled, reminderText) {
@@ -1596,11 +1856,38 @@ import { assertRequiredFields } from "./js/contracts.js";
     try {
       const reminderEnabled = mealEditorReminderEnabled.checked;
       const reminderText = mealEditorReminderText.value.trim();
+      const mealTitle = mealEditorNameInput.value.trim();
+      const primaryRecipe = editorRecipes.length > 0 ? toEditorRecipePayload(editorRecipes[0]) : null;
+      const extraRecipes = editorRecipes.slice(1)
+        .map((recipe) => {
+          const payloadRecipe = toEditorRecipePayload(recipe);
+          if (payloadRecipe === null) {
+            return null;
+          }
+          return {
+            purpose: recipe.purpose === "shopping_only" ? "shopping_only" : "meal",
+            recipe: payloadRecipe,
+          };
+        })
+        .filter((row) => row !== null);
+
+      let recipePayload = null;
+      if (editorMode === "planned") {
+        recipePayload = primaryRecipe;
+        if (recipePayload === null && mealTitle.length > 0) {
+          recipePayload = { title: mealTitle };
+        }
+      } else if (editorMode === "leftover") {
+        recipePayload = primaryRecipe;
+      } else if (mealTitle.length > 0) {
+        recipePayload = { title: mealTitle };
+      }
 
       const patch = {
         mode: editorMode,
         servings: editorServings,
-        recipe: buildRecipePayloadFromEditor(),
+        recipe: recipePayload,
+        extra_recipes: editorMode === "planned" ? extraRecipes : [],
         reminder_enabled: reminderEnabled,
         reminder_text: reminderText,
         notes: buildLegacyNotes(reminderEnabled, reminderText),
@@ -1632,8 +1919,17 @@ import { assertRequiredFields } from "./js/contracts.js";
     void runAction(addMealDay);
   });
   generateShoppingButton.addEventListener("click", () => {
+    if (generateShoppingSuppressClick || generateShoppingLongPressTriggered) {
+      generateShoppingSuppressClick = false;
+      generateShoppingLongPressTriggered = false;
+      return;
+    }
     void runAction(generateShoppingList);
   });
+  generateShoppingButton.addEventListener("pointerdown", startGenerateShoppingLongPress);
+  generateShoppingButton.addEventListener("pointerup", endGenerateShoppingLongPress);
+  generateShoppingButton.addEventListener("pointerleave", endGenerateShoppingLongPress);
+  generateShoppingButton.addEventListener("pointercancel", endGenerateShoppingLongPress);
 
   generateModal.addEventListener("click", closeGenerateModalIfBackdrop);
   startDateCancelButton.addEventListener("click", closeStartDateModal);
@@ -1655,9 +1951,28 @@ import { assertRequiredFields } from "./js/contracts.js";
     setEditorServings(editorServings + 1);
   });
 
-  mealEditorSearchInput.addEventListener("input", scheduleRecipeSearch);
+  mealEditorRecipesSearchInput.addEventListener("input", scheduleRecipeSearch);
+  mealEditorRecipesAddButton.addEventListener("click", () => {
+    if (editorMode !== "planned") {
+      return;
+    }
+    setAddRecipeRowVisible(true);
+  });
+  mealEditorRecipesAddCancel.addEventListener("click", () => {
+    setAddRecipeRowVisible(false);
+  });
+  mealEditorRecipesPurpose.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement)) {
+      return;
+    }
+    const purpose = String(target.dataset.purpose || "");
+    setAddRecipePurpose(purpose);
+  });
   mealEditorNameInput.addEventListener("input", () => {
-    editorSelectedRecipe = null;
+    const first = firstEditorRecipe();
+    const nextValue = mealEditorNameInput.value.trim();
+    editorMealTitleManuallySet = first ? nextValue !== String(first.title).trim() : nextValue.length > 0;
   });
 
   for (const button of mealEditorModes) {
