@@ -1,5 +1,6 @@
 services:
   app:
+    image: whatsfordinner:${DOCKER_IMAGE_VERSION:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
