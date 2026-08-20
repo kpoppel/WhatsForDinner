@@ -1,6 +1,13 @@
-(() => {
-  const apiPrefix = window.WFD_API_PREFIX;
+import {
+  api as storeApi,
+  cachePlanDetail as storeCachePlanDetail,
+  cachePlanListRows as storeCachePlanListRows,
+  writeActiveMealPlanId as storeWriteActiveMealPlanId,
+} from "./js/store/commands.js";
+import { readMealPlanCache as storeReadMealPlanCache } from "./js/store/selectors.js";
+import { assertRequiredFields } from "./js/contracts.js";
 
+(() => {
   const changeStartDateButton = document.getElementById("wf-plan-change-start-btn");
   const addDayButton = document.getElementById("wf-plan-add-day-btn");
   const generateShoppingButton = document.getElementById("wf-plan-generate-shopping-btn");
@@ -93,9 +100,6 @@
   });
 
   const generateSheetClass = "wf-plan-sheet-open";
-  const MEAL_PLAN_CACHE_KEY = "wfd.meal-plans.cache.v1";
-  const ACTIVE_MEAL_PLAN_ID_KEY = "wfd.active-meal-plan-id.v1";
-
   let activePlanId = null;
   let selectedPlanId = null;
   let selectedPlan = null;
@@ -115,64 +119,19 @@
   let mealPlanApiReachable = true;
 
   function writeActiveMealPlanId(planId) {
-    try {
-      if (!Number.isInteger(planId)) {
-        localStorage.removeItem(ACTIVE_MEAL_PLAN_ID_KEY);
-        return;
-      }
-      localStorage.setItem(ACTIVE_MEAL_PLAN_ID_KEY, String(planId));
-    } catch {
-      // Ignore localStorage failures.
-    }
+    storeWriteActiveMealPlanId(planId);
   }
 
   function readPlanCache() {
-    try {
-      const raw = localStorage.getItem(MEAL_PLAN_CACHE_KEY);
-      if (!raw) {
-        return { list: [], byId: {} };
-      }
-      const parsed = JSON.parse(raw);
-      const list = Array.isArray(parsed?.list) ? parsed.list : [];
-      const byId = parsed?.byId && typeof parsed.byId === "object" ? parsed.byId : {};
-      return { list, byId };
-    } catch {
-      return { list: [], byId: {} };
-    }
-  }
-
-  function writePlanCache(nextCache) {
-    try {
-      localStorage.setItem(MEAL_PLAN_CACHE_KEY, JSON.stringify(nextCache));
-    } catch {
-      // Ignore localStorage failures.
-    }
+    return storeReadMealPlanCache();
   }
 
   function cachePlanListRows(plans) {
-    const current = readPlanCache();
-    writePlanCache({
-      list: Array.isArray(plans) ? plans : [],
-      byId: current.byId,
-      updatedAt: new Date().toISOString(),
-    });
+    storeCachePlanListRows(plans);
   }
 
   function cachePlanDetail(plan) {
-    const planId = Number(plan?.plan_id);
-    if (!Number.isInteger(planId)) {
-      return;
-    }
-    const current = readPlanCache();
-    const byId = {
-      ...current.byId,
-      [String(planId)]: plan,
-    };
-    writePlanCache({
-      list: current.list,
-      byId,
-      updatedAt: new Date().toISOString(),
-    });
+    storeCachePlanDetail(plan);
   }
 
   function cachedPlanDetail(planId) {
@@ -253,31 +212,7 @@
   }
 
   async function api(path, options) {
-    let opts = {};
-    if (options && typeof options === "object") {
-      opts = options;
-    }
-
-    try {
-      const response = await fetch(`${apiPrefix}${path}`, {
-        headers: { "Content-Type": "application/json" },
-        ...opts,
-      });
-
-      const payload = await response.json();
-      if (!response.ok) {
-        if (typeof payload.detail === "string") {
-          throw new Error(payload.detail);
-        }
-        throw new Error(JSON.stringify(payload));
-      }
-
-      reportApiReachable(true);
-      return payload;
-    } catch (error) {
-      reportApiReachable(false);
-      throw error;
-    }
+    return await storeApi(path, options, reportApiReachable);
   }
 
   function parseIsoDate(text) {
@@ -1035,6 +970,7 @@
 
     try {
       const listPayload = await api("/meal-plans/stored");
+      assertRequiredFields(listPayload, ["data"], "Meal plan list response");
       const rawPlans = Array.isArray(listPayload.data) ? listPayload.data : [];
       plans = sortPlansMostRecentFirst(rawPlans);
       cachePlanListRows(plans);
@@ -1073,6 +1009,7 @@
     if (Number.isInteger(firstPlanId) && !planPreviewTitlesById.has(firstPlanId)) {
       try {
         const activePayload = await api(`/meal-plans/${firstPlanId}`);
+        assertRequiredFields(activePayload, ["data"], "Meal plan detail response");
         cachePlanPreview(activePayload.data);
         cachePlanDetail(activePayload.data);
       } catch {
@@ -1113,6 +1050,7 @@
     let planData = null;
     try {
       const payload = await api(`/meal-plans/${selectedPlanId}`);
+      assertRequiredFields(payload, ["data"], "Meal plan detail response");
       planData = payload.data;
     } catch {
       planData = cachedPlanDetail(selectedPlanId);
@@ -1146,6 +1084,7 @@
     let planData = null;
     try {
       const payload = await api(`/meal-plans/${planId}`);
+      assertRequiredFields(payload, ["data"], "Meal plan detail response");
       planData = payload.data;
     } catch {
       planData = cachedPlanDetail(planId);
@@ -1189,6 +1128,7 @@
       const payload = await api(`/meal-plans/${selectedPlanId}/shopping-list`, {
         method: "POST",
       });
+      assertRequiredFields(payload, ["data"], "Meal plan shopping response");
 
       const data = payload.data;
       const createdCount = Number(data.created_count);

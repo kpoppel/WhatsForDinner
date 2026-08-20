@@ -1,12 +1,23 @@
+import logging
+from uuid import uuid4
+
 from fastapi import FastAPI
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.requests import Request
+from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import router as api_router
 from app.config import settings
 from app.inspect_ui import render_inspector
+from app.logging_config import configure_logging
 from app.user_app import render_user_app
+
+configure_logging()
+logger = logging.getLogger("wfd.api")
 
 app = FastAPI(
     title=settings.app_name,
@@ -16,6 +27,28 @@ app = FastAPI(
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    correlation_id = request.headers.get("X-Correlation-ID") or str(uuid4())
+    request.state.correlation_id = correlation_id
+    response = await call_next(request)
+    response.headers["X-Correlation-ID"] = correlation_id
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    logger.warning(
+        "event=request_validation_failed method=%s path=%s correlation_id=%s errors=%s",
+        request.method,
+        request.url.path,
+        correlation_id,
+        exc.errors(),
+    )
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
 
 
 @app.get(f"{settings.api_v1_prefix}/openapi.json", include_in_schema=False)

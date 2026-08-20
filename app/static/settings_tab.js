@@ -1,6 +1,7 @@
-(() => {
-  const apiPrefix = window.WFD_API_PREFIX;
+import { api as storeApi } from "./js/store/commands.js";
+import { assertRequiredFields } from "./js/contracts.js";
 
+(() => {
   const panel = document.getElementById("wf-tab-settings");
   const dinersValueNode = document.getElementById("wf-settings-default-diners");
   const dinersDownButton = document.getElementById("wf-settings-diners-down");
@@ -123,25 +124,7 @@
   }
 
   async function api(path, options) {
-    let opts = {};
-    if (options && typeof options === "object") {
-      opts = options;
-    }
-
-    const response = await fetch(`${apiPrefix}${path}`, {
-      headers: { "Content-Type": "application/json" },
-      ...opts,
-    });
-
-    const payload = await response.json();
-    if (!response.ok) {
-      if (typeof payload.detail === "string") {
-        throw new Error(payload.detail);
-      }
-      throw new Error(JSON.stringify(payload));
-    }
-
-    return payload;
+    return await storeApi(path, options);
   }
 
   function selectedKeywordIds() {
@@ -295,6 +278,11 @@
     const rulesPayload = await api("/config/meal-plan-rules");
     const keywordsPayload = await api("/config/keywords");
     const selectedPayload = await api("/config/keywords/selected");
+
+    assertRequiredFields(userSettingsPayload, ["data"], "User settings response");
+    assertRequiredFields(rulesPayload, ["data"], "Meal plan rules response");
+    assertRequiredFields(keywordsPayload, ["data"], "Keyword catalog response");
+    assertRequiredFields(selectedPayload, ["selected_keyword_ids"], "Selected keywords response");
 
     const settingsData = userSettingsPayload.data;
     if (settingsData && typeof settingsData === "object") {

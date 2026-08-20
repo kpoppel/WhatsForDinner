@@ -1,5 +1,17 @@
+import {
+  api as storeApi,
+  writeActiveMealPlanId as storeWriteActiveMealPlanId,
+  writeHomeActivePlanCache as storeWriteHomeActivePlanCache,
+  writeMealPlanCache as storeWriteMealPlanCache,
+} from "./js/store/commands.js";
+import {
+  readActiveMealPlanId as storeReadActiveMealPlanId,
+  readHomeActivePlanCache as storeReadHomeActivePlanCache,
+  readMealPlanCache as storeReadMealPlanCache,
+} from "./js/store/selectors.js";
+import { assertRequiredFields } from "./js/contracts.js";
+
 (() => {
-  const apiPrefix = window.WFD_API_PREFIX;
   const tandoorBaseUrl = typeof window.WFD_TANDOOR_BASE_URL === "string"
     ? window.WFD_TANDOOR_BASE_URL.trim().replace(/\/+$/, "")
     : "";
@@ -44,98 +56,33 @@
     day: "numeric",
   });
   const VIEW_RECIPE_LABEL = "View Recipe";
-  const MEAL_PLAN_CACHE_KEY = "wfd.meal-plans.cache.v1";
-  const HOME_ACTIVE_PLAN_CACHE_KEY = "wfd.home.active-plan.v1";
-  const ACTIVE_MEAL_PLAN_ID_KEY = "wfd.active-meal-plan-id.v1";
-
   let lastSelectedPlanId = null;
   let todayEntryId = null;
   let todayRecipeUrl = null;
   let todayRecipeLookupTitle = "";
 
   function readActiveMealPlanId() {
-    try {
-      const raw = localStorage.getItem(ACTIVE_MEAL_PLAN_ID_KEY);
-      const value = Number(raw);
-      if (Number.isInteger(value)) {
-        return value;
-      }
-      return null;
-    } catch {
-      return null;
-    }
+    return storeReadActiveMealPlanId();
   }
 
   function writeActiveMealPlanId(planId) {
-    try {
-      if (!Number.isInteger(planId)) {
-        localStorage.removeItem(ACTIVE_MEAL_PLAN_ID_KEY);
-        return;
-      }
-      localStorage.setItem(ACTIVE_MEAL_PLAN_ID_KEY, String(planId));
-    } catch {
-      // Ignore localStorage failures.
-    }
+    storeWriteActiveMealPlanId(planId);
   }
 
   function readMealPlanCache() {
-    try {
-      const raw = localStorage.getItem(MEAL_PLAN_CACHE_KEY);
-      if (!raw) {
-        return { list: [], byId: {} };
-      }
-      const parsed = JSON.parse(raw);
-      const list = Array.isArray(parsed?.list) ? parsed.list : [];
-      const byId = parsed?.byId && typeof parsed.byId === "object" ? parsed.byId : {};
-      return { list, byId };
-    } catch {
-      return { list: [], byId: {} };
-    }
+    return storeReadMealPlanCache();
   }
 
   function writeMealPlanCache(nextCache) {
-    try {
-      localStorage.setItem(MEAL_PLAN_CACHE_KEY, JSON.stringify(nextCache));
-    } catch {
-      // Ignore localStorage failures.
-    }
+    storeWriteMealPlanCache(nextCache);
   }
 
   function readHomeActivePlanCache() {
-    try {
-      const raw = localStorage.getItem(HOME_ACTIVE_PLAN_CACHE_KEY);
-      if (!raw) {
-        return null;
-      }
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object") {
-        return null;
-      }
-      const plan = parsed.plan;
-      if (!plan || typeof plan !== "object") {
-        return null;
-      }
-      return {
-        plan,
-        entries: sortEntries(plan.entries),
-      };
-    } catch {
-      return null;
-    }
+    return storeReadHomeActivePlanCache(sortEntries);
   }
 
   function writeHomeActivePlanCache(plan) {
-    if (!plan || typeof plan !== "object") {
-      return;
-    }
-    try {
-      localStorage.setItem(HOME_ACTIVE_PLAN_CACHE_KEY, JSON.stringify({
-        plan,
-        updatedAt: new Date().toISOString(),
-      }));
-    } catch {
-      // Ignore localStorage failures.
-    }
+    storeWriteHomeActivePlanCache(plan);
   }
 
   function setTab(tabName) {
@@ -210,24 +157,7 @@
   }
 
   async function api(path, options) {
-    let opts = {};
-    if (options && typeof options === "object") {
-      opts = options;
-    }
-
-    const response = await fetch(`${apiPrefix}${path}`, {
-      headers: { "Content-Type": "application/json" },
-      ...opts,
-    });
-
-    const payload = await response.json();
-    if (!response.ok) {
-      if (typeof payload.detail === "string") {
-        throw new Error(payload.detail);
-      }
-      throw new Error(JSON.stringify(payload));
-    }
-    return payload;
+    return await storeApi(path, options);
   }
 
   function parseIsoDate(text) {
@@ -604,6 +534,7 @@
 
   async function fetchActivePlan() {
     const listPayload = await api("/meal-plans/stored");
+    assertRequiredFields(listPayload, ["data"], "Meal plan list response");
     const rows = listPayload.data;
     if (!Array.isArray(rows) || rows.length === 0) {
       const cache = readMealPlanCache();
@@ -630,6 +561,7 @@
     lastSelectedPlanId = planId;
     writeActiveMealPlanId(planId);
     const detailPayload = await api(`/meal-plans/${planId}`);
+    assertRequiredFields(detailPayload, ["data"], "Meal plan detail response");
     const plan = detailPayload.data;
     if (!plan || typeof plan !== "object") {
       return { plan: null, entries: [] };
@@ -705,6 +637,7 @@
       let reminderTexts = [];
       try {
         const shoppingPayload = await api("/shopping-list/view?limit=400");
+        assertRequiredFields(shoppingPayload, ["data"], "Shopping view response");
         reminderTexts = shoppingReminderTexts(shoppingPayload);
       } catch {
         reminderTexts = [];

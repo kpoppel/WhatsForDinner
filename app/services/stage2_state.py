@@ -1,81 +1,108 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
+import tempfile
 from typing import Any
 
-DEFAULT_STATE: dict[str, Any] = {
-    "selected_keyword_ids": [],
-    "meal_plan_rules": {"no_repeat_days": 30},
-    "user_settings": {
-        "default_diners": 2,
-        "default_notification_time": "08:00",
-    },
-    "meal_plans": {},
-    "next_meal_plan_id": 1,
-    "next_entry_id": 1,
-    "shopping_status_overrides": {},
-    "shopping_item_metadata": {},
-    "local_shopping_entries": {},
-    "next_local_shopping_entry_id": -1,
-    "shopping_sync_events": [],
-    "next_sync_event_id": 1,
-}
+from app.models.state_schema import default_state_payload
+from app.services.state_migrations import StateSchemaError, migrate_and_validate_state
+
 DEFAULT_STATE_FILENAME = "state.json"
+logger = logging.getLogger(__name__)
 
 
 class Stage2State:
-    def __init__(self, data_dir: str) -> None:
+    def __init__(
+        self,
+        data_dir: str,
+        sync_event_max_count: int = 2000,
+        sync_event_max_age_days: int = 30,
+    ) -> None:
         self.state_file = Path(data_dir) / DEFAULT_STATE_FILENAME
+        self._sync_event_max_count = sync_event_max_count
+        self._sync_event_max_age_days = sync_event_max_age_days
         self._lock = Lock()
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         if not self.state_file.exists():
-            self._save(DEFAULT_STATE)
+            self._save(default_state_payload())
 
     def _load(self) -> dict[str, Any]:
         with self.state_file.open("r", encoding="utf-8") as fp:
             data = json.load(fp)
 
-        merged = deepcopy(DEFAULT_STATE)
-        merged.update(data)
-        if not isinstance(merged.get("meal_plans"), dict):
-            merged["meal_plans"] = {}
-        if not isinstance(merged.get("shopping_status_overrides"), dict):
-            merged["shopping_status_overrides"] = {}
-        if not isinstance(merged.get("shopping_item_metadata"), dict):
-            merged["shopping_item_metadata"] = {}
-        if not isinstance(merged.get("local_shopping_entries"), dict):
-            merged["local_shopping_entries"] = {}
-        local_next_id = merged.get("next_local_shopping_entry_id")
-        if not isinstance(local_next_id, int) or local_next_id >= 0:
-            merged["next_local_shopping_entry_id"] = -1
-        if not isinstance(merged.get("shopping_sync_events"), list):
-            merged["shopping_sync_events"] = []
-        rules = merged.get("meal_plan_rules")
-        if not isinstance(rules, dict):
-            merged["meal_plan_rules"] = {"no_repeat_days": 30}
-        elif not isinstance(rules.get("no_repeat_days"), int):
-            merged["meal_plan_rules"]["no_repeat_days"] = 30
-        settings = merged.get("user_settings")
-        if not isinstance(settings, dict):
-            merged["user_settings"] = {
-                "default_diners": 2,
-                "default_notification_time": "08:00",
-            }
-        else:
-            if not isinstance(settings.get("default_diners"), int):
-                settings["default_diners"] = 2
-            if not isinstance(settings.get("default_notification_time"), str):
-                settings["default_notification_time"] = "08:00"
-            elif len(settings["default_notification_time"].strip()) == 0:
-                settings["default_notification_time"] = "08:00"
-        return merged
+        if not isinstance(data, dict):
+            raise StateSchemaError("Invalid stage2 state payload: expected a JSON object.")
+
+        try:
+            return migrate_and_validate_state(data)
+        except StateSchemaError:
+            logger.exception("stage2_state_validation_failed state_file=%s", self.state_file)
+            raise
 
     def _save(self, data: dict[str, Any]) -> None:
-        with self.state_file.open("w", encoding="utf-8") as fp:
-            json.dump(data, fp, indent=2, ensure_ascii=True)
+        payload = migrate_and_validate_state(deepcopy(data))
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.state_file.parent,
+                prefix=f"{self.state_file.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as fp:
+                tmp_path = Path(fp.name)
+                json.dump(payload, fp, indent=2, ensure_ascii=True)
+                fp.flush()
+                os.fsync(fp.fileno())
+
+            os.replace(tmp_path, self.state_file)
+        finally:
+            if tmp_path is not None and tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+
+    def _parse_event_created_at(self, value: Any) -> datetime | None:
+        if not isinstance(value, str):
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        normalized = text.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _prune_sync_events(self, data: dict[str, Any]) -> None:
+        raw_events = data.get("shopping_sync_events")
+        if not isinstance(raw_events, list):
+            data["shopping_sync_events"] = []
+            return
+
+        events: list[dict[str, Any]] = [event for event in raw_events if isinstance(event, dict)]
+
+        if self._sync_event_max_age_days > 0 and events:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=self._sync_event_max_age_days)
+            kept_by_age: list[dict[str, Any]] = []
+            for event in events:
+                created_at = self._parse_event_created_at(event.get("created_at"))
+                if created_at is None or created_at >= cutoff:
+                    kept_by_age.append(event)
+            events = kept_by_age
+
+        if self._sync_event_max_count > 0 and len(events) > self._sync_event_max_count:
+            events = events[-self._sync_event_max_count :]
+
+        data["shopping_sync_events"] = events
 
     def selected_keywords(self) -> list[int]:
         with self._lock:
@@ -112,22 +139,12 @@ class Stage2State:
             data = self._load()
             raw = data.get("user_settings")
             if not isinstance(raw, dict):
-                return {
-                    "default_diners": 2,
-                    "default_notification_time": "08:00",
-                }
+                raise StateSchemaError("Invalid state: user_settings must be an object.")
 
             default_diners = raw.get("default_diners")
-            if not isinstance(default_diners, int):
-                default_diners = 2
-
             default_notification_time = raw.get("default_notification_time")
-            if not isinstance(default_notification_time, str):
-                default_notification_time = "08:00"
-            else:
-                default_notification_time = default_notification_time.strip()
-                if len(default_notification_time) == 0:
-                    default_notification_time = "08:00"
+            if not isinstance(default_diners, int) or not isinstance(default_notification_time, str):
+                raise StateSchemaError("Invalid state: user_settings fields are not valid.")
 
             return {
                 "default_diners": default_diners,
@@ -213,8 +230,10 @@ class Stage2State:
                 "cursor": event_id,
                 "operation": operation,
                 "payload": payload,
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
             data["shopping_sync_events"].append(event)
+            self._prune_sync_events(data)
             self._save(data)
             return event_id
 

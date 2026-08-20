@@ -14,6 +14,8 @@ class Settings(BaseSettings):
         default="data",
         validation_alias="DATA_DIR",
     )
+    stage2_sync_event_max_count: int = Field(default=2000, ge=1)
+    stage2_sync_event_max_age_days: int = Field(default=30, ge=1)
     tandoor_token_valid_date: str | None = Field(
         default=None,
         validation_alias="TANDOOR_TOKEN_VALID_DATE",

@@ -11,6 +11,14 @@ FastAPI backend for a mobile app that proxies recipe and shopping list data from
 - Offline-friendly shopping sync endpoints with cursor-based change feeds
 - OpenAPI docs at `/docs` and versioned docs at `/api/v1/docs`
 
+## Architecture guardrails
+
+- API request contracts are strict for mutable endpoints. Unknown or invalid fields are rejected with a 4xx response.
+- Contract violations are logged with request method, path, and correlation ID.
+- Stage 2 local JSON state is schema-versioned (`schema_version`) and validated on load and save.
+- Invalid persisted state fails fast; the server does not silently auto-heal broken state payloads.
+- No compatibility aliases or duplicate API keys are introduced to mask contract mismatches.
+
 ## Quick start
 
 1. Create and activate a virtual environment:
@@ -39,6 +47,28 @@ FastAPI backend for a mobile app that proxies recipe and shopping list data from
    ```bash
    uvicorn app.main:app --reload
    ```
+
+## Testing
+
+Install dev/test dependencies:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+Run the full suite from the repo root:
+
+```bash
+pytest -q
+```
+
+Equivalent command using the virtual environment interpreter:
+
+```bash
+/home/kpo/development/WhatsForDinner/.venv/bin/python -m pytest -q
+```
+
+The repository includes `pytest.ini` with `pythonpath = .` so both invocations resolve `app.*` imports consistently.
 
 ## Docker deployment
 

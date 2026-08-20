@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
@@ -78,6 +79,117 @@ def test_stage2_user_settings_roundtrip(monkeypatch, tmp_path) -> None:
     assert get_updated.status_code == 200
     assert get_updated.json()["data"]["default_diners"] == 4
     assert get_updated.json()["data"]["default_notification_time"] == "07:30"
+
+
+def test_stage2_user_settings_rejects_unknown_field(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    put_res = client.put(
+        "/api/v1/config/user-settings",
+        json={
+            "default_diners": 4,
+            "default_notification_time": "07:30",
+            "unexpected": True,
+        },
+    )
+    assert put_res.status_code == 422
+
+
+def test_stage2_validation_failure_logs_context(monkeypatch, tmp_path, caplog) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    with caplog.at_level("WARNING", logger="wfd.api"):
+        put_res = client.put(
+            "/api/v1/config/user-settings",
+            json={
+                "default_diners": 4,
+                "default_notification_time": "07:30",
+                "unexpected": True,
+            },
+            headers={"X-Correlation-ID": "test-correlation-id"},
+        )
+
+    assert put_res.status_code == 422
+
+    log_messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "event=request_validation_failed" in log_messages
+    assert "method=PUT" in log_messages
+    assert "path=/api/v1/config/user-settings" in log_messages
+    assert "correlation_id=test-correlation-id" in log_messages
+
+
+def test_stage2_sync_update_requires_entry_id(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    res = client.post(
+        "/api/v1/shopping-list/sync",
+        json={
+            "changes": [
+                {
+                    "operation": "update",
+                    "payload": {"status": "completed"},
+                }
+            ]
+        },
+    )
+    assert res.status_code == 422
+
+
+def test_stage2_meal_plan_mutations_reject_unknown_fields(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    class FakeClient:
+        async def list_recipes(self, search=None, limit=20, keyword_ids=None):
+            return {"results": [{"id": 9, "name": "Default Pantry Pick"}]}
+
+    monkeypatch.setattr("app.api.client", FakeClient())
+
+    gen_res = client.post(
+        "/api/v1/meal-plans/generate",
+        json={
+            "start_date": "2026-08-17",
+            "length_days": 1,
+            "diners": 2,
+        },
+    )
+    assert gen_res.status_code == 200
+    plan = gen_res.json()["data"]
+    plan_id = int(plan["plan_id"])
+    entry_id = int(plan["entries"][0]["entry_id"])
+
+    patch_plan = client.patch(
+        f"/api/v1/meal-plans/{plan_id}",
+        json={"unexpected": True},
+    )
+    assert patch_plan.status_code == 422
+
+    add_entry = client.post(
+        f"/api/v1/meal-plans/{plan_id}/entries",
+        json={"mode": "planned", "unexpected": True},
+    )
+    assert add_entry.status_code == 422
+
+    patch_entry = client.patch(
+        f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
+        json={"unexpected": True},
+    )
+    assert patch_entry.status_code == 422
+
+
+def test_stage2_shopping_mutations_reject_unknown_fields(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    create_res = client.post(
+        "/api/v1/shopping-list/entries",
+        json={"ad_hoc": True, "name": "Ice", "amount": 1, "unexpected": True},
+    )
+    assert create_res.status_code == 422
+
+    update_res = client.patch(
+        "/api/v1/shopping-list/entries/1",
+        json={"unexpected": True},
+    )
+    assert update_res.status_code == 422
 
 
 def test_stage2_meal_plan_uses_all_recipes_when_no_keywords_selected(monkeypatch, tmp_path) -> None:
@@ -542,6 +654,148 @@ def test_stage2_shopping_view_uses_supermarket_category_name(monkeypatch, tmp_pa
     assert item["store_group"]["name"] == "Kød, fisk og fjerkræ"
     assert item["store_group"]["id"] == 6
     assert item["food_id"] == 919
+
+
+def test_stage2_shopping_mutation_parity_direct_vs_sync(monkeypatch, tmp_path) -> None:
+    class StatefulClient:
+        def __init__(self) -> None:
+            self.entries: dict[int, dict] = {}
+            self.next_id = 1
+
+        async def list_shopping_entries(self, limit=100):
+            rows = [deepcopy(row) for row in self.entries.values()]
+            rows.sort(key=lambda row: int(row.get("id", 0)))
+            return {"results": rows}
+
+        async def create_shopping_entry(self, payload):
+            entry_id = self.next_id
+            self.next_id += 1
+            food_payload = payload.get("food") if isinstance(payload.get("food"), dict) else {}
+            name = food_payload.get("name") or payload.get("name") or "Unnamed"
+            entry = {
+                "id": entry_id,
+                "food": {
+                    "id": food_payload.get("id"),
+                    "name": name,
+                    "category": food_payload.get("category") or "Other",
+                    "store_group": food_payload.get("store_group") or {"id": None, "name": "General"},
+                },
+                "amount": payload.get("amount", 0),
+                "unit": payload.get("unit") or "",
+                "checked": bool(payload.get("checked", False)),
+                "delay_until": payload.get("delay_until"),
+            }
+            self.entries[entry_id] = entry
+            return deepcopy(entry)
+
+        async def update_shopping_entry(self, entry_id, payload):
+            current = self.entries.get(entry_id, {"id": entry_id})
+            updated = {**current, **payload}
+            self.entries[entry_id] = updated
+            return deepcopy(updated)
+
+        async def delete_shopping_entry(self, entry_id):
+            self.entries.pop(entry_id, None)
+            return {"deleted": entry_id}
+
+    def snapshot_signature(view_payload: dict) -> dict[str, list[tuple]]:
+        sections = view_payload["data"]["sections"]
+        signature: dict[str, list[tuple]] = {}
+        for status in ("remaining", "skipped", "completed"):
+            rows = sections[status]
+            normalized = [
+                (
+                    int(row["id"]),
+                    str(row["name"]),
+                    str(row["status"]),
+                    str(row["ingredient_type"]),
+                    str(row["store_group"]["name"]),
+                    row["amount"],
+                    str(row["unit"]),
+                )
+                for row in rows
+            ]
+            normalized.sort(key=lambda row: row[0])
+            signature[status] = normalized
+        return signature
+
+    create_payload = {
+        "food": {
+            "id": 700,
+            "name": "Milk",
+            "category": "Dairy",
+            "store_group": {"id": 5, "name": "Cold"},
+        },
+        "amount": 2,
+        "unit": "L",
+        "status": "skipped",
+    }
+
+    def run_flow(use_sync: bool) -> dict[str, dict[str, list[tuple]]]:
+        use_temp_state(monkeypatch, tmp_path / ("sync" if use_sync else "direct"))
+        monkeypatch.setattr("app.api.client", StatefulClient())
+
+        if use_sync:
+            create_res = client.post(
+                "/api/v1/shopping-list/sync",
+                json={"changes": [{"operation": "create", "payload": create_payload}]},
+            )
+            assert create_res.status_code == 200
+            create_payload_json = create_res.json()
+            assert len(create_payload_json["applied"]) == 1, create_payload_json
+            created_id = create_payload_json["applied"][0]["data"]["id"]
+        else:
+            create_res = client.post("/api/v1/shopping-list/entries", json=create_payload)
+            assert create_res.status_code == 200
+            created_id = create_res.json()["data"]["id"]
+
+        after_create = client.get("/api/v1/shopping-list/view")
+        assert after_create.status_code == 200
+
+        if use_sync:
+            update_res = client.post(
+                "/api/v1/shopping-list/sync",
+                json={
+                    "changes": [
+                        {
+                            "operation": "update",
+                            "entry_id": created_id,
+                            "payload": {"status": "completed"},
+                        }
+                    ]
+                },
+            )
+        else:
+            update_res = client.patch(
+                f"/api/v1/shopping-list/entries/{created_id}",
+                json={"status": "completed"},
+            )
+        assert update_res.status_code == 200
+
+        after_update = client.get("/api/v1/shopping-list/view")
+        assert after_update.status_code == 200
+
+        if use_sync:
+            delete_res = client.post(
+                "/api/v1/shopping-list/sync",
+                json={"changes": [{"operation": "delete", "entry_id": created_id}]},
+            )
+        else:
+            delete_res = client.delete(f"/api/v1/shopping-list/entries/{created_id}")
+        assert delete_res.status_code == 200
+
+        after_delete = client.get("/api/v1/shopping-list/view")
+        assert after_delete.status_code == 200
+
+        return {
+            "after_create": snapshot_signature(after_create.json()),
+            "after_update": snapshot_signature(after_update.json()),
+            "after_delete": snapshot_signature(after_delete.json()),
+        }
+
+    direct = run_flow(use_sync=False)
+    sync = run_flow(use_sync=True)
+    assert direct == sync
 
 
 def test_stage2_plan_shopping_uses_recipe_shopping_update(monkeypatch, tmp_path) -> None:

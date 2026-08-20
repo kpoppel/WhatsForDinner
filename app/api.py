@@ -1,22 +1,45 @@
 from __future__ import annotations
 
-import random
-import re
 from datetime import date, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
 from app.config import settings
+from app.models.contracts import (
+    GenerateMealPlanRequest,
+    MealPlanEntryCreateRequest,
+    MealPlanEntryPatchRequest,
+    MealPlanPatchRequest,
+    MealPlanRulesRequest,
+    SetSelectedKeywordsRequest,
+    ShoppingEntryCreateRequest,
+    ShoppingEntryPatchRequest,
+    ShoppingSyncRequest,
+    UserSettingsRequest,
+)
+from app.services.meal_plan_service import MealPlanService
+from app.services.shopping_service import ShoppingService
 from app.services.stage2_state import Stage2State
 from app.services.tandoor_client import TandoorClient, TandoorError
 
 router = APIRouter(tags=["mobile-api"])
 client = TandoorClient()
-stage2_state = Stage2State(settings.stage2_data_dir)
+stage2_state = Stage2State(
+    settings.stage2_data_dir,
+    sync_event_max_count=settings.stage2_sync_event_max_count,
+    sync_event_max_age_days=settings.stage2_sync_event_max_age_days,
+)
+
+
+def _shopping_service() -> ShoppingService:
+    return ShoppingService(stage2_state, client)
+
+
+def _meal_plan_service() -> MealPlanService:
+    return MealPlanService(stage2_state, client)
 
 SHOPPING_STATUSES = {"remaining", "skipped", "completed"}
-TIME_24H_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 def _ensure_tandoor_writes_enabled(operation: str) -> None:
@@ -43,30 +66,6 @@ def _extract_results(payload: Any) -> list[dict[str, Any]]:
 
 def _recipe_title(recipe: dict[str, Any]) -> str:
     return str(recipe.get("name") or recipe.get("title") or f"Recipe {recipe.get('id')}")
-
-
-def _parse_constraint_days(
-    days: list[Any],
-    start_date: date,
-    length_days: int,
-) -> set[int]:
-    indexes: set[int] = set()
-    for item in days:
-        if isinstance(item, int):
-            idx = item - 1 if item > 0 else item
-            if 0 <= idx < length_days:
-                indexes.add(idx)
-            continue
-
-        if isinstance(item, str):
-            try:
-                target_date = date.fromisoformat(item)
-            except ValueError:
-                continue
-            idx = (target_date - start_date).days
-            if 0 <= idx < length_days:
-                indexes.add(idx)
-    return indexes
 
 
 def _effective_status(entry: dict[str, Any], overrides: dict[str, str]) -> str:
@@ -478,49 +477,6 @@ def _build_shopping_view(entries: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _next_plan_entry_id() -> int:
-    return stage2_state.allocate_entry_id()
-
-
-def _find_entry(plan: dict[str, Any], entry_id: int) -> dict[str, Any] | None:
-    entries = plan.get("entries", [])
-    if not isinstance(entries, list):
-        return None
-    for entry in entries:
-        if isinstance(entry, dict) and entry.get("entry_id") == entry_id:
-            return entry
-    return None
-
-
-def _extract_recipe_ingredient_ids(recipe_payload: dict[str, Any]) -> list[int]:
-    ids: list[int] = []
-    steps = recipe_payload.get("steps")
-    if isinstance(steps, list):
-        for step in steps:
-            if not isinstance(step, dict):
-                continue
-            step_ingredients = step.get("ingredients")
-            if not isinstance(step_ingredients, list):
-                continue
-            for ingredient in step_ingredients:
-                if not isinstance(ingredient, dict):
-                    continue
-                ingredient_id = ingredient.get("id")
-                if isinstance(ingredient_id, int):
-                    ids.append(ingredient_id)
-
-    top_ingredients = recipe_payload.get("ingredients")
-    if isinstance(top_ingredients, list):
-        for ingredient in top_ingredients:
-            if not isinstance(ingredient, dict):
-                continue
-            ingredient_id = ingredient.get("id")
-            if isinstance(ingredient_id, int):
-                ids.append(ingredient_id)
-
-    return sorted(set(ids))
-
-
 def _parse_plan_start_date(value: Any) -> date | None:
     if not isinstance(value, str):
         return None
@@ -546,55 +502,6 @@ def _stored_plan_sort_key(plan: dict[str, Any]) -> tuple[int, int, int, int]:
     distance = abs(diff_days)
     is_future_or_today = 0 if diff_days >= 0 else 1
     return (distance, is_future_or_today, -start.toordinal(), -plan_id)
-
-
-def _collect_recipe_history_dates() -> dict[int, list[date]]:
-    history: dict[int, list[date]] = {}
-    for plan in stage2_state.list_meal_plans():
-        entries = plan.get("entries")
-        if not isinstance(entries, list):
-            continue
-
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            recipe = entry.get("recipe")
-            if not isinstance(recipe, dict):
-                continue
-            recipe_id = recipe.get("id")
-            if not isinstance(recipe_id, int):
-                continue
-            date_value = entry.get("date")
-            if not isinstance(date_value, str):
-                continue
-            try:
-                entry_date = date.fromisoformat(date_value)
-            except ValueError:
-                continue
-
-            history.setdefault(recipe_id, []).append(entry_date)
-
-    for recipe_id, dates in history.items():
-        dates.sort()
-        history[recipe_id] = dates
-    return history
-
-
-def _is_within_no_repeat_window(
-    recipe_id: int,
-    candidate_date: date,
-    no_repeat_days: int,
-    history_dates: dict[int, list[date]],
-) -> bool:
-    if no_repeat_days <= 0:
-        return False
-
-    for seen_date in history_dates.get(recipe_id, []):
-        if seen_date >= candidate_date:
-            break
-        if (candidate_date - seen_date).days <= no_repeat_days:
-            return True
-    return False
 
 
 @router.get("/health")
@@ -676,15 +583,8 @@ async def selected_keywords() -> dict:
 
 
 @router.put("/config/keywords/selected")
-async def set_selected_keywords(payload: dict[str, Any] = Body(...)) -> dict:
-    values = payload.get("keyword_ids")
-    if not isinstance(values, list):
-        raise HTTPException(status_code=400, detail="keyword_ids must be a list of integers.")
-
-    try:
-        keyword_ids = sorted({int(v) for v in values})
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="keyword_ids must be integers.") from exc
+async def set_selected_keywords(payload: SetSelectedKeywordsRequest = Body(...)) -> dict:
+    keyword_ids = sorted({int(v) for v in payload.keyword_ids})
 
     stage2_state.set_selected_keywords(keyword_ids)
     return {
@@ -712,23 +612,9 @@ async def get_user_settings() -> dict:
 
 
 @router.put("/config/user-settings")
-async def set_user_settings(payload: dict[str, Any] = Body(...)) -> dict:
-    raw_default_diners = payload.get("default_diners")
-    try:
-        default_diners = int(raw_default_diners)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="default_diners must be an integer.") from exc
-
-    if default_diners < 1 or default_diners > 20:
-        raise HTTPException(status_code=400, detail="default_diners must be within 1..20.")
-
-    raw_notification_time = payload.get("default_notification_time")
-    if not isinstance(raw_notification_time, str):
-        raise HTTPException(status_code=400, detail="default_notification_time must be a string in HH:MM format.")
-
-    default_notification_time = raw_notification_time.strip()
-    if TIME_24H_RE.match(default_notification_time) is None:
-        raise HTTPException(status_code=400, detail="default_notification_time must be HH:MM (24-hour).")
+async def set_user_settings(payload: UserSettingsRequest = Body(...)) -> dict:
+    default_diners = int(payload.default_diners)
+    default_notification_time = payload.default_notification_time.strip()
 
     saved = stage2_state.set_user_settings(default_diners, default_notification_time)
     return {
@@ -738,15 +624,8 @@ async def set_user_settings(payload: dict[str, Any] = Body(...)) -> dict:
 
 
 @router.put("/config/meal-plan-rules")
-async def set_meal_plan_rules(payload: dict[str, Any] = Body(...)) -> dict:
-    raw_value = payload.get("no_repeat_days")
-    try:
-        no_repeat_days = int(raw_value)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="no_repeat_days must be an integer.") from exc
-
-    if no_repeat_days < 0:
-        raise HTTPException(status_code=400, detail="no_repeat_days must be >= 0.")
+async def set_meal_plan_rules(payload: MealPlanRulesRequest = Body(...)) -> dict:
+    no_repeat_days = int(payload.no_repeat_days)
 
     rules = stage2_state.set_meal_plan_rules(no_repeat_days)
     return {
@@ -756,30 +635,15 @@ async def set_meal_plan_rules(payload: dict[str, Any] = Body(...)) -> dict:
 
 
 @router.post("/meal-plans/generate")
-async def generate_meal_plan(payload: dict[str, Any] = Body(...)) -> dict:
-    start_date_raw = payload.get("start_date")
-    if not isinstance(start_date_raw, str):
-        raise HTTPException(status_code=400, detail="start_date must be an ISO date string.")
-
-    try:
-        start_day = date.fromisoformat(start_date_raw)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="start_date must be YYYY-MM-DD.") from exc
-
-    try:
-        length_days = int(payload.get("length_days") or 7)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="length_days must be an integer.") from exc
-
-    if length_days < 1 or length_days > 31:
-        raise HTTPException(status_code=400, detail="length_days must be within 1..31.")
-
+async def generate_meal_plan(payload: GenerateMealPlanRequest = Body(...)) -> dict:
+    start_day = payload.start_date
+    length_days = int(payload.length_days)
     configured_user_settings = stage2_state.user_settings()
     configured_default_diners = configured_user_settings.get("default_diners")
     if not isinstance(configured_default_diners, int):
         configured_default_diners = 2
 
-    raw_diners = payload.get("diners")
+    raw_diners = payload.diners
     if raw_diners is None:
         diners = configured_default_diners
     else:
@@ -791,32 +655,14 @@ async def generate_meal_plan(payload: dict[str, Any] = Body(...)) -> dict:
     if diners < 1 or diners > 20:
         raise HTTPException(status_code=400, detail="diners must be within 1..20.")
 
-    constraints = payload.get("constraints")
-    if not isinstance(constraints, dict):
-        constraints = {}
-
-    leftover_days = _parse_constraint_days(constraints.get("leftover_days", []), start_day, length_days)
-    takeout_days = _parse_constraint_days(constraints.get("takeout_days", []), start_day, length_days)
-    empty_days = _parse_constraint_days(constraints.get("empty_days", []), start_day, length_days)
-
-    raw_keyword_ids = payload.get("keyword_ids")
+    raw_keyword_ids = payload.keyword_ids
     if isinstance(raw_keyword_ids, list) and raw_keyword_ids:
         keyword_ids = [int(v) for v in raw_keyword_ids]
     else:
         keyword_ids = stage2_state.selected_keywords()
 
-    recipe_candidates: list[dict[str, Any]] = []
-    try:
-        result = await client.list_recipes(
-            limit=max(20, length_days * 3),
-            keyword_ids=keyword_ids if keyword_ids else None,
-        )
-        recipe_candidates = _extract_results(result)
-    except TandoorError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
     configured_rules = stage2_state.meal_plan_rules()
-    raw_no_repeat = payload.get("no_repeat_days")
+    raw_no_repeat = payload.no_repeat_days
     if raw_no_repeat is None:
         no_repeat_days = int(configured_rules.get("no_repeat_days", 30))
     else:
@@ -828,97 +674,18 @@ async def generate_meal_plan(payload: dict[str, Any] = Body(...)) -> dict:
     if no_repeat_days < 0:
         raise HTTPException(status_code=400, detail="no_repeat_days must be >= 0.")
 
-    recipe_history_dates = _collect_recipe_history_dates()
-
-    recipe_pointer = 0
-    randomized_candidates = recipe_candidates[:]
-    if randomized_candidates:
-        random.SystemRandom().shuffle(randomized_candidates)
-    entries: list[dict[str, Any]] = []
-    last_recipe: dict[str, Any] | None = None
-
-    for day_index in range(length_days):
-        entry_date = start_day + timedelta(days=day_index)
-        mode = "planned"
-        recipe_obj: dict[str, Any] | None = None
-
-        if day_index in empty_days:
-            mode = "empty"
-        elif day_index in takeout_days:
-            mode = "takeout"
-        elif day_index in leftover_days and last_recipe is not None:
-            mode = "leftover"
-            recipe_obj = last_recipe
-        elif randomized_candidates:
-            # Shuffle candidate order per plan generation to avoid identical plans
-            # when Tandoor returns recipes in a stable sort order.
-            if recipe_pointer > 0 and recipe_pointer % len(randomized_candidates) == 0:
-                random.SystemRandom().shuffle(randomized_candidates)
-
-            chosen_obj: dict[str, Any] | None = None
-            candidate_len = len(randomized_candidates)
-
-            for offset in range(candidate_len):
-                candidate = randomized_candidates[(recipe_pointer + offset) % candidate_len]
-                candidate_id = candidate.get("id") if isinstance(candidate, dict) else None
-                if not isinstance(candidate_id, int):
-                    continue
-                if _is_within_no_repeat_window(
-                    recipe_id=candidate_id,
-                    candidate_date=entry_date,
-                    no_repeat_days=no_repeat_days,
-                    history_dates=recipe_history_dates,
-                ):
-                    continue
-                chosen_obj = candidate
-                recipe_pointer += offset + 1
-                break
-
-            if chosen_obj is not None:
-                chosen_id = chosen_obj.get("id")
-                if isinstance(chosen_id, int):
-                    recipe_history_dates.setdefault(chosen_id, []).append(entry_date)
-                    recipe_history_dates[chosen_id].sort()
-
-                recipe_obj = {
-                    "id": chosen_id,
-                    "title": _recipe_title(chosen_obj),
-                    "url": _recipe_url(chosen_id),
-                }
-                last_recipe = recipe_obj
-
-        entries.append(
-            {
-                "entry_id": _next_plan_entry_id(),
-                "day_index": day_index,
-                "date": entry_date.isoformat(),
-                "mode": mode,
-                "recipe": recipe_obj,
-                "servings": diners,
-                "reminder_enabled": False,
-                "reminder_text": "",
-                "notes": "",
-            }
-        )
-
-    plan_payload = {
-        "start_date": start_day.isoformat(),
-        "length_days": length_days,
-        "diners": diners,
-        "no_repeat_days": no_repeat_days,
-        "keyword_ids": keyword_ids,
-        "constraints": {
-            "leftover_days": sorted(leftover_days),
-            "takeout_days": sorted(takeout_days),
-            "empty_days": sorted(empty_days),
+    return await _meal_plan_service().generate_plan(
+        start_day=start_day,
+        length_days=length_days,
+        diners=diners,
+        constraints={
+            "leftover_days": payload.constraints.leftover_days,
+            "takeout_days": payload.constraints.takeout_days,
+            "empty_days": payload.constraints.empty_days,
         },
-        "entries": entries,
-    }
-
-    stored = stage2_state.create_meal_plan(plan_payload)
-    stage2_state.append_sync_event("meal_plan_generated", stored)
-
-    return {"source": "tandoor+local-state", "data": _enrich_plan_recipe_urls(stored)}
+        keyword_ids=keyword_ids,
+        no_repeat_days=no_repeat_days,
+    )
 
 
 @router.get("/meal-plans/stored")
@@ -972,503 +739,93 @@ async def delete_stored_meal_plan(plan_id: int) -> dict:
 
 
 @router.patch("/meal-plans/{plan_id}")
-async def patch_meal_plan_stage2(plan_id: int, payload: dict[str, Any] = Body(...)) -> dict:
-    current = stage2_state.get_meal_plan(plan_id)
-    if current is None:
-        raise HTTPException(status_code=404, detail="Meal plan not found.")
-
-    mutable: dict[str, Any] = {}
-
-    start_date_override: str | None = None
-    if "start_date" in payload:
-        raw_start_date = payload.get("start_date")
-        if not isinstance(raw_start_date, str):
-            raise HTTPException(status_code=400, detail="start_date must be YYYY-MM-DD.")
-        try:
-            parsed_start = date.fromisoformat(raw_start_date)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="start_date must be YYYY-MM-DD.") from exc
-        start_date_override = parsed_start.isoformat()
-        mutable["start_date"] = start_date_override
-
-    for key in ("start_date", "length_days", "diners", "constraints", "keyword_ids"):
-        if key in payload and key != "start_date":
-            mutable[key] = payload[key]
-
-    if "entries" in payload and isinstance(payload["entries"], list):
-        mutable["entries"] = payload["entries"]
-
-    if start_date_override is not None:
-        entries_source = mutable.get("entries")
-        if not isinstance(entries_source, list):
-            current_entries = current.get("entries")
-            entries_source = current_entries if isinstance(current_entries, list) else []
-
-        normalized_entries = _normalize_plan_entries(entries_source, start_date_override)
-        mutable["entries"] = normalized_entries
-        if "length_days" not in mutable:
-            mutable["length_days"] = len(normalized_entries)
-
-    updated = stage2_state.update_meal_plan(plan_id, mutable)
-    if updated is None:
-        raise HTTPException(status_code=404, detail="Meal plan not found.")
-
-    stage2_state.append_sync_event("meal_plan_updated", {"plan_id": plan_id, "payload": payload})
-    return {"source": "local-state", "data": _enrich_plan_recipe_urls(updated)}
-
-
-def _normalize_plan_entries(entries: list[dict[str, Any]], plan_start_date: Any) -> list[dict[str, Any]]:
-    start_day: date | None
-    try:
-        start_day = date.fromisoformat(str(plan_start_date))
-    except ValueError:
-        start_day = None
-
-    normalized = [row for row in entries if isinstance(row, dict)]
-    normalized.sort(key=lambda row: int(row.get("day_index", 0)))
-    for idx, row in enumerate(normalized):
-        row["day_index"] = idx
-        if start_day is not None:
-            row["date"] = (start_day + timedelta(days=idx)).isoformat()
-    return normalized
+async def patch_meal_plan_stage2(plan_id: int, payload: MealPlanPatchRequest = Body(...)) -> dict:
+    return await _meal_plan_service().patch_plan(
+        plan_id,
+        payload.model_dump(mode="python", exclude_unset=True),
+    )
 
 
 @router.post("/meal-plans/{plan_id}/entries")
-async def add_meal_plan_entry(plan_id: int, payload: dict[str, Any] = Body(...)) -> dict:
-    plan = stage2_state.get_meal_plan(plan_id)
-    if plan is None:
-        raise HTTPException(status_code=404, detail="Meal plan not found.")
-
-    entries = plan.get("entries")
-    if not isinstance(entries, list):
-        entries = []
-
-    day_index = int(payload.get("day_index") if payload.get("day_index") is not None else len(entries))
-    entry_date = payload.get("date")
-    if not isinstance(entry_date, str):
-        try:
-            start_day = date.fromisoformat(str(plan.get("start_date")))
-        except ValueError:
-            start_day = date.today()
-        entry_date = (start_day + timedelta(days=day_index)).isoformat()
-
-    mode = str(payload.get("mode") or "planned")
-    recipe = payload.get("recipe") if isinstance(payload.get("recipe"), dict) else None
-
-    entry = {
-        "entry_id": _next_plan_entry_id(),
-        "day_index": day_index,
-        "date": entry_date,
-        "mode": mode,
-        "recipe": recipe,
-        "servings": int(payload.get("servings") or plan.get("diners") or 2),
-        "reminder_enabled": bool(payload.get("reminder_enabled", False)),
-        "reminder_text": str(payload.get("reminder_text") or ""),
-        "notes": str(payload.get("notes") or ""),
-    }
-
-    entries.append(entry)
-    entries = _normalize_plan_entries(entries, plan.get("start_date"))
-
-    updated = stage2_state.update_meal_plan(
+async def add_meal_plan_entry(plan_id: int, payload: MealPlanEntryCreateRequest = Body(...)) -> dict:
+    return await _meal_plan_service().add_entry(
         plan_id,
-        {
-            "entries": entries,
-            "length_days": len(entries),
-        },
+        payload.model_dump(mode="python", exclude_unset=True),
     )
-    stage2_state.append_sync_event("meal_plan_entry_added", {"plan_id": plan_id, "entry": entry})
-
-    return {"source": "local-state", "data": _enrich_plan_recipe_urls(updated)}
 
 
 @router.patch("/meal-plans/{plan_id}/entries/{entry_id}")
 async def patch_meal_plan_entry(
     plan_id: int,
     entry_id: int,
-    payload: dict[str, Any] = Body(...),
+    payload: MealPlanEntryPatchRequest = Body(...),
 ) -> dict:
-    plan = stage2_state.get_meal_plan(plan_id)
-    if plan is None:
-        raise HTTPException(status_code=404, detail="Meal plan not found.")
-
-    entry = _find_entry(plan, entry_id)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="Meal plan entry not found.")
-
-    for key in (
-        "day_index",
-        "date",
-        "mode",
-        "recipe",
-        "servings",
-        "reminder_enabled",
-        "reminder_text",
-        "notes",
-    ):
-        if key in payload:
-            entry[key] = payload[key]
-
-    target_day_index = payload.get("target_day_index")
-    if target_day_index is not None:
-        entries_for_reorder = plan.get("entries")
-        if not isinstance(entries_for_reorder, list):
-            raise HTTPException(status_code=404, detail="Meal plan entry not found.")
-
-        ordered_entries = [
-            row for row in entries_for_reorder if isinstance(row, dict)
-        ]
-        ordered_entries.sort(key=lambda row: int(row.get("day_index", 0)))
-
-        from_index = -1
-        for idx, row in enumerate(ordered_entries):
-            if int(row.get("entry_id", -1)) == entry_id:
-                from_index = idx
-                break
-
-        if from_index < 0:
-            raise HTTPException(status_code=404, detail="Meal plan entry not found.")
-
-        moved_entry = ordered_entries.pop(from_index)
-
-        target_index = int(target_day_index)
-        if target_index < 0:
-            target_index = 0
-        if target_index > len(ordered_entries):
-            target_index = len(ordered_entries)
-
-        ordered_entries.insert(target_index, moved_entry)
-
-        start_day: date | None
-        try:
-            start_day = date.fromisoformat(str(plan.get("start_date")))
-        except ValueError:
-            start_day = None
-
-        for idx, row in enumerate(ordered_entries):
-            row["day_index"] = idx
-            if start_day is not None:
-                row["date"] = (start_day + timedelta(days=idx)).isoformat()
-
-        plan["entries"] = ordered_entries
-
-    entries = plan.get("entries", [])
-    if isinstance(entries, list):
-        entries.sort(key=lambda row: int(row.get("day_index", 0)))
-
-    updated = stage2_state.update_meal_plan(plan_id, {"entries": entries})
-    stage2_state.append_sync_event(
-        "meal_plan_entry_updated",
-        {"plan_id": plan_id, "entry_id": entry_id, "payload": payload},
+    return await _meal_plan_service().patch_entry(
+        plan_id,
+        entry_id,
+        payload.model_dump(mode="python", exclude_unset=True),
     )
-
-    return {"source": "local-state", "data": _enrich_plan_recipe_urls(updated)}
 
 
 @router.delete("/meal-plans/{plan_id}/entries/{entry_id}")
 async def delete_meal_plan_entry(plan_id: int, entry_id: int) -> dict:
-    plan = stage2_state.get_meal_plan(plan_id)
-    if plan is None:
-        raise HTTPException(status_code=404, detail="Meal plan not found.")
-
-    entries = plan.get("entries")
-    if not isinstance(entries, list):
-        raise HTTPException(status_code=404, detail="Meal plan entry not found.")
-
-    before = len(entries)
-    entries = [row for row in entries if int(row.get("entry_id", -1)) != entry_id]
-    if len(entries) == before:
-        raise HTTPException(status_code=404, detail="Meal plan entry not found.")
-
-    entries = _normalize_plan_entries(entries, plan.get("start_date"))
-    updated = stage2_state.update_meal_plan(
-        plan_id,
-        {
-            "entries": entries,
-            "length_days": len(entries),
-        },
-    )
-    stage2_state.append_sync_event("meal_plan_entry_deleted", {"plan_id": plan_id, "entry_id": entry_id})
-
-    return {"source": "local-state", "data": updated}
+    return await _meal_plan_service().delete_entry(plan_id, entry_id)
 
 
 @router.post("/meal-plans/{plan_id}/shopping-list")
 async def meal_plan_to_shopping_list(plan_id: int) -> dict:
-    _ensure_tandoor_writes_enabled("meal_plan_to_shopping_list")
-    plan = stage2_state.get_meal_plan(plan_id)
-    if plan is None:
-        raise HTTPException(status_code=404, detail="Meal plan not found.")
-
-    entries = plan.get("entries")
-    if not isinstance(entries, list):
-        entries = []
-
-    created: list[dict[str, Any]] = []
-    failed: list[dict[str, Any]] = []
-
-    for entry in entries:
-        recipe = entry.get("recipe") if isinstance(entry, dict) else None
-        if not isinstance(recipe, dict):
-            continue
-
-        recipe_id = recipe.get("id")
-        if not isinstance(recipe_id, int):
-            continue
-
-        servings = int(entry.get("servings") or plan.get("diners") or 2)
-        try:
-            recipe_payload = await client.get_recipe(recipe_id)
-            ingredient_ids = _extract_recipe_ingredient_ids(recipe_payload)
-            request_payload = {"ingredients": ingredient_ids, "servings": servings}
-            result = await client.update_recipe_shopping(recipe_id, request_payload)
-            created.append(
-                {
-                    "entry_id": entry.get("entry_id"),
-                    "operation": "recipe_shopping_update",
-                    "payload": request_payload,
-                    "result": result,
-                }
-            )
-        except TandoorError as exc:
-            failed.append(
-                {
-                    "entry_id": entry.get("entry_id"),
-                    "operation": "recipe_shopping_update",
-                    "payload": {"ingredients": [], "servings": servings},
-                    "errors": [str(exc)],
-                }
-            )
-
-    sync_payload = {
-        "plan_id": plan_id,
-        "created_count": len(created),
-        "failed_count": len(failed),
-    }
-    stage2_state.append_sync_event("meal_plan_shopping_generated", sync_payload)
-
-    shopping_view: dict[str, Any] | None = None
-    shopping_view_error: str | None = None
-    try:
-        shopping_entries = await client.list_shopping_entries(limit=500)
-        shopping_view = _build_shopping_view(_extract_results(shopping_entries))
-    except TandoorError as exc:
-        shopping_view_error = str(exc)
-
-    return {
-        "source": "tandoor+local-state",
-        "data": {
-            "plan_id": plan_id,
-            "created": created,
-            "failed": failed,
-            "shopping_view": shopping_view,
-            "shopping_view_error": shopping_view_error,
-        },
-    }
+    return await _meal_plan_service().generate_shopping_from_plan(
+        plan_id=plan_id,
+        ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
+        build_shopping_view=_build_shopping_view,
+    )
 
 
 @router.get("/shopping-list/view")
 async def shopping_list_view(limit: int = Query(default=300, ge=1, le=1000)) -> dict:
-    try:
-        data = await client.list_shopping_entries(limit=limit)
-        entries = _extract_results(data)
-        view = _build_shopping_view(entries)
-
-        return {
-            "source": "tandoor+local-state",
-            "cursor": stage2_state.current_sync_cursor(),
-            "data": view,
-        }
-    except TandoorError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return await _shopping_service().get_view(
+        limit=limit,
+        extract_results=_extract_results,
+        build_shopping_view=_build_shopping_view,
+    )
 
 
 @router.post("/shopping-list/entries")
-async def shopping_entries_stage2_create(payload: dict[str, Any] = Body(...)) -> dict:
-    request_payload = dict(payload)
-    reminder_patch, has_reminder_patch = _extract_reminder_patch(request_payload)
-    is_ad_hoc = bool(request_payload.pop("ad_hoc", False))
-    status = request_payload.pop("status", None)
-    status_value: str | None = None
-    if status is not None:
-        status_value = str(status)
-        if status_value not in SHOPPING_STATUSES:
-            raise HTTPException(status_code=400, detail="status must be remaining, skipped, or completed.")
-    if status_value is None:
-        status_value = "remaining"
-
-    if is_ad_hoc:
-        local_id = stage2_state.allocate_local_shopping_entry_id()
-        local_entry = _build_local_entry_payload(local_id, request_payload)
-        local_entry["status"] = status_value
-        stored = stage2_state.set_local_shopping_entry(local_id, local_entry)
-        if has_reminder_patch:
-            stage2_state.set_shopping_item_metadata(local_id, reminder_patch)
-        stage2_state.set_shopping_status(local_id, status_value)
-        cursor = stage2_state.append_sync_event("shopping_entry_created", stored)
-        return {
-            "source": "local-state",
-            "cursor": cursor,
-            "data": stored,
-        }
-
-    _ensure_tandoor_writes_enabled("shopping_entries_stage2_create")
-    mapped = _status_to_tandoor_fields(status_value)
-    for key, value in mapped.items():
-        request_payload.setdefault(key, value)
-
-    try:
-        created = await client.create_shopping_entry(request_payload)
-        created_id = created.get("id") if isinstance(created, dict) else None
-        if isinstance(created_id, int) and has_reminder_patch:
-            stage2_state.set_shopping_item_metadata(created_id, reminder_patch)
-        if isinstance(created_id, int) and status_value is not None:
-            stage2_state.set_shopping_status(created_id, status_value)
-
-        cursor = stage2_state.append_sync_event("shopping_entry_created", created)
-        return {
-            "source": "tandoor+local-state",
-            "cursor": cursor,
-            "data": created,
-        }
-    except TandoorError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+async def shopping_entries_stage2_create(payload: ShoppingEntryCreateRequest = Body(...)) -> dict:
+    return await _shopping_service().create_entry(
+        payload=payload.model_dump(mode="python", exclude_unset=True),
+        ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
+        extract_reminder_patch=_extract_reminder_patch,
+        build_local_entry_payload=_build_local_entry_payload,
+        status_to_tandoor_fields=_status_to_tandoor_fields,
+        operation_name="shopping_entries_stage2_create",
+    )
 
 
 @router.patch("/shopping-list/entries/{entry_id}")
 async def shopping_entries_stage2_update(
     entry_id: int,
-    payload: dict[str, Any] = Body(...),
+    payload: ShoppingEntryPatchRequest = Body(...),
 ) -> dict:
-    request_payload = dict(payload)
-    reminder_patch, has_reminder_patch = _extract_reminder_patch(request_payload)
-
-    status = request_payload.pop("status", None)
-    if status is not None:
-        status = str(status)
-        if status not in SHOPPING_STATUSES:
-            raise HTTPException(status_code=400, detail="status must be remaining, skipped, or completed.")
-
-        mapped = _status_to_tandoor_fields(status)
-        for key, value in mapped.items():
-            request_payload.setdefault(key, value)
-
-    local_current = stage2_state.get_local_shopping_entry(entry_id)
-    if local_current is not None:
-        patch: dict[str, Any] = {}
-        if "name" in request_payload:
-            raw_name = request_payload["name"]
-            if not isinstance(raw_name, str) or not raw_name.strip():
-                raise HTTPException(status_code=400, detail="name must be a non-empty string.")
-            patch["name"] = raw_name.strip()
-        if "amount" in request_payload:
-            raw_amount = request_payload["amount"]
-            if not isinstance(raw_amount, (int, float)):
-                raise HTTPException(status_code=400, detail="amount must be numeric.")
-            patch["amount"] = raw_amount
-        if "unit" in request_payload:
-            raw_unit = request_payload["unit"]
-            if not isinstance(raw_unit, str):
-                raise HTTPException(status_code=400, detail="unit must be a string.")
-            patch["unit"] = raw_unit.strip()
-        if "ingredient_type" in request_payload:
-            raw_category = request_payload["ingredient_type"]
-            if not isinstance(raw_category, str) or not raw_category.strip():
-                raise HTTPException(status_code=400, detail="ingredient_type must be a non-empty string.")
-            patch["ingredient_type"] = raw_category.strip()
-        if "recipe_context" in request_payload:
-            raw_context = request_payload["recipe_context"]
-            if not isinstance(raw_context, str) or not raw_context.strip():
-                raise HTTPException(status_code=400, detail="recipe_context must be a non-empty string.")
-            patch["recipe_context"] = raw_context.strip()
-        if "store_group" in request_payload:
-            patch["store_group"] = _local_store_group_payload(request_payload["store_group"])
-        if status is not None:
-            patch["status"] = status
-
-        updated_local = stage2_state.update_local_shopping_entry(entry_id, patch)
-        if updated_local is None:
-            raise HTTPException(status_code=404, detail="Shopping list entry not found.")
-        if status is not None:
-            stage2_state.set_shopping_status(entry_id, status)
-        if has_reminder_patch:
-            stage2_state.set_shopping_item_metadata(entry_id, reminder_patch)
-
-        cursor = stage2_state.append_sync_event(
-            "shopping_entry_updated",
-            {
-                "entry_id": entry_id,
-                "request": payload,
-                "data": updated_local,
-                "status": status,
-            },
-        )
-        return {
-            "source": "local-state",
-            "cursor": cursor,
-            "effective_status": str(updated_local.get("status") or "remaining"),
-            "data": updated_local,
-        }
-
-    _ensure_tandoor_writes_enabled("shopping_entries_stage2_update")
-
-    if request_payload:
-        try:
-            updated = await client.update_shopping_entry(entry_id, request_payload)
-        except TandoorError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-    else:
-        updated = {"id": entry_id}
-
-    if status is not None:
-        stage2_state.set_shopping_status(entry_id, status)
-    if has_reminder_patch:
-        stage2_state.set_shopping_item_metadata(entry_id, reminder_patch)
-
-    cursor = stage2_state.append_sync_event(
-        "shopping_entry_updated",
-        {
-            "entry_id": entry_id,
-            "request": payload,
-            "data": updated,
-            "status": status,
-        },
+    return await _shopping_service().update_entry(
+        entry_id=entry_id,
+        payload=payload.model_dump(mode="python", exclude_unset=True),
+        ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
+        extract_reminder_patch=_extract_reminder_patch,
+        local_store_group_payload=_local_store_group_payload,
+        status_to_tandoor_fields=_status_to_tandoor_fields,
+        effective_status=_effective_status,
+        operation_name="shopping_entries_stage2_update",
     )
-
-    effective = status or _effective_status(updated if isinstance(updated, dict) else {}, stage2_state.get_shopping_statuses())
-
-    return {
-        "source": "tandoor+local-state",
-        "cursor": cursor,
-        "effective_status": effective,
-        "data": updated,
-    }
 
 
 @router.delete("/shopping-list/entries/{entry_id}")
 async def shopping_entries_stage2_delete(entry_id: int) -> dict:
-    deleted_local = stage2_state.delete_local_shopping_entry(entry_id)
-    if deleted_local is not None:
-        stage2_state.delete_shopping_item_metadata(entry_id)
-        cursor = stage2_state.append_sync_event("shopping_entry_deleted", {"entry_id": entry_id})
-        return {
-            "source": "local-state",
-            "cursor": cursor,
-            "data": {"deleted": entry_id},
-        }
-
-    _ensure_tandoor_writes_enabled("shopping_entries_stage2_delete")
-    try:
-        deleted = await client.delete_shopping_entry(entry_id)
-        stage2_state.delete_shopping_item_metadata(entry_id)
-        cursor = stage2_state.append_sync_event("shopping_entry_deleted", {"entry_id": entry_id})
-        return {
-            "source": "tandoor+local-state",
-            "cursor": cursor,
-            "data": deleted,
-        }
-    except TandoorError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return await _shopping_service().delete_entry(
+        entry_id=entry_id,
+        ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
+        operation_name="shopping_entries_stage2_delete",
+    )
 
 
 @router.get("/shopping-list/sync")
@@ -1486,151 +843,19 @@ async def shopping_sync_get(
 
 
 @router.post("/shopping-list/sync")
-async def shopping_sync_post(payload: dict[str, Any] = Body(...)) -> dict:
-    changes = payload.get("changes")
-    if not isinstance(changes, list):
-        raise HTTPException(status_code=400, detail="changes must be a list.")
-
-    applied: list[dict[str, Any]] = []
-    rejected: list[dict[str, Any]] = []
-
-    for idx, change in enumerate(changes):
-        if not isinstance(change, dict):
-            rejected.append({"index": idx, "reason": "Change must be an object."})
-            continue
-
-        operation = str(change.get("operation") or "").lower()
-        entry_id = change.get("entry_id")
-        change_payload = change.get("payload") if isinstance(change.get("payload"), dict) else {}
-
-        try:
-            if operation == "create":
-                req = dict(change_payload)
-                reminder_patch, has_reminder_patch = _extract_reminder_patch(req)
-                is_ad_hoc = bool(req.pop("ad_hoc", False))
-                status = req.pop("status", None)
-                status_value: str | None = None
-                if status is not None:
-                    status_value = str(status)
-                    if status_value not in SHOPPING_STATUSES:
-                        raise ValueError("status must be remaining, skipped, or completed")
-                if status_value is None:
-                    status_value = "remaining"
-
-                if is_ad_hoc:
-                    local_id = stage2_state.allocate_local_shopping_entry_id()
-                    local_entry = _build_local_entry_payload(local_id, req)
-                    local_entry["status"] = status_value
-                    stored_local = stage2_state.set_local_shopping_entry(local_id, local_entry)
-                    if has_reminder_patch:
-                        stage2_state.set_shopping_item_metadata(local_id, reminder_patch)
-                    stage2_state.set_shopping_status(local_id, status_value)
-                    cursor = stage2_state.append_sync_event("shopping_entry_created", stored_local)
-                    applied.append({"index": idx, "cursor": cursor, "operation": operation, "data": stored_local})
-                    continue
-
-                _ensure_tandoor_writes_enabled("shopping_sync_post_create")
-                mapped = _status_to_tandoor_fields(status_value)
-                for key, value in mapped.items():
-                    req.setdefault(key, value)
-
-                data = await client.create_shopping_entry(req)
-                data_id = data.get("id") if isinstance(data, dict) else None
-                if isinstance(data_id, int) and has_reminder_patch:
-                    stage2_state.set_shopping_item_metadata(data_id, reminder_patch)
-                if isinstance(data_id, int) and status_value is not None:
-                    stage2_state.set_shopping_status(data_id, status_value)
-                cursor = stage2_state.append_sync_event("shopping_entry_created", data)
-                applied.append({"index": idx, "cursor": cursor, "operation": operation, "data": data})
-            elif operation == "update":
-                if not isinstance(entry_id, int):
-                    raise ValueError("entry_id is required for update")
-                local_entry = stage2_state.get_local_shopping_entry(entry_id)
-                status = change_payload.get("status")
-                req = dict(change_payload)
-                reminder_patch, has_reminder_patch = _extract_reminder_patch(req)
-                if status is not None:
-                    status_str = str(status)
-                    if status_str not in SHOPPING_STATUSES:
-                        raise ValueError("status must be remaining, skipped, or completed")
-                    stage2_state.set_shopping_status(entry_id, status_str)
-                    req.pop("status", None)
-                    mapped = _status_to_tandoor_fields(status_str)
-                    for key, value in mapped.items():
-                        req.setdefault(key, value)
-
-                if local_entry is not None:
-                    patch: dict[str, Any] = {}
-                    if "name" in req:
-                        patch["name"] = str(req["name"]).strip()
-                    if "amount" in req:
-                        patch["amount"] = req["amount"]
-                    if "unit" in req:
-                        patch["unit"] = str(req["unit"]).strip()
-                    if "ingredient_type" in req:
-                        patch["ingredient_type"] = str(req["ingredient_type"]).strip() or "Other"
-                    if "recipe_context" in req:
-                        patch["recipe_context"] = str(req["recipe_context"]).strip() or "Unassigned"
-                    if "store_group" in req:
-                        patch["store_group"] = _local_store_group_payload(req["store_group"])
-                    if status is not None:
-                        patch["status"] = str(status)
-
-                    data = stage2_state.update_local_shopping_entry(entry_id, patch)
-                    if data is None:
-                        raise ValueError("local entry not found")
-                    if has_reminder_patch:
-                        stage2_state.set_shopping_item_metadata(entry_id, reminder_patch)
-                    cursor = stage2_state.append_sync_event(
-                        "shopping_entry_updated",
-                        {"entry_id": entry_id, "request": change_payload, "data": data},
-                    )
-                    applied.append({"index": idx, "cursor": cursor, "operation": operation, "data": data})
-                    continue
-
-                _ensure_tandoor_writes_enabled("shopping_sync_post_update")
-
-                if req:
-                    data = await client.update_shopping_entry(entry_id, req)
-                else:
-                    data = {"id": entry_id}
-                if has_reminder_patch:
-                    stage2_state.set_shopping_item_metadata(entry_id, reminder_patch)
-                cursor = stage2_state.append_sync_event(
-                    "shopping_entry_updated",
-                    {"entry_id": entry_id, "request": change_payload, "data": data},
-                )
-                applied.append({"index": idx, "cursor": cursor, "operation": operation, "data": data})
-            elif operation == "delete":
-                if not isinstance(entry_id, int):
-                    raise ValueError("entry_id is required for delete")
-                local_removed = stage2_state.delete_local_shopping_entry(entry_id)
-                if local_removed is not None:
-                    stage2_state.delete_shopping_item_metadata(entry_id)
-                    cursor = stage2_state.append_sync_event("shopping_entry_deleted", {"entry_id": entry_id})
-                    applied.append(
-                        {
-                            "index": idx,
-                            "cursor": cursor,
-                            "operation": operation,
-                            "data": {"deleted": entry_id},
-                        }
-                    )
-                    continue
-
-                _ensure_tandoor_writes_enabled("shopping_sync_post_delete")
-                data = await client.delete_shopping_entry(entry_id)
-                stage2_state.delete_shopping_item_metadata(entry_id)
-                cursor = stage2_state.append_sync_event("shopping_entry_deleted", {"entry_id": entry_id})
-                applied.append({"index": idx, "cursor": cursor, "operation": operation, "data": data})
-            else:
-                rejected.append({"index": idx, "reason": f"Unsupported operation: {operation}"})
-        except (TandoorError, ValueError, HTTPException) as exc:
-            rejected.append({"index": idx, "reason": str(exc)})
-
+async def shopping_sync_post(payload: ShoppingSyncRequest = Body(...)) -> dict:
+    response = await _shopping_service().apply_sync_changes(
+        changes=[change.model_dump(mode="python") for change in payload.changes],
+        ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
+        extract_reminder_patch=_extract_reminder_patch,
+        build_local_entry_payload=_build_local_entry_payload,
+        local_store_group_payload=_local_store_group_payload,
+        status_to_tandoor_fields=_status_to_tandoor_fields,
+        effective_status=_effective_status,
+    )
     return {
         "source": "tandoor+local-state",
-        "server_cursor": stage2_state.current_sync_cursor(),
-        "applied": applied,
-        "rejected": rejected,
+        "server_cursor": response["server_cursor"],
+        "applied": response["applied"],
+        "rejected": response["rejected"],
     }

@@ -13,8 +13,11 @@ If any rule conflicts with your default behavior, follow this file.
 
 1. No fallback code.
 - Do not add alternate execution paths, backup behaviors, silent defaults, or compatibility-only branches.
-- If a fallback seems necessary, stop and ask the user how to proceed.
-- NEVER introduce || [],  || {}, ? or ?? (nullable coalescing, papering over root cause issues)
+- Only create try/catch paths if and only if there is a real failure path warranting this.
+- Do not introduce these constructions in JS/test code unless explicitly asked by the user or truly necessary for correctness: `?.`, `??`, `Array.isArray(...)`.
+- Boolean `||` expressions are allowed when they are true boolean evaluations (for example conditions and boolean flags).
+- Fallback-style `||` defaults are restricted (for example `value || ''`, `value || []`, `value || null`) unless explicitly asked by the user or truly necessary.
+- If one of the restricted constructions above is truly necessary, confirm the reason with the user first, then proceed only after explicit confirmation.
 
 2. Minimal scope only.
 - Change only what is required for the requested outcome.
