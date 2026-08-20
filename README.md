@@ -45,8 +45,10 @@ FastAPI backend for a mobile app that proxies recipe and shopping list data from
 The repository includes a containerized deployment under `docker/`:
 
 - `docker/Dockerfile` builds the FastAPI app image.
-- `docker/docker-compose.caddy.yml` runs the app behind Caddy.
-- `docker/docker-compose.traefik.yml` runs the app with Traefik labels so it can be attached to an existing Traefik proxy.
+- `docker/docker-compose.caddy.yaml` is the Caddy template.
+- `docker/docker-compose.traefik.yaml` is the Traefik template.
+
+Copy the template you want to `docker-compose.yaml` before using plain `docker compose up` from inside `docker/`.
 
 Before deploying, ensure `.env` contains your Tandoor settings:
 
@@ -58,6 +60,15 @@ Visit your instance of Tandoor: https://<tandoor_url>/settings/api and create a 
 
 ### Deploy with Caddy
 
+From inside `docker/`, plain commands are:
+
+```bash
+cd docker
+cp docker-compose.caddy.yaml docker-compose.yaml
+docker compose --env-file ../.env up -d --build
+docker compose --env-file ../.env down
+```
+
 1. Optional: set the site address (defaults to `:80`):
 
    ```bash
@@ -67,16 +78,25 @@ Visit your instance of Tandoor: https://<tandoor_url>/settings/api and create a 
 2. Build and start:
 
    ```bash
-   docker compose -f docker/docker-compose.caddy.yml up -d --build
+   docker compose --env-file .env -f docker/docker-compose.caddy.yaml up -d --build
    ```
 
 3. Stop:
 
    ```bash
-   docker compose -f docker/docker-compose.caddy.yml down
+   docker compose --env-file .env -f docker/docker-compose.caddy.yaml down
    ```
 
 ### Deploy with Traefik
+
+From inside `docker/`, plain commands are:
+
+```bash
+cd docker
+cp docker-compose.traefik.yaml docker-compose.yaml
+docker compose --env-file ../.env up -d --build
+docker compose --env-file ../.env down
+```
 
 This compose file assumes you already run Traefik and have an external Docker network for proxied services.
 
@@ -97,13 +117,13 @@ Important: `env_file` in the compose service only populates container environmen
 3. Build and start:
 
    ```bash
-   docker compose --env-file .env -f docker/docker-compose.traefik.yml up -d --build
+   docker compose --env-file .env -f docker/docker-compose.traefik.yaml up -d --build
    ```
 
    If you run the command from inside `docker/`, use:
 
    ```bash
-   docker compose --env-file ../.env -f docker-compose.traefik.yml up -d --build
+   docker compose --env-file ../.env -f docker-compose.traefik.yaml up -d --build
    ```
 
 4. Ensure the external Traefik network already exists and matches `TRAEFIK_NETWORK`:
@@ -117,8 +137,17 @@ Important: `env_file` in the compose service only populates container environmen
 5. Stop:
 
    ```bash
-   docker compose --env-file .env -f docker/docker-compose.traefik.yml down
+   docker compose --env-file .env -f docker/docker-compose.traefik.yaml down
    ```
+
+### Build from docker folder
+
+If you are already in `docker/`, build using the parent directory as context:
+
+```bash
+cd docker
+docker build -t whatsfordinner:latest -f Dockerfile ..
+```
 
 ## API endpoints
 

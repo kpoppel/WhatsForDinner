@@ -8,6 +8,7 @@ __pycache__/
 .coverage.*
 htmlcov/
 .DS_Store
+ignore/
 
 # Runtime app state (contains user/account and instance-specific synced data)
 /data/*.json
