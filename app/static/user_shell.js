@@ -16,12 +16,80 @@
   const shoppingControls = Array.from(document.querySelectorAll(".wf-shop-control"));
   const navButtons = Array.from(document.querySelectorAll(".wf-nav-btn"));
   const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
+  const onlineAwareControls = Array.from(document.querySelectorAll("[data-online-behavior]"));
 
   if (!shell || !bottomNav || !titleNode || !settingsButton || !exitButton || navButtons.length === 0 || tabPanels.length === 0) {
     return;
   }
 
   let activeTab = "home";
+  let apiReachable = true;
+
+  function isOnline() {
+    return navigator.onLine !== false && apiReachable;
+  }
+
+  function applyOnlineAwareControls() {
+    const online = isOnline();
+    shell.classList.toggle("wf-is-offline", !online);
+
+    for (const control of onlineAwareControls) {
+      const behavior = String(control.getAttribute("data-online-behavior") || "disable").trim().toLowerCase();
+      const offlineTitle = String(control.getAttribute("data-offline-title") || "Offline: unavailable.");
+      const hasDisableProperty = (
+        control instanceof HTMLButtonElement
+        || control instanceof HTMLInputElement
+        || control instanceof HTMLSelectElement
+        || control instanceof HTMLTextAreaElement
+      );
+
+      if (behavior === "hide") {
+        control.hidden = !online;
+      }
+
+      if (behavior === "disable" && hasDisableProperty) {
+        if (!control.dataset.onlineTitle) {
+          control.dataset.onlineTitle = control.title || "";
+        }
+        control.disabled = !online;
+        control.setAttribute("aria-disabled", String(!online));
+        control.title = online ? (control.dataset.onlineTitle || "") : offlineTitle;
+      }
+    }
+
+    window.dispatchEvent(new CustomEvent("wfd:online-state", {
+      detail: {
+        online,
+        browserOnline: navigator.onLine !== false,
+        apiReachable,
+      },
+    }));
+  }
+
+  async function probeApiReachability() {
+    if (navigator.onLine === false) {
+      apiReachable = false;
+      applyOnlineAwareControls();
+      return;
+    }
+
+    try {
+      const response = await fetch(`${window.WFD_API_PREFIX}/health`, { cache: "no-store" });
+      apiReachable = response.ok;
+    } catch {
+      apiReachable = false;
+    }
+
+    applyOnlineAwareControls();
+  }
+
+  function reportApiReachable(value) {
+    apiReachable = Boolean(value);
+    applyOnlineAwareControls();
+  }
+
+  window.WFD_reportApiReachable = reportApiReachable;
+  window.WFD_isOnline = isOnline;
 
   function setActiveTab(nextTab) {
     if (!TAB_META[nextTab]) {
@@ -46,10 +114,24 @@
     titleNode.textContent = TAB_META[nextTab].title;
 
     const isShoppingMode = nextTab === "shopping-mode";
+    const isMealPlanDetail = nextTab === "meal-plan-detail";
     shell.classList.toggle("in-shopping-mode", isShoppingMode);
     bottomNav.hidden = isShoppingMode;
     settingsButton.hidden = isShoppingMode;
-    exitButton.hidden = !isShoppingMode;
+
+    if (isShoppingMode) {
+      exitButton.hidden = false;
+      exitButton.textContent = "← Exit";
+      exitButton.setAttribute("aria-label", "Exit shopping mode");
+    } else if (isMealPlanDetail) {
+      exitButton.hidden = false;
+      exitButton.textContent = "<- Back";
+      exitButton.setAttribute("aria-label", "Back to meal plans");
+    } else {
+      exitButton.hidden = true;
+      exitButton.textContent = "← Exit";
+      exitButton.setAttribute("aria-label", "Exit");
+    }
 
     for (const control of shoppingControls) {
       control.hidden = !isShoppingMode;
@@ -63,6 +145,10 @@
   }
 
   exitButton.addEventListener("click", () => {
+    if (activeTab === "meal-plan-detail") {
+      setActiveTab("meal-plans");
+      return;
+    }
     setActiveTab("home");
   });
 
@@ -72,5 +158,23 @@
 
   window.WFD_setActiveTab = setActiveTab;
 
+  window.addEventListener("online", () => {
+    apiReachable = true;
+    applyOnlineAwareControls();
+    void probeApiReachability();
+  });
+
+  window.addEventListener("offline", () => {
+    apiReachable = false;
+    applyOnlineAwareControls();
+  });
+
   setActiveTab(activeTab);
+  applyOnlineAwareControls();
+  void probeApiReachability();
+  setInterval(() => {
+    if (!isOnline()) {
+      void probeApiReachability();
+    }
+  }, 6000);
 })();

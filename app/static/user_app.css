@@ -564,10 +564,38 @@ body {
   margin-left: auto;
 }
 
+.wf-plan-add-day-btn {
+  white-space: nowrap;
+}
+
 .wf-plan-detail-meta {
   margin: 0;
   font-size: 0.84rem;
   color: var(--wf-muted);
+}
+
+.wf-plan-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
+.wf-plan-edit-start-btn {
+  width: 1.9rem;
+  height: 1.9rem;
+  border: 1px solid var(--wf-line);
+  border-radius: 8px;
+  color: var(--wf-muted);
+  background: #fff;
+  font-size: 0.95rem;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.wf-plan-edit-start-btn:hover {
+  color: var(--wf-ink);
+  border-color: #cfd8d3;
 }
 
 .wf-plan-heading {
@@ -664,6 +692,7 @@ body {
 
 .wf-plan-back-btn {
   justify-self: start;
+  align-self: flex-start;
 }
 
 #wf-plan-detail-title {
@@ -688,6 +717,7 @@ body {
   -webkit-touch-callout: none;
   touch-action: pan-y;
   transition: box-shadow 120ms ease, border-color 120ms ease;
+  --wf-plan-delete-progress: 0;
 }
 
 .wf-plan-day:hover {
@@ -695,8 +725,24 @@ body {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
+.wf-plan-day-leftover {
+  background: #f1f8fe;
+}
+
+.wf-plan-day-takeout {
+  background: #fff8ec;
+}
+
+.wf-plan-day-empty {
+  background: #f5f7f8;
+}
+
 .wf-plan-day.is-dragging {
   opacity: 0.55;
+}
+
+.wf-plan-day.swiping-delete-right {
+  border-color: #e87474;
 }
 
 .wf-plan-day.is-drop-target {
@@ -748,6 +794,53 @@ body {
   flex: 1;
   min-width: 0;
   display: grid;
+}
+
+.wf-plan-swipe-delete-right-hint {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 0.7rem;
+  gap: 0.45rem;
+  background: linear-gradient(90deg, #ffc0c0 0%, #ffd6d6 50%, rgba(255, 232, 232, 0.92) 100%);
+  opacity: var(--wf-plan-delete-progress);
+  transition: opacity 80ms linear;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.wf-plan-swipe-delete-right-icon {
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: #2d1212;
+  background: #f8a9a9;
+  box-shadow: inset 0 0 0 1px rgba(45, 18, 18, 0.2);
+}
+
+.wf-plan-swipe-delete-right-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #542020;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.wf-plan-day-body,
+.wf-plan-drag-handle {
+  position: relative;
+  z-index: 3;
 }
 
 .wf-plan-day-head {
@@ -1269,6 +1362,16 @@ body {
   gap: 0.5rem;
 }
 
+#wf-meal-editor-modal {
+  place-items: start center;
+  overflow-y: auto;
+}
+
+#wf-meal-editor-modal .wf-modal-card {
+  margin-top: clamp(0.75rem, 8vh, 4rem);
+  margin-bottom: 1rem;
+}
+
 .wf-sheet-modal {
   align-items: flex-end;
   opacity: 0;
@@ -1355,6 +1458,12 @@ body {
   color: var(--wf-muted);
 }
 
+.wf-field[hidden],
+.wf-reminder-box[hidden],
+.wf-meal-search-results[hidden] {
+  display: none !important;
+}
+
 .wf-field input,
 .wf-field select {
   width: 100%;
@@ -1406,6 +1515,11 @@ body {
 .wf-btn-danger {
   background: #b71c1c;
   color: #fff;
+}
+
+.wf-is-offline [data-online-behavior="disable"]:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
 }
 
 @keyframes wf-fade-in {

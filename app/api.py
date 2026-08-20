@@ -944,12 +944,36 @@ async def patch_meal_plan_stage2(plan_id: int, payload: dict[str, Any] = Body(..
         raise HTTPException(status_code=404, detail="Meal plan not found.")
 
     mutable: dict[str, Any] = {}
+
+    start_date_override: str | None = None
+    if "start_date" in payload:
+        raw_start_date = payload.get("start_date")
+        if not isinstance(raw_start_date, str):
+            raise HTTPException(status_code=400, detail="start_date must be YYYY-MM-DD.")
+        try:
+            parsed_start = date.fromisoformat(raw_start_date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="start_date must be YYYY-MM-DD.") from exc
+        start_date_override = parsed_start.isoformat()
+        mutable["start_date"] = start_date_override
+
     for key in ("start_date", "length_days", "diners", "constraints", "keyword_ids"):
-        if key in payload:
+        if key in payload and key != "start_date":
             mutable[key] = payload[key]
 
     if "entries" in payload and isinstance(payload["entries"], list):
         mutable["entries"] = payload["entries"]
+
+    if start_date_override is not None:
+        entries_source = mutable.get("entries")
+        if not isinstance(entries_source, list):
+            current_entries = current.get("entries")
+            entries_source = current_entries if isinstance(current_entries, list) else []
+
+        normalized_entries = _normalize_plan_entries(entries_source, start_date_override)
+        mutable["entries"] = normalized_entries
+        if "length_days" not in mutable:
+            mutable["length_days"] = len(normalized_entries)
 
     updated = stage2_state.update_meal_plan(plan_id, mutable)
     if updated is None:
@@ -957,6 +981,22 @@ async def patch_meal_plan_stage2(plan_id: int, payload: dict[str, Any] = Body(..
 
     stage2_state.append_sync_event("meal_plan_updated", {"plan_id": plan_id, "payload": payload})
     return {"source": "local-state", "data": updated}
+
+
+def _normalize_plan_entries(entries: list[dict[str, Any]], plan_start_date: Any) -> list[dict[str, Any]]:
+    start_day: date | None
+    try:
+        start_day = date.fromisoformat(str(plan_start_date))
+    except ValueError:
+        start_day = None
+
+    normalized = [row for row in entries if isinstance(row, dict)]
+    normalized.sort(key=lambda row: int(row.get("day_index", 0)))
+    for idx, row in enumerate(normalized):
+        row["day_index"] = idx
+        if start_day is not None:
+            row["date"] = (start_day + timedelta(days=idx)).isoformat()
+    return normalized
 
 
 @router.post("/meal-plans/{plan_id}/entries")
@@ -994,9 +1034,15 @@ async def add_meal_plan_entry(plan_id: int, payload: dict[str, Any] = Body(...))
     }
 
     entries.append(entry)
-    entries.sort(key=lambda row: int(row.get("day_index", 0)))
+    entries = _normalize_plan_entries(entries, plan.get("start_date"))
 
-    updated = stage2_state.update_meal_plan(plan_id, {"entries": entries})
+    updated = stage2_state.update_meal_plan(
+        plan_id,
+        {
+            "entries": entries,
+            "length_days": len(entries),
+        },
+    )
     stage2_state.append_sync_event("meal_plan_entry_added", {"plan_id": plan_id, "entry": entry})
 
     return {"source": "local-state", "data": updated}
@@ -1100,8 +1146,14 @@ async def delete_meal_plan_entry(plan_id: int, entry_id: int) -> dict:
     if len(entries) == before:
         raise HTTPException(status_code=404, detail="Meal plan entry not found.")
 
-    entries.sort(key=lambda row: int(row.get("day_index", 0)))
-    updated = stage2_state.update_meal_plan(plan_id, {"entries": entries})
+    entries = _normalize_plan_entries(entries, plan.get("start_date"))
+    updated = stage2_state.update_meal_plan(
+        plan_id,
+        {
+            "entries": entries,
+            "length_days": len(entries),
+        },
+    )
     stage2_state.append_sync_event("meal_plan_entry_deleted", {"plan_id": plan_id, "entry_id": entry_id})
 
     return {"source": "local-state", "data": updated}

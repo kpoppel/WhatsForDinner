@@ -35,7 +35,7 @@
 
           <div class="wf-action-row">
             <button id="wf-home-view-plan" class="wf-btn wf-btn-blue" type="button">Open Meal Plans</button>
-            <button id="wf-home-edit-plan" class="wf-btn wf-btn-outline" type="button">Edit Day</button>
+            <button id="wf-home-edit-plan" class="wf-btn wf-btn-outline" type="button" data-online-behavior="disable" data-offline-title="Offline: editing is unavailable.">Edit Day</button>
           </div>
         </article>
 
@@ -87,7 +87,7 @@
 
       <section id="wf-tab-meal-plans" class="wf-tab" data-tab-panel="meal-plans" aria-label="Meal Plans" hidden>
         <section class="wf-plan-toolbar">
-          <button id="wf-plan-generate-btn" class="wf-btn wf-btn-blue" type="button">+ Generate New Meal Plan</button>
+          <button id="wf-plan-generate-btn" class="wf-btn wf-btn-blue" type="button" data-online-behavior="disable" data-offline-title="Offline: generation is unavailable.">+ Generate New Meal Plan</button>
         </section>
 
         <p id="wf-plan-status" class="wf-plan-status" aria-live="polite"></p>
@@ -102,11 +102,14 @@
         <section class="wf-plan-detail-panel">
           <div class="wf-plan-detail-head">
             <div class="wf-plan-detail-actions">
-              <button id="wf-plan-back-btn" class="wf-btn wf-btn-outline wf-plan-back-btn" type="button">← Back to plans</button>
-              <button id="wf-plan-generate-shopping-btn" class="wf-btn wf-btn-blue wf-plan-generate-shopping-btn" type="button">Generate Shopping List 🛒</button>
+              <button id="wf-plan-add-day-btn" class="wf-btn wf-btn-outline wf-plan-add-day-btn" type="button" data-online-behavior="disable" data-offline-title="Offline: adding days is unavailable.">+ Add Day</button>
+              <button id="wf-plan-generate-shopping-btn" class="wf-btn wf-btn-blue wf-plan-generate-shopping-btn" type="button" data-online-behavior="disable" data-offline-title="Offline: shopping-list generation is unavailable.">Generate Shopping List 🛒</button>
             </div>
             <p class="wf-plan-detail-meta">Viewing Plan: <strong id="wf-plan-detail-range">-</strong></p>
-            <h2 id="wf-plan-detail-title" class="wf-plan-heading">Plan Detail</h2>
+            <div class="wf-plan-title-row">
+              <h2 id="wf-plan-detail-title" class="wf-plan-heading">Plan Detail</h2>
+              <button id="wf-plan-change-start-btn" class="wf-icon-btn wf-plan-edit-start-btn" type="button" aria-label="Edit start date" title="Edit start date" data-online-behavior="disable" data-offline-title="Offline: updating plan date is unavailable.">✎</button>
+            </div>
           </div>
           <section id="wf-plan-detail" class="wf-plan-detail" aria-label="Selected meal plan detail"></section>
         </section>
@@ -260,31 +263,44 @@
     </div>
   </div>
 
+  <div id="wf-plan-start-date-modal" class="wf-modal" hidden>
+    <div class="wf-modal-card" role="dialog" aria-modal="true" aria-labelledby="wf-plan-start-date-title">
+      <h2 id="wf-plan-start-date-title">Update Plan Start Date</h2>
+      <label class="wf-field">Start Date
+        <input id="wf-plan-start-date-edit" type="date" required />
+      </label>
+      <div class="wf-modal-actions">
+        <button id="wf-plan-start-date-cancel" class="wf-btn wf-btn-outline" type="button">Cancel</button>
+        <button id="wf-plan-start-date-save" class="wf-btn wf-btn-blue" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div id="wf-meal-editor-modal" class="wf-modal" hidden>
     <div class="wf-modal-card" role="dialog" aria-modal="true" aria-labelledby="wf-meal-editor-title">
       <h2 id="wf-meal-editor-title">Edit Meal Day</h2>
       <input id="wf-meal-editor-entry-id" type="hidden" />
 
-      <label class="wf-field">Meal / Recipe Name
-        <input id="wf-meal-editor-name" type="text" maxlength="140" />
-      </label>
-
-      <label class="wf-field">Swap with Tandoor Recipe
-        <input id="wf-meal-editor-search" type="text" maxlength="120" placeholder="Search recipes..." />
-      </label>
-      <section id="wf-meal-editor-search-results" class="wf-meal-search-results" aria-label="Recipe search results"></section>
-
-      <section class="wf-field">
+      <section class="wf-field" id="wf-meal-editor-mode-field">
         <span>Meal Action Type</span>
         <div id="wf-meal-editor-modes" class="wf-pill-group" role="group" aria-label="Meal mode">
           <button class="wf-pill-btn is-active" type="button" data-mode="planned">Cook</button>
           <button class="wf-pill-btn" type="button" data-mode="leftover">Leftovers</button>
           <button class="wf-pill-btn" type="button" data-mode="takeout">Takeout</button>
-          <button class="wf-pill-btn" type="button" data-mode="empty">Empty</button>
+          <button class="wf-pill-btn" type="button" data-mode="empty">Eating out</button>
         </div>
       </section>
 
-      <section class="wf-field">
+      <label class="wf-field" id="wf-meal-editor-name-field">Meal
+        <input id="wf-meal-editor-name" type="text" maxlength="140" />
+      </label>
+
+      <label class="wf-field" id="wf-meal-editor-search-field">Swap with Tandoor Recipe
+        <input id="wf-meal-editor-search" type="text" maxlength="120" placeholder="Search recipes..." />
+      </label>
+      <section id="wf-meal-editor-search-results" class="wf-meal-search-results" aria-label="Recipe search results"></section>
+
+      <section class="wf-field" id="wf-meal-editor-diners-field">
         <span>Number of Diners</span>
         <div class="wf-stepper" role="group" aria-label="Diners controls">
           <button id="wf-meal-editor-diners-down" class="wf-stepper-btn" type="button">-</button>
@@ -293,7 +309,7 @@
         </div>
       </section>
 
-      <section class="wf-reminder-box">
+      <section class="wf-reminder-box" id="wf-meal-editor-reminder-field">
         <div class="wf-reminder-head">
           <label class="wf-reminder-label" for="wf-meal-editor-reminder-enabled">🔔 Day-of Prep / Thaw Reminder</label>
           <input id="wf-meal-editor-reminder-enabled" class="wf-reminder-check" type="checkbox" />

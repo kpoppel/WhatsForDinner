@@ -13,6 +13,9 @@ export function isOnline() {
 
 export function setApiReachable(value) {
   state.apiReachable = Boolean(value);
+  if (typeof window.WFD_reportApiReachable === "function") {
+    window.WFD_reportApiReachable(state.apiReachable);
+  }
   updateStatusBadges();
 }
 

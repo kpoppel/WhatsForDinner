@@ -198,9 +198,62 @@ def test_stage2_meal_plan_generate_and_entry_ops(monkeypatch, tmp_path) -> None:
     )
     assert move_res.status_code == 200
 
+    add_res = client.post(
+        f"/api/v1/meal-plans/{plan_id}/entries",
+        json={"mode": "planned", "servings": 3, "recipe": None},
+    )
+    assert add_res.status_code == 200
+    updated_after_add = add_res.json()["data"]
+    assert updated_after_add["length_days"] == 5
+    assert len(updated_after_add["entries"]) == 5
+    assert [row["day_index"] for row in updated_after_add["entries"]] == [0, 1, 2, 3, 4]
+
+    new_entry_id = updated_after_add["entries"][-1]["entry_id"]
+    delete_res = client.delete(f"/api/v1/meal-plans/{plan_id}/entries/{new_entry_id}")
+    assert delete_res.status_code == 200
+    updated_after_delete = delete_res.json()["data"]
+    assert updated_after_delete["length_days"] == 4
+    assert len(updated_after_delete["entries"]) == 4
+    assert [row["day_index"] for row in updated_after_delete["entries"]] == [0, 1, 2, 3]
+
     shop_res = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
     assert shop_res.status_code == 200
     assert shop_res.json()["data"]["shopping_view"] is not None
+
+
+def test_stage2_patch_meal_plan_start_date_rebases_entries(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    class FakeClient:
+        async def list_recipes(self, search=None, limit=20, keyword_ids=None):
+            return {"results": [{"id": 70, "name": "Sheet Pan"}]}
+
+    monkeypatch.setattr("app.api.client", FakeClient())
+
+    gen_res = client.post(
+        "/api/v1/meal-plans/generate",
+        json={
+            "start_date": "2026-08-10",
+            "length_days": 3,
+            "diners": 2,
+        },
+    )
+    assert gen_res.status_code == 200
+    plan = gen_res.json()["data"]
+    plan_id = plan["plan_id"]
+
+    patch_res = client.patch(
+        f"/api/v1/meal-plans/{plan_id}",
+        json={"start_date": "2026-08-20"},
+    )
+    assert patch_res.status_code == 200
+    patched = patch_res.json()["data"]
+    assert patched["start_date"] == "2026-08-20"
+
+    entries = patched["entries"]
+    assert len(entries) == 3
+    assert [row["day_index"] for row in entries] == [0, 1, 2]
+    assert [row["date"] for row in entries] == ["2026-08-20", "2026-08-21", "2026-08-22"]
 
 
 def test_stage2_no_repeat_blocks_recent_recipe(monkeypatch, tmp_path) -> None:

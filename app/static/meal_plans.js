@@ -1,7 +1,8 @@
 (() => {
   const apiPrefix = window.WFD_API_PREFIX;
 
-  const backButton = document.getElementById("wf-plan-back-btn");
+  const changeStartDateButton = document.getElementById("wf-plan-change-start-btn");
+  const addDayButton = document.getElementById("wf-plan-add-day-btn");
   const generateShoppingButton = document.getElementById("wf-plan-generate-shopping-btn");
   const listNode = document.getElementById("wf-plan-list");
   const detailNode = document.getElementById("wf-plan-detail");
@@ -17,22 +18,32 @@
   const generateCancelButton = document.getElementById("wf-plan-generate-cancel");
   const generateSaveButton = document.getElementById("wf-plan-generate-save");
 
+  const startDateModal = document.getElementById("wf-plan-start-date-modal");
+  const startDateEditInput = document.getElementById("wf-plan-start-date-edit");
+  const startDateCancelButton = document.getElementById("wf-plan-start-date-cancel");
+  const startDateSaveButton = document.getElementById("wf-plan-start-date-save");
+
   const mealEditorModal = document.getElementById("wf-meal-editor-modal");
   const mealEditorEntryIdInput = document.getElementById("wf-meal-editor-entry-id");
+  const mealEditorNameField = document.getElementById("wf-meal-editor-name-field");
+  const mealEditorSearchField = document.getElementById("wf-meal-editor-search-field");
   const mealEditorNameInput = document.getElementById("wf-meal-editor-name");
   const mealEditorSearchInput = document.getElementById("wf-meal-editor-search");
   const mealEditorSearchResults = document.getElementById("wf-meal-editor-search-results");
   const mealEditorModes = Array.from(document.querySelectorAll("#wf-meal-editor-modes [data-mode]"));
+  const mealEditorDinersField = document.getElementById("wf-meal-editor-diners-field");
   const mealEditorDinersDown = document.getElementById("wf-meal-editor-diners-down");
   const mealEditorDinersUp = document.getElementById("wf-meal-editor-diners-up");
   const mealEditorDinersValue = document.getElementById("wf-meal-editor-diners-value");
+  const mealEditorReminderField = document.getElementById("wf-meal-editor-reminder-field");
   const mealEditorReminderEnabled = document.getElementById("wf-meal-editor-reminder-enabled");
   const mealEditorReminderText = document.getElementById("wf-meal-editor-reminder-text");
   const mealEditorCancelButton = document.getElementById("wf-meal-editor-cancel");
   const mealEditorSaveButton = document.getElementById("wf-meal-editor-save");
 
   if (
-    !(backButton instanceof HTMLButtonElement) ||
+    !(changeStartDateButton instanceof HTMLButtonElement) ||
+    !(addDayButton instanceof HTMLButtonElement) ||
     !(generateShoppingButton instanceof HTMLButtonElement) ||
     !(listNode instanceof HTMLElement) ||
     !(detailNode instanceof HTMLElement) ||
@@ -46,14 +57,22 @@
     !(generateDinersInput instanceof HTMLInputElement) ||
     !(generateCancelButton instanceof HTMLButtonElement) ||
     !(generateSaveButton instanceof HTMLButtonElement) ||
+    !(startDateModal instanceof HTMLElement) ||
+    !(startDateEditInput instanceof HTMLInputElement) ||
+    !(startDateCancelButton instanceof HTMLButtonElement) ||
+    !(startDateSaveButton instanceof HTMLButtonElement) ||
     !(mealEditorModal instanceof HTMLElement) ||
     !(mealEditorEntryIdInput instanceof HTMLInputElement) ||
+    !(mealEditorNameField instanceof HTMLElement) ||
+    !(mealEditorSearchField instanceof HTMLElement) ||
     !(mealEditorNameInput instanceof HTMLInputElement) ||
     !(mealEditorSearchInput instanceof HTMLInputElement) ||
     !(mealEditorSearchResults instanceof HTMLElement) ||
+    !(mealEditorDinersField instanceof HTMLElement) ||
     !(mealEditorDinersDown instanceof HTMLButtonElement) ||
     !(mealEditorDinersUp instanceof HTMLButtonElement) ||
     !(mealEditorDinersValue instanceof HTMLElement) ||
+    !(mealEditorReminderField instanceof HTMLElement) ||
     !(mealEditorReminderEnabled instanceof HTMLInputElement) ||
     !(mealEditorReminderText instanceof HTMLInputElement) ||
     !(mealEditorCancelButton instanceof HTMLButtonElement) ||
@@ -75,6 +94,7 @@
 
   const generateSheetClass = "wf-plan-sheet-open";
   const MEAL_PLAN_CACHE_KEY = "wfd.meal-plans.cache.v1";
+  const ACTIVE_MEAL_PLAN_ID_KEY = "wfd.active-meal-plan-id.v1";
 
   let activePlanId = null;
   let selectedPlanId = null;
@@ -92,6 +112,19 @@
   let touchDraggedEntryId = null;
   let touchDropEntryId = null;
   let touchDropPlacement = "before";
+  let mealPlanApiReachable = true;
+
+  function writeActiveMealPlanId(planId) {
+    try {
+      if (!Number.isInteger(planId)) {
+        localStorage.removeItem(ACTIVE_MEAL_PLAN_ID_KEY);
+        return;
+      }
+      localStorage.setItem(ACTIVE_MEAL_PLAN_ID_KEY, String(planId));
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }
 
   function readPlanCache() {
     try {
@@ -152,7 +185,17 @@
   }
 
   function isMealPlanOfflineReadOnly() {
-    return navigator.onLine === false;
+    if (typeof window.WFD_isOnline === "function") {
+      return !window.WFD_isOnline();
+    }
+    return navigator.onLine === false || mealPlanApiReachable === false;
+  }
+
+  function reportApiReachable(value) {
+    mealPlanApiReachable = Boolean(value);
+    if (typeof window.WFD_reportApiReachable === "function") {
+      window.WFD_reportApiReachable(mealPlanApiReachable);
+    }
   }
 
   function assertMealPlanWriteAllowed(action) {
@@ -164,13 +207,19 @@
   function updateMealPlanActionAvailability() {
     const isOffline = isMealPlanOfflineReadOnly();
     generateButton.disabled = isOffline;
+    changeStartDateButton.disabled = isOffline;
+    addDayButton.disabled = isOffline;
     generateShoppingButton.disabled = isOffline;
     if (isOffline) {
       generateButton.title = "Offline: generation is unavailable.";
+      changeStartDateButton.title = "Offline: updating plan date is unavailable.";
+      addDayButton.title = "Offline: adding days is unavailable.";
       generateShoppingButton.title = "Offline: shopping-list generation is unavailable.";
       return;
     }
     generateButton.title = "";
+    changeStartDateButton.title = "";
+    addDayButton.title = "";
     generateShoppingButton.title = "";
   }
 
@@ -209,20 +258,26 @@
       opts = options;
     }
 
-    const response = await fetch(`${apiPrefix}${path}`, {
-      headers: { "Content-Type": "application/json" },
-      ...opts,
-    });
+    try {
+      const response = await fetch(`${apiPrefix}${path}`, {
+        headers: { "Content-Type": "application/json" },
+        ...opts,
+      });
 
-    const payload = await response.json();
-    if (!response.ok) {
-      if (typeof payload.detail === "string") {
-        throw new Error(payload.detail);
+      const payload = await response.json();
+      if (!response.ok) {
+        if (typeof payload.detail === "string") {
+          throw new Error(payload.detail);
+        }
+        throw new Error(JSON.stringify(payload));
       }
-      throw new Error(JSON.stringify(payload));
-    }
 
-    return payload;
+      reportApiReachable(true);
+      return payload;
+    } catch (error) {
+      reportApiReachable(false);
+      throw error;
+    }
   }
 
   function parseIsoDate(text) {
@@ -388,7 +443,7 @@
       return "Takeout";
     }
     if (mode === "empty") {
-      return "Empty";
+      return "Eating out";
     }
     return "Cook";
   }
@@ -615,6 +670,142 @@
     publishDataChanged();
   }
 
+  function suppressNextDayCardClick(dayCard) {
+    dayCard.dataset.suppressNextClick = "1";
+  }
+
+  function consumeSuppressedDayCardClick(dayCard) {
+    if (dayCard.dataset.suppressNextClick === "1") {
+      dayCard.dataset.suppressNextClick = "0";
+      return true;
+    }
+    return false;
+  }
+
+  function attachSwipeRightDeleteGesture(dayCard, entryId) {
+    let startX = 0;
+    let startY = 0;
+    let deltaX = 0;
+    let isDragging = false;
+
+    dayCard.addEventListener("touchstart", (event) => {
+      if (isMealPlanOfflineReadOnly()) {
+        return;
+      }
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-role="drag-handle"]')) {
+        return;
+      }
+
+      const touch = event.changedTouches?.[0];
+      if (!touch) {
+        return;
+      }
+
+      startX = touch.clientX;
+      startY = touch.clientY;
+      deltaX = 0;
+      isDragging = false;
+      dayCard.classList.remove("swiping-delete-right");
+      dayCard.style.setProperty("--wf-plan-delete-progress", "0");
+    });
+
+    dayCard.addEventListener("touchmove", (event) => {
+      if (isMealPlanOfflineReadOnly()) {
+        return;
+      }
+      const touch = event.changedTouches?.[0];
+      if (!touch) {
+        return;
+      }
+
+      deltaX = touch.clientX - startX;
+      const deltaY = touch.clientY - startY;
+      if (Math.abs(deltaX) <= Math.abs(deltaY) || deltaX <= 0) {
+        return;
+      }
+
+      isDragging = true;
+      const clamped = Math.max(Math.min(deltaX, 130), 0);
+      dayCard.style.transform = `translateX(${clamped}px)`;
+      dayCard.classList.toggle("swiping-delete-right", clamped > 18);
+      const progress = Math.min(Math.abs(clamped) / 130, 1);
+      dayCard.style.setProperty("--wf-plan-delete-progress", String(progress));
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+    }, { passive: false });
+
+    dayCard.addEventListener("touchend", () => {
+      const shouldDelete = isDragging && deltaX > 78;
+      dayCard.style.transform = "";
+      dayCard.classList.remove("swiping-delete-right");
+      dayCard.style.setProperty("--wf-plan-delete-progress", "0");
+      if (shouldDelete) {
+        suppressNextDayCardClick(dayCard);
+        void runAction(() => deleteMealDay(entryId));
+      }
+      isDragging = false;
+      deltaX = 0;
+    });
+  }
+
+  async function deleteMealDay(entryId) {
+    assertMealPlanWriteAllowed("delete a meal day");
+    if (!Number.isInteger(selectedPlanId)) {
+      throw new Error("No meal plan selected.");
+    }
+    await api(`/meal-plans/${selectedPlanId}/entries/${entryId}`, {
+      method: "DELETE",
+    });
+    await reloadSelectedPlan();
+    setStatus("Meal day deleted.");
+    publishDataChanged();
+  }
+
+  async function addMealDay() {
+    assertMealPlanWriteAllowed("add a meal day");
+    if (!Number.isInteger(selectedPlanId)) {
+      throw new Error("No meal plan selected.");
+    }
+
+    const plan = selectedPlan;
+    if (!plan || typeof plan !== "object") {
+      throw new Error("Open a meal plan first.");
+    }
+
+    const entries = Array.isArray(plan.entries) ? plan.entries : [];
+    const nextDayIndex = entries.length;
+    const startDate = parseIsoDate(String(plan.start_date));
+    const nextDate = startDate ? toIsoDate(addDays(startDate, nextDayIndex)) : "";
+    const defaultServings = Number(plan.diners);
+
+    const payload = await api(`/meal-plans/${selectedPlanId}/entries`, {
+      method: "POST",
+      body: JSON.stringify({
+        day_index: nextDayIndex,
+        date: nextDate,
+        mode: "planned",
+        servings: Number.isInteger(defaultServings) ? defaultServings : 2,
+        recipe: null,
+      }),
+    });
+
+    const updatedPlan = payload && typeof payload === "object" ? payload.data : null;
+    const updatedEntries = Array.isArray(updatedPlan?.entries) ? updatedPlan.entries : [];
+    const createdEntry = updatedEntries.find((row) => Number(row?.day_index) === nextDayIndex) || null;
+    const createdEntryId = Number(createdEntry?.entry_id);
+
+    await reloadSelectedPlan();
+    if (Number.isInteger(createdEntryId)) {
+      await openMealEditor(createdEntryId);
+      setStatus(`Added Day ${nextDayIndex + 1}. Edit details and save when ready.`);
+    } else {
+      setStatus(`Added Day ${nextDayIndex + 1}.`);
+    }
+    publishDataChanged();
+  }
+
   function renderPlanDetail(plan) {
     detailNode.innerHTML = "";
 
@@ -637,6 +828,7 @@
       return;
     }
 
+    const canEditPlan = !isMealPlanOfflineReadOnly();
     const stack = document.createElement("section");
     stack.className = "wf-plan-days";
 
@@ -659,12 +851,23 @@
 
       const dayCard = document.createElement("article");
       dayCard.className = "wf-plan-day";
+      if (mode === "leftover") {
+        dayCard.classList.add("wf-plan-day-leftover");
+      } else if (mode === "takeout") {
+        dayCard.classList.add("wf-plan-day-takeout");
+      } else if (mode === "empty") {
+        dayCard.classList.add("wf-plan-day-empty");
+      }
       dayCard.dataset.entryId = String(entryId);
-      dayCard.draggable = true;
+      dayCard.draggable = canEditPlan;
 
       const reminderBadge = reminder.enabled ? '<span class="wf-badge wf-badge-notify">🔔 Reminder Set</span>' : "";
 
       dayCard.innerHTML = `
+        <div class="wf-plan-swipe-delete-right-hint" aria-hidden="true">
+          <span class="wf-plan-swipe-delete-right-icon">x</span>
+          <span class="wf-plan-swipe-delete-right-label">Delete Day</span>
+        </div>
         <button class="wf-plan-drag-handle" type="button" data-role="drag-handle" aria-label="Drag day">⋮⋮</button>
         <div class="wf-plan-day-body">
           <div class="wf-plan-day-head">
@@ -676,7 +879,13 @@
         </div>
       `;
 
+      attachSwipeRightDeleteGesture(dayCard, entryId);
+
       dayCard.addEventListener("dragstart", (event) => {
+        if (isMealPlanOfflineReadOnly()) {
+          event.preventDefault();
+          return;
+        }
         draggedEntryId = entryId;
         dayCard.classList.add("is-dragging");
         if (event.dataTransfer) {
@@ -686,6 +895,9 @@
       });
 
       dayCard.addEventListener("dragover", (event) => {
+        if (isMealPlanOfflineReadOnly()) {
+          return;
+        }
         event.preventDefault();
         if (draggedEntryId !== null && draggedEntryId !== entryId) {
           const rect = dayCard.getBoundingClientRect();
@@ -696,6 +908,9 @@
       });
 
       dayCard.addEventListener("drop", (event) => {
+        if (isMealPlanOfflineReadOnly()) {
+          return;
+        }
         event.preventDefault();
         const sourceId = draggedEntryId;
         const placement = dayCard.classList.contains("is-drop-after") ? "after" : "before";
@@ -716,6 +931,9 @@
       });
 
       dayCard.addEventListener("touchstart", (event) => {
+        if (isMealPlanOfflineReadOnly()) {
+          return;
+        }
         const target = event.target;
         if (!(target instanceof Element)) {
           return;
@@ -730,6 +948,9 @@
       }, { passive: true });
 
       dayCard.addEventListener("touchmove", (event) => {
+        if (isMealPlanOfflineReadOnly()) {
+          return;
+        }
         if (!Number.isInteger(touchDraggedEntryId)) {
           return;
         }
@@ -766,6 +987,9 @@
       }, { passive: false });
 
       dayCard.addEventListener("touchend", () => {
+        if (isMealPlanOfflineReadOnly()) {
+          return;
+        }
         if (!Number.isInteger(touchDraggedEntryId)) {
           return;
         }
@@ -786,6 +1010,9 @@
       });
 
       dayCard.addEventListener("click", (event) => {
+        if (consumeSuppressedDayCardClick(dayCard)) {
+          return;
+        }
         const target = event.target;
         if (!(target instanceof Element)) {
           return;
@@ -826,6 +1053,7 @@
       activePlanId = null;
       selectedPlanId = null;
       selectedPlan = null;
+      writeActiveMealPlanId(null);
       renderPlanList(plans);
       renderPlanDetail(null);
       setAppTab("meal-plans");
@@ -863,6 +1091,12 @@
       }
     }
 
+    if (Number.isInteger(selectedPlanId)) {
+      writeActiveMealPlanId(selectedPlanId);
+    } else if (Number.isInteger(firstPlanId)) {
+      writeActiveMealPlanId(firstPlanId);
+    }
+
     renderPlanList(plans);
     if (listFromApi) {
       updateMealPlanActionAvailability();
@@ -873,6 +1107,8 @@
     if (!Number.isInteger(selectedPlanId)) {
       return;
     }
+
+    writeActiveMealPlanId(selectedPlanId);
 
     let planData = null;
     try {
@@ -905,6 +1141,7 @@
 
   async function openPlanEditor(planId) {
     selectedPlanId = planId;
+    writeActiveMealPlanId(planId);
 
     let planData = null;
     try {
@@ -1027,6 +1264,70 @@
     closeGenerateModal();
   }
 
+  function openStartDateModal() {
+    if (isMealPlanOfflineReadOnly()) {
+      setStatus("Offline: updating plan date is unavailable.");
+      return;
+    }
+    if (!selectedPlan || typeof selectedPlan !== "object") {
+      setStatus("Open a meal plan first.");
+      return;
+    }
+
+    const current = String(selectedPlan.start_date || "").trim();
+    startDateEditInput.value = current;
+    startDateSaveButton.disabled = false;
+    startDateCancelButton.disabled = false;
+    startDateSaveButton.textContent = "Save";
+    startDateModal.hidden = false;
+  }
+
+  function closeStartDateModal() {
+    if (startDateModal.hidden) {
+      return;
+    }
+    startDateModal.hidden = true;
+  }
+
+  function closeStartDateModalIfBackdrop(event) {
+    if (event.target !== startDateModal) {
+      return;
+    }
+    closeStartDateModal();
+  }
+
+  async function saveStartDate() {
+    assertMealPlanWriteAllowed("update meal plan start date");
+    if (!Number.isInteger(selectedPlanId)) {
+      throw new Error("No meal plan selected.");
+    }
+
+    const startDate = startDateEditInput.value.trim();
+    if (startDate.length === 0) {
+      throw new Error("Start date is required.");
+    }
+
+    startDateSaveButton.disabled = true;
+    startDateCancelButton.disabled = true;
+    startDateSaveButton.textContent = "Saving...";
+
+    try {
+      await api(`/meal-plans/${selectedPlanId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ start_date: startDate }),
+      });
+
+      closeStartDateModal();
+      await reloadSelectedPlan();
+      setStatus(`Meal plan start date updated to ${startDate}.`);
+      publishDataChanged();
+    } finally {
+      startDateSaveButton.disabled = false;
+      startDateCancelButton.disabled = false;
+      startDateSaveButton.textContent = "Save";
+    }
+  }
+
   function setGenerateSavingState(isSaving) {
     generateSaveButton.disabled = isSaving;
     generateCancelButton.disabled = isSaving;
@@ -1089,13 +1390,6 @@
     } finally {
       setGenerateSavingState(false);
     }
-  }
-
-  function backToPlanList() {
-    setAppTab("meal-plans");
-    selectedPlanId = null;
-    selectedPlan = null;
-    //setStatus("Choose a meal plan to edit.");
   }
 
   function renderMealEditorSearchResults(results) {
@@ -1196,15 +1490,34 @@
       button.setAttribute("aria-pressed", String(selected));
     }
 
-    const disableRecipeFields = nextMode === "empty";
-    mealEditorNameInput.disabled = disableRecipeFields;
-    mealEditorSearchInput.disabled = disableRecipeFields;
+    const showMealField = nextMode === "planned" || nextMode === "takeout" || nextMode === "empty";
+    const showSearchField = nextMode === "planned";
+    const showDinersField = nextMode === "planned" || nextMode === "leftover" || nextMode === "takeout";
+    const showReminderField = nextMode === "planned" || nextMode === "leftover";
 
-    if (disableRecipeFields) {
-      mealEditorNameInput.value = "";
+    mealEditorNameField.hidden = !showMealField;
+    mealEditorSearchField.hidden = !showSearchField;
+    mealEditorSearchResults.hidden = !showSearchField;
+    mealEditorDinersField.hidden = !showDinersField;
+    mealEditorReminderField.hidden = !showReminderField;
+
+    mealEditorNameInput.disabled = !showMealField;
+    mealEditorSearchInput.disabled = !showSearchField;
+
+    if (!showSearchField) {
       mealEditorSearchInput.value = "";
       mealEditorSearchResults.innerHTML = "";
-      editorSelectedRecipe = null;
+      if (nextMode !== "leftover") {
+        editorSelectedRecipe = null;
+      }
+    }
+
+    if (nextMode === "empty") {
+      mealEditorNameInput.placeholder = "Where are you eating out?";
+    } else if (nextMode === "takeout") {
+      mealEditorNameInput.placeholder = "Takeout place";
+    } else {
+      mealEditorNameInput.placeholder = "";
     }
   }
 
@@ -1290,11 +1603,17 @@
   }
 
   function buildRecipePayloadFromEditor() {
-    if (editorMode === "empty") {
+    if (editorMode === "leftover") {
+      if (editorSelectedRecipe && Number.isInteger(editorSelectedRecipe.id)) {
+        return {
+          id: editorSelectedRecipe.id,
+          title: editorSelectedRecipe.title,
+        };
+      }
       return null;
     }
 
-    if (editorSelectedRecipe && Number.isInteger(editorSelectedRecipe.id)) {
+    if (editorMode === "planned" && editorSelectedRecipe && Number.isInteger(editorSelectedRecipe.id)) {
       return {
         id: editorSelectedRecipe.id,
         title: editorSelectedRecipe.title,
@@ -1368,12 +1687,20 @@
   generateSaveButton.addEventListener("click", () => {
     void runAction(generatePlan);
   });
+  changeStartDateButton.addEventListener("click", openStartDateModal);
+  addDayButton.addEventListener("click", () => {
+    void runAction(addMealDay);
+  });
   generateShoppingButton.addEventListener("click", () => {
     void runAction(generateShoppingList);
   });
 
-  backButton.addEventListener("click", backToPlanList);
   generateModal.addEventListener("click", closeGenerateModalIfBackdrop);
+  startDateCancelButton.addEventListener("click", closeStartDateModal);
+  startDateSaveButton.addEventListener("click", () => {
+    void runAction(saveStartDate);
+  });
+  startDateModal.addEventListener("click", closeStartDateModalIfBackdrop);
 
   mealEditorCancelButton.addEventListener("click", closeMealEditorModal);
   mealEditorSaveButton.addEventListener("click", () => {
@@ -1402,6 +1729,9 @@
 
   window.addEventListener("keydown", (event) => {
     closeGenerateModalIfEscape(event);
+    if (event.key === "Escape") {
+      closeStartDateModal();
+    }
     closeMealEditorIfEscape(event);
   });
 
@@ -1411,6 +1741,13 @@
 
   window.addEventListener("offline", () => {
     updateMealPlanActionAvailability();
+  });
+
+  window.addEventListener("wfd:online-state", () => {
+    updateMealPlanActionAvailability();
+    if (selectedPlan) {
+      renderPlanDetail(selectedPlan);
+    }
   });
 
   window.addEventListener("wfd:open-meal-editor", (event) => {

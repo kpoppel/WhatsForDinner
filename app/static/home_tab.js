@@ -42,9 +42,35 @@
   });
   const MEAL_PLAN_CACHE_KEY = "wfd.meal-plans.cache.v1";
   const HOME_ACTIVE_PLAN_CACHE_KEY = "wfd.home.active-plan.v1";
+  const ACTIVE_MEAL_PLAN_ID_KEY = "wfd.active-meal-plan-id.v1";
 
   let lastSelectedPlanId = null;
   let todayEntryId = null;
+
+  function readActiveMealPlanId() {
+    try {
+      const raw = localStorage.getItem(ACTIVE_MEAL_PLAN_ID_KEY);
+      const value = Number(raw);
+      if (Number.isInteger(value)) {
+        return value;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeActiveMealPlanId(planId) {
+    try {
+      if (!Number.isInteger(planId)) {
+        localStorage.removeItem(ACTIVE_MEAL_PLAN_ID_KEY);
+        return;
+      }
+      localStorage.setItem(ACTIVE_MEAL_PLAN_ID_KEY, String(planId));
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }
 
   function readMealPlanCache() {
     try {
@@ -120,7 +146,7 @@
       return "Takeout";
     }
     if (mode === "empty") {
-      return "Empty";
+      return "Eating out";
     }
     return "Cook";
   }
@@ -377,7 +403,11 @@
 
     openPlansButton.textContent = "View Recipe";
     editDayButton.textContent = "Edit";
-    editDayButton.disabled = navigator.onLine === false;
+    if (typeof window.WFD_isOnline === "function") {
+      editDayButton.disabled = !window.WFD_isOnline();
+    } else {
+      editDayButton.disabled = navigator.onLine === false;
+    }
   }
 
   function renderUpcoming(entries) {
@@ -488,12 +518,17 @@
       updatedAt: new Date().toISOString(),
     });
 
-    const planId = Number(rows[0].plan_id);
+    const preferredId = readActiveMealPlanId();
+    const preferredRow = Number.isInteger(preferredId)
+      ? rows.find((row) => Number(row?.plan_id) === preferredId)
+      : null;
+    const planId = Number((preferredRow || rows[0]).plan_id);
     if (!Number.isInteger(planId)) {
       return { plan: null, entries: [] };
     }
 
     lastSelectedPlanId = planId;
+    writeActiveMealPlanId(planId);
     const detailPayload = await api(`/meal-plans/${planId}`);
     const plan = detailPayload.data;
     if (!plan || typeof plan !== "object") {
@@ -522,12 +557,17 @@
       return { plan: null, entries: [] };
     }
 
-    const planId = Number(rows[0].plan_id);
+    const preferredId = readActiveMealPlanId();
+    const preferredRow = Number.isInteger(preferredId)
+      ? rows.find((row) => Number(row?.plan_id) === preferredId)
+      : null;
+    const planId = Number((preferredRow || rows[0]).plan_id);
     if (!Number.isInteger(planId)) {
       return { plan: null, entries: [] };
     }
 
     lastSelectedPlanId = planId;
+    writeActiveMealPlanId(planId);
     const plan = cache.byId[String(planId)];
     if (plan && typeof plan === "object") {
       return {
@@ -541,6 +581,7 @@
       const cachedPlanId = Number(homeFallback.plan.plan_id);
       if (Number.isInteger(cachedPlanId)) {
         lastSelectedPlanId = cachedPlanId;
+        writeActiveMealPlanId(cachedPlanId);
       }
       return homeFallback;
     }
