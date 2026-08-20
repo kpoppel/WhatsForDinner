@@ -512,16 +512,106 @@ import { assertRequiredFields } from "./js/contracts.js";
       includes.className = "wf-plan-card-includes";
       includes.textContent = planIncludesText(plan);
 
+      const deleteHint = document.createElement("div");
+      deleteHint.className = "wf-plan-card-swipe-delete-right-hint";
+      deleteHint.innerHTML = `
+        <span class="wf-plan-card-swipe-delete-right-icon">x</span>
+        <span class="wf-plan-card-swipe-delete-right-label">Delete Plan</span>
+      `;
+
+      card.appendChild(deleteHint);
       card.appendChild(header);
       card.appendChild(meta);
       card.appendChild(includes);
 
+      attachPlanCardSwipeRightDeleteGesture(card, planId);
+
       card.addEventListener("click", () => {
+        if (consumeSuppressedPlanCardClick(card)) {
+          return;
+        }
         void runAction(() => openPlanEditor(planId));
       });
 
       listNode.appendChild(card);
     }
+  }
+
+  function suppressNextPlanCardClick(card) {
+    card.dataset.suppressNextClick = "1";
+  }
+
+  function consumeSuppressedPlanCardClick(card) {
+    if (card.dataset.suppressNextClick === "1") {
+      card.dataset.suppressNextClick = "0";
+      return true;
+    }
+    return false;
+  }
+
+  function attachPlanCardSwipeRightDeleteGesture(card, planId) {
+    let startX = 0;
+    let startY = 0;
+    let deltaX = 0;
+    let isDragging = false;
+
+    card.addEventListener("touchstart", (event) => {
+      if (isMealPlanOfflineReadOnly()) {
+        return;
+      }
+
+      const touch = event.changedTouches?.[0];
+      if (!touch) {
+        return;
+      }
+
+      startX = touch.clientX;
+      startY = touch.clientY;
+      deltaX = 0;
+      isDragging = false;
+      card.classList.remove("swiping-delete-right");
+      card.style.setProperty("--wf-plan-card-delete-progress", "0");
+    });
+
+    card.addEventListener("touchmove", (event) => {
+      if (isMealPlanOfflineReadOnly()) {
+        return;
+      }
+
+      const touch = event.changedTouches?.[0];
+      if (!touch) {
+        return;
+      }
+
+      deltaX = touch.clientX - startX;
+      const deltaY = touch.clientY - startY;
+      if (Math.abs(deltaX) <= Math.abs(deltaY) || deltaX <= 0) {
+        return;
+      }
+
+      isDragging = true;
+      const clamped = Math.max(Math.min(deltaX, 130), 0);
+      card.style.transform = `translateX(${clamped}px)`;
+      card.classList.toggle("swiping-delete-right", clamped > 18);
+      const progress = Math.min(Math.abs(clamped) / 130, 1);
+      card.style.setProperty("--wf-plan-card-delete-progress", String(progress));
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+    }, { passive: false });
+
+    card.addEventListener("touchend", () => {
+      const shouldDelete = isDragging && deltaX > 78;
+      card.style.transform = "";
+      card.classList.remove("swiping-delete-right");
+      card.style.setProperty("--wf-plan-card-delete-progress", "0");
+      if (shouldDelete) {
+        suppressNextPlanCardClick(card);
+        void runAction(() => deleteStoredPlan(planId));
+      }
+      isDragging = false;
+      deltaX = 0;
+    });
   }
 
   function clearDayDropTargets() {
@@ -717,6 +807,30 @@ import { assertRequiredFields } from "./js/contracts.js";
     });
     await reloadSelectedPlan();
     setStatus("Meal day deleted.");
+    publishDataChanged();
+  }
+
+  async function deleteStoredPlan(planId) {
+    assertMealPlanWriteAllowed("delete a meal plan");
+
+    await api(`/meal-plans/stored/${planId}`, {
+      method: "DELETE",
+    });
+
+    if (selectedPlanId === planId) {
+      selectedPlanId = null;
+      selectedPlan = null;
+      writeActiveMealPlanId(null);
+      renderPlanDetail(null);
+      setAppTab("meal-plans");
+    }
+
+    if (activePlanId === planId) {
+      activePlanId = null;
+    }
+
+    await refreshPlans();
+    setStatus("Meal plan deleted.");
     publishDataChanged();
   }
 
@@ -1877,10 +1991,6 @@ import { assertRequiredFields } from "./js/contracts.js";
         if (recipePayload === null && mealTitle.length > 0) {
           recipePayload = { title: mealTitle };
         }
-      } else if (editorMode === "leftover") {
-        recipePayload = primaryRecipe;
-      } else if (mealTitle.length > 0) {
-        recipePayload = { title: mealTitle };
       }
 
       const patch = {

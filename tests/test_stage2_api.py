@@ -911,6 +911,40 @@ def test_stage2_stored_meal_plan_list_and_delete(monkeypatch, tmp_path) -> None:
     assert list_after_delete.json()["count"] == 0
 
 
+def test_stage2_delete_stored_meal_plan_cleans_shopping_and_meal_rows(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    fake_client = MealPlanShoppingStatefulClient()
+    monkeypatch.setattr("app.api.client", fake_client)
+
+    gen_res = client.post(
+        "/api/v1/meal-plans/generate",
+        json={
+            "start_date": "2026-08-18",
+            "length_days": 1,
+            "diners": 2,
+        },
+    )
+    assert gen_res.status_code == 200
+    plan_id = int(gen_res.json()["data"]["plan_id"])
+
+    shopping_res = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
+    assert shopping_res.status_code == 200
+    assert shopping_item_count_from_view() > 0
+    assert len(fake_client.meal_plan_rows) > 0
+
+    delete_res = client.delete(f"/api/v1/meal-plans/stored/{plan_id}")
+    assert delete_res.status_code == 200
+    assert delete_res.json()["data"]["deleted"] is True
+
+    assert shopping_item_count_from_view() == 0
+    assert fake_client.meal_plan_rows == {}
+
+    list_after_delete = client.get("/api/v1/meal-plans/stored")
+    assert list_after_delete.status_code == 200
+    assert list_after_delete.json()["count"] == 0
+
+
 def test_stage2_stored_meal_plans_sorted_by_start_date_proximity(monkeypatch, tmp_path) -> None:
     state = use_temp_state(monkeypatch, tmp_path)
 
