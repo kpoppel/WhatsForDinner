@@ -1473,17 +1473,22 @@ class MealPlanService:
             for instance_key in removed_instance_keys:
                 previous_row = previous_sync[instance_key]
                 recipe_id = previous_row.get("recipe_id")
+
+                # Keep non-recipe mode rows (leftover/takeout/empty) intact.
+                if not isinstance(recipe_id, int):
+                    next_sync[instance_key] = dict(previous_row)
+                    continue
+
                 previous_ids = set(previous_row.get("entry_ids") if isinstance(previous_row.get("entry_ids"), set) else set())
                 remaining_ids: set[int] = set(previous_ids)
-                if isinstance(recipe_id, int):
-                    remaining_ids = await delete_tracked_entries(
-                        recipe_id=recipe_id,
-                        tracked_ids=previous_ids,
-                        instance_key=instance_key,
-                        recipe_source="sync_remove",
-                        created=created,
-                        failed=failed,
-                    )
+                remaining_ids = await delete_tracked_entries(
+                    recipe_id=recipe_id,
+                    tracked_ids=previous_ids,
+                    instance_key=instance_key,
+                    recipe_source="sync_remove",
+                    created=created,
+                    failed=failed,
+                )
                 meal_plan_deleted = await delete_meal_plan_row(
                     instance=previous_row,
                     recipe_source="sync_remove",

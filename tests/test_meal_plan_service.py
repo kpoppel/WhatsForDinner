@@ -907,6 +907,67 @@ def test_patch_entry_keeps_unchanged_mode_rows_when_remote_snapshot_is_sparse(tm
     assert any("Eating Out" in title for title in titles)
 
 
+def test_generate_shopping_sync_preserves_mode_only_rows(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+    client = FakeMealClient()
+    service = MealPlanService(state, client)
+
+    plan = state.create_meal_plan(
+        {
+            "start_date": "2026-08-10",
+            "length_days": 2,
+            "diners": 2,
+            "entries": [
+                {
+                    "entry_id": 1,
+                    "day_index": 0,
+                    "date": "2026-08-10",
+                    "mode": "planned",
+                    "recipe": {"id": 11, "title": "Roast Veg"},
+                    "extra_recipes": [],
+                    "servings": 2,
+                },
+                {
+                    "entry_id": 2,
+                    "day_index": 1,
+                    "date": "2026-08-11",
+                    "mode": "leftover",
+                    "recipe": None,
+                    "extra_recipes": [],
+                    "servings": 2,
+                },
+            ],
+            "keyword_ids": [],
+            "constraints": {"leftover_days": [], "takeout_days": [], "empty_days": []},
+            "no_repeat_days": 30,
+        }
+    )
+    plan_id = int(plan["plan_id"])
+
+    asyncio.run(
+        service.patch_plan(
+            plan_id,
+            {"entries": plan["entries"]},
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+        )
+    )
+
+    initial_titles = [str(row.get("title") or "") for row in client.meal_plan_rows.values()]
+    assert any("Leftovers" in title for title in initial_titles)
+
+    asyncio.run(
+        service.generate_shopping_from_plan(
+            plan_id=plan_id,
+            mode="sync",
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            build_shopping_view=build_shopping_view,
+        )
+    )
+
+    titles_after = [str(row.get("title") or "") for row in client.meal_plan_rows.values()]
+    assert any("Leftovers" in title for title in titles_after)
+
+
 def test_delete_plan_removes_tracked_shopping_before_meal_rows(tmp_path) -> None:
     state = Stage2State(str(tmp_path))
     client = OrderedDeleteMealClient()
