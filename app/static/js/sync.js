@@ -1,5 +1,5 @@
 import { api, isOnline, setApiReachable, browserOnline } from "./api.js";
-import { state, persistCache, applyPendingChanges, queueStatusChange, queueDeleteChange, SHOPPING_STATUSES } from "./state.js";
+import { state, persistCache, applyPendingChanges, queueStatusChange, queueDeleteChange, compactPendingChanges, SHOPPING_STATUSES } from "./state.js";
 import { render, updateStatusBadges } from "./render.js";
 
 const DEBUG_MODE = false;
@@ -12,6 +12,21 @@ export function show(data) {
   if (output) {
     output.textContent = JSON.stringify(data, null, 2);
   }
+}
+
+function publishDataChanged() {
+  window.dispatchEvent(new CustomEvent("wfd:data-changed", { detail: { source: "shopping-mode" } }));
+}
+
+function normalizeEntryIds(entryIds) {
+  if (!Array.isArray(entryIds)) {
+    return [];
+  }
+  return Array.from(new Set(
+    entryIds
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value !== 0),
+  ));
 }
 
 export async function run(action) {
@@ -57,6 +72,8 @@ export async function refresh() {
 }
 
 export async function syncPending(showPayload = true) {
+  compactPendingChanges();
+  persistCache();
   updateStatusBadges();
   if (state.pendingChanges.length === 0) {
     return { source: "local-cache", applied: [], rejected: [] };
@@ -91,6 +108,7 @@ export async function syncPending(showPayload = true) {
   if (showPayload) {
     show(payload);
   }
+  publishDataChanged();
   return payload;
 }
 
@@ -100,6 +118,7 @@ export async function setStatus(entryId, status) {
   }
   queueStatusChange(entryId, status);
   render();
+  publishDataChanged();
   if (!isOnline()) {
     show({
       source: "local-cache",
@@ -119,9 +138,47 @@ export async function setStatus(entryId, status) {
   });
 }
 
+export async function setStatusMany(entryIds, status) {
+  if (!SHOPPING_STATUSES.has(status)) {
+    throw new Error("Invalid status for shopping mode.");
+  }
+  const ids = normalizeEntryIds(entryIds);
+  if (ids.length === 0) {
+    return;
+  }
+
+  for (const entryId of ids) {
+    queueStatusChange(entryId, status);
+  }
+
+  render();
+  publishDataChanged();
+
+  if (!isOnline()) {
+    show({
+      source: "local-cache",
+      message: "Offline mode: changes saved locally and queued for sync.",
+      entry_ids: ids,
+      status,
+      pending_count: state.pendingChanges.length,
+    });
+    return;
+  }
+
+  await syncPending(false);
+  show({
+    source: "shopping-mode",
+    message: "Batch status update synced to server.",
+    entry_ids: ids,
+    status,
+    pending_count: state.pendingChanges.length,
+  });
+}
+
 export async function deleteEntry(entryId) {
   queueDeleteChange(entryId);
   render();
+  publishDataChanged();
   if (!isOnline()) {
     show({
       source: "local-cache",
@@ -136,6 +193,38 @@ export async function deleteEntry(entryId) {
     source: "shopping-mode",
     message: "Delete synced to server.",
     entry_id: entryId,
+    pending_count: state.pendingChanges.length,
+  });
+}
+
+export async function deleteEntries(entryIds) {
+  const ids = normalizeEntryIds(entryIds);
+  if (ids.length === 0) {
+    return;
+  }
+
+  for (const entryId of ids) {
+    queueDeleteChange(entryId);
+  }
+
+  render();
+  publishDataChanged();
+
+  if (!isOnline()) {
+    show({
+      source: "local-cache",
+      message: "Offline mode: deletes saved locally and queued for sync.",
+      entry_ids: ids,
+      pending_count: state.pendingChanges.length,
+    });
+    return;
+  }
+
+  await syncPending(false);
+  show({
+    source: "shopping-mode",
+    message: "Batch delete synced to server.",
+    entry_ids: ids,
     pending_count: state.pendingChanges.length,
   });
 }

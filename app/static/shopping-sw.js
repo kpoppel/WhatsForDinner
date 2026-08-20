@@ -1,4 +1,4 @@
-const CACHE_NAME = "wfd-shopping-pwa-v5";
+const CACHE_NAME = "wfd-shopping-pwa-v6";
 const APP_FALLBACK_PATH = "/app";
 const APP_SHELL = [
   "/app",
@@ -119,9 +119,6 @@ self.addEventListener("fetch", (event) => {
         const cache = await caches.open(CACHE_NAME);
         const cacheKey = url.pathname;
         const cached = await cache.match(cacheKey);
-        if (cached) {
-          return cached;
-        }
         try {
           const response = await fetch(request);
           if (response && response.ok) {

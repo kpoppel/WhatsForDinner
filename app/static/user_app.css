@@ -1031,6 +1031,18 @@ body {
   border-color: #e87474;
 }
 
+.wf-editor-item.wf-editor-item-status-completed {
+  background: #dff4e3;
+  border-color: #87c895;
+  box-shadow: inset 4px 0 0 #2e7d32;
+}
+
+.wf-editor-item.wf-editor-item-status-skipped {
+  background: #fff3c9;
+  border-color: #d7b85f;
+  box-shadow: inset 4px 0 0 #b7791f;
+}
+
 .wf-editor-swipe-delete-right-hint {
   position: absolute;
   top: 0;

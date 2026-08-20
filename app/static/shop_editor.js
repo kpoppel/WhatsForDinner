@@ -118,6 +118,15 @@ function bindTabActivation() {
       });
     });
   }
+
+  window.addEventListener("wfd:data-changed", (event) => {
+    const detail = event instanceof CustomEvent ? event.detail : null;
+    const source = detail && typeof detail === "object" ? String(detail.source || "") : "";
+    if (source === "shop-editor") {
+      return;
+    }
+    renderEditor();
+  });
 }
 
 function bindModalControls() {
@@ -509,6 +518,13 @@ function closeMergePickModal() {
 function createEditorRow(item) {
   const row = document.createElement("article");
   row.className = "wf-editor-item";
+
+  const status = String(item?.status || "remaining");
+  if (status === "completed") {
+    row.classList.add("wf-editor-item-status-completed");
+  } else if (status === "skipped") {
+    row.classList.add("wf-editor-item-status-skipped");
+  }
 
   const entryIds = Array.isArray(item.entry_ids) && item.entry_ids.length > 0
     ? item.entry_ids

@@ -74,6 +74,7 @@
   });
 
   const generateSheetClass = "wf-plan-sheet-open";
+  const MEAL_PLAN_CACHE_KEY = "wfd.meal-plans.cache.v1";
 
   let activePlanId = null;
   let selectedPlanId = null;
@@ -91,6 +92,87 @@
   let touchDraggedEntryId = null;
   let touchDropEntryId = null;
   let touchDropPlacement = "before";
+
+  function readPlanCache() {
+    try {
+      const raw = localStorage.getItem(MEAL_PLAN_CACHE_KEY);
+      if (!raw) {
+        return { list: [], byId: {} };
+      }
+      const parsed = JSON.parse(raw);
+      const list = Array.isArray(parsed?.list) ? parsed.list : [];
+      const byId = parsed?.byId && typeof parsed.byId === "object" ? parsed.byId : {};
+      return { list, byId };
+    } catch {
+      return { list: [], byId: {} };
+    }
+  }
+
+  function writePlanCache(nextCache) {
+    try {
+      localStorage.setItem(MEAL_PLAN_CACHE_KEY, JSON.stringify(nextCache));
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }
+
+  function cachePlanListRows(plans) {
+    const current = readPlanCache();
+    writePlanCache({
+      list: Array.isArray(plans) ? plans : [],
+      byId: current.byId,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  function cachePlanDetail(plan) {
+    const planId = Number(plan?.plan_id);
+    if (!Number.isInteger(planId)) {
+      return;
+    }
+    const current = readPlanCache();
+    const byId = {
+      ...current.byId,
+      [String(planId)]: plan,
+    };
+    writePlanCache({
+      list: current.list,
+      byId,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  function cachedPlanDetail(planId) {
+    const cache = readPlanCache();
+    const row = cache.byId[String(planId)];
+    if (row && typeof row === "object") {
+      return row;
+    }
+    return null;
+  }
+
+  function isMealPlanOfflineReadOnly() {
+    return navigator.onLine === false;
+  }
+
+  function assertMealPlanWriteAllowed(action) {
+    if (isMealPlanOfflineReadOnly()) {
+      throw new Error(`Cannot ${action} while offline. Meal plan editing is disabled.`);
+    }
+  }
+
+  function updateMealPlanActionAvailability() {
+    const isOffline = isMealPlanOfflineReadOnly();
+    generateButton.disabled = isOffline;
+    generateShoppingButton.disabled = isOffline;
+    if (isOffline) {
+      generateButton.title = "Offline: generation is unavailable.";
+      generateShoppingButton.title = "Offline: shopping-list generation is unavailable.";
+      return;
+    }
+    generateButton.title = "";
+    generateShoppingButton.title = "";
+  }
 
   function setStatus(message) {
     statusNode.textContent = message;
@@ -477,6 +559,7 @@
   }
 
   async function reorderEntry(dragEntryId, dropEntryId, dropPlacement = "before") {
+    assertMealPlanWriteAllowed("reorder meal days");
     if (!Number.isInteger(selectedPlanId)) {
       return;
     }
@@ -720,9 +803,24 @@
   }
 
   async function refreshPlans() {
-    const listPayload = await api("/meal-plans/stored");
-    const rawPlans = Array.isArray(listPayload.data) ? listPayload.data : [];
-    const plans = sortPlansMostRecentFirst(rawPlans);
+    let plans = [];
+    let listFromApi = false;
+
+    try {
+      const listPayload = await api("/meal-plans/stored");
+      const rawPlans = Array.isArray(listPayload.data) ? listPayload.data : [];
+      plans = sortPlansMostRecentFirst(rawPlans);
+      cachePlanListRows(plans);
+      listFromApi = true;
+    } catch {
+      const cached = readPlanCache().list;
+      plans = sortPlansMostRecentFirst(Array.isArray(cached) ? cached : []);
+      if (plans.length > 0) {
+        setStatus("Offline: showing cached meal plans.");
+      } else {
+        throw new Error("Unable to load meal plans while offline.");
+      }
+    }
 
     if (plans.length === 0) {
       activePlanId = null;
@@ -748,8 +846,12 @@
       try {
         const activePayload = await api(`/meal-plans/${firstPlanId}`);
         cachePlanPreview(activePayload.data);
+        cachePlanDetail(activePayload.data);
       } catch {
-        // Keep list rendering resilient even if preview fetch fails.
+        const cached = cachedPlanDetail(firstPlanId);
+        if (cached) {
+          cachePlanPreview(cached);
+        }
       }
     }
 
@@ -762,6 +864,9 @@
     }
 
     renderPlanList(plans);
+    if (listFromApi) {
+      updateMealPlanActionAvailability();
+    }
   }
 
   async function reloadSelectedPlan() {
@@ -769,35 +874,72 @@
       return;
     }
 
-    const payload = await api(`/meal-plans/${selectedPlanId}`);
-    selectedPlan = payload.data;
+    let planData = null;
+    try {
+      const payload = await api(`/meal-plans/${selectedPlanId}`);
+      planData = payload.data;
+    } catch {
+      planData = cachedPlanDetail(selectedPlanId);
+      if (!planData) {
+        throw new Error("Unable to load selected meal plan while offline.");
+      }
+      setStatus("Offline: showing cached meal plan.");
+    }
+
+    selectedPlan = planData;
     cachePlanPreview(selectedPlan);
+    cachePlanDetail(selectedPlan);
     renderPlanDetail(selectedPlan);
 
-    const listPayload = await api("/meal-plans/stored");
-    const rawPlans = Array.isArray(listPayload.data) ? listPayload.data : [];
-    const plans = sortPlansMostRecentFirst(rawPlans);
+    let plans = [];
+    try {
+      const listPayload = await api("/meal-plans/stored");
+      const rawPlans = Array.isArray(listPayload.data) ? listPayload.data : [];
+      plans = sortPlansMostRecentFirst(rawPlans);
+      cachePlanListRows(plans);
+    } catch {
+      plans = sortPlansMostRecentFirst(readPlanCache().list);
+    }
     renderPlanList(plans);
   }
 
   async function openPlanEditor(planId) {
     selectedPlanId = planId;
 
-    const payload = await api(`/meal-plans/${planId}`);
-    selectedPlan = payload.data;
+    let planData = null;
+    try {
+      const payload = await api(`/meal-plans/${planId}`);
+      planData = payload.data;
+    } catch {
+      planData = cachedPlanDetail(planId);
+      if (!planData) {
+        throw new Error("Unable to open this plan while offline.");
+      }
+      setStatus("Offline: opened cached meal plan.");
+    }
+
+    selectedPlan = planData;
     cachePlanPreview(selectedPlan);
+    cachePlanDetail(selectedPlan);
     renderPlanDetail(selectedPlan);
     setAppTab("meal-plan-detail");
 
-    const listPayload = await api("/meal-plans/stored");
-    const rawPlans = Array.isArray(listPayload.data) ? listPayload.data : [];
-    const plans = sortPlansMostRecentFirst(rawPlans);
+    let plans = [];
+    try {
+      const listPayload = await api("/meal-plans/stored");
+      const rawPlans = Array.isArray(listPayload.data) ? listPayload.data : [];
+      plans = sortPlansMostRecentFirst(rawPlans);
+      cachePlanListRows(plans);
+    } catch {
+      plans = sortPlansMostRecentFirst(readPlanCache().list);
+    }
     renderPlanList(plans);
 
     setStatus(`Loaded meal plan ${planDateRangeLabel(selectedPlan)}.`);
   }
 
   async function generateShoppingList() {
+    assertMealPlanWriteAllowed("generate a shopping list from meal plans");
     if (!Number.isInteger(selectedPlanId)) {
       throw new Error("Select a meal plan first.");
     }
@@ -838,6 +980,10 @@
   }
 
   function openGenerateModal() {
+    if (isMealPlanOfflineReadOnly()) {
+      setStatus("Offline: meal plan generation is unavailable.");
+      return;
+    }
     generateStartDateInput.value = toIsoDate(new Date());
     generateLengthInput.value = "7";
     generateDinersInput.value = "2";
@@ -892,6 +1038,7 @@
   }
 
   async function generatePlan() {
+    assertMealPlanWriteAllowed("generate a meal plan");
     setGenerateSavingState(true);
 
     try {
@@ -1136,6 +1283,10 @@
     }
 
     openMealEditorModal();
+    mealEditorSaveButton.disabled = isMealPlanOfflineReadOnly();
+    if (isMealPlanOfflineReadOnly()) {
+      setStatus("Offline: meal plan edits are disabled.");
+    }
   }
 
   function buildRecipePayloadFromEditor() {
@@ -1169,6 +1320,7 @@
   }
 
   async function saveMealEditor() {
+    assertMealPlanWriteAllowed("edit this meal day");
     if (!Number.isInteger(selectedPlanId)) {
       throw new Error("No meal plan selected.");
     }
@@ -1253,6 +1405,14 @@
     closeMealEditorIfEscape(event);
   });
 
+  window.addEventListener("online", () => {
+    updateMealPlanActionAvailability();
+  });
+
+  window.addEventListener("offline", () => {
+    updateMealPlanActionAvailability();
+  });
+
   window.addEventListener("wfd:open-meal-editor", (event) => {
     const detail = event instanceof CustomEvent ? event.detail : null;
     if (!detail || typeof detail !== "object") {
@@ -1281,6 +1441,7 @@
   }
 
   setAppTab("meal-plans");
+  updateMealPlanActionAvailability();
   //setStatus("Choose a meal plan to edit.");
   void runAction(refreshPlans);
 })();

@@ -2,12 +2,14 @@ import { escapeAttr } from "./utils.js";
 import { suppressNextCardClick, consumeSuppressedCardClick } from "./render.js";
 
 // Injected by initGestures() from shopping.js to avoid a circular dependency with sync.js.
-let _run, _setStatus, _deleteEntry;
+let _run, _setStatus, _deleteEntry, _setStatusMany, _deleteEntries;
 
-export function initGestures({ run, setStatus, deleteEntry }) {
+export function initGestures({ run, setStatus, deleteEntry, setStatusMany, deleteEntries }) {
   _run = run;
   _setStatus = setStatus;
   _deleteEntry = deleteEntry;
+  _setStatusMany = setStatusMany;
+  _deleteEntries = deleteEntries;
 }
 
 function normalizeEntryIds(value) {
@@ -21,13 +23,29 @@ function normalizeEntryIds(value) {
 }
 
 async function setStatusForEntries(entryIds, status) {
-  for (const entryId of normalizeEntryIds(entryIds)) {
+  const ids = normalizeEntryIds(entryIds);
+  if (ids.length === 0) {
+    return;
+  }
+  if (typeof _setStatusMany === "function") {
+    await _setStatusMany(ids, status);
+    return;
+  }
+  for (const entryId of ids) {
     await _setStatus(entryId, status);
   }
 }
 
 async function deleteEntries(entryIds) {
-  for (const entryId of normalizeEntryIds(entryIds)) {
+  const ids = normalizeEntryIds(entryIds);
+  if (ids.length === 0) {
+    return;
+  }
+  if (typeof _deleteEntries === "function") {
+    await _deleteEntries(ids);
+    return;
+  }
+  for (const entryId of ids) {
     await _deleteEntry(entryId);
   }
 }

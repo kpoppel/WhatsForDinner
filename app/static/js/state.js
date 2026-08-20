@@ -14,6 +14,145 @@ export const state = {
   },
 };
 
+export function queuedEntryId(change) {
+  if (!change || typeof change !== "object") {
+    return null;
+  }
+  if (change.operation === "create") {
+    return shoppingItemId(change.payload?.id);
+  }
+  return shoppingItemId(change.entry_id);
+}
+
+function mergeCreatePayload(basePayload, patch) {
+  const base = basePayload && typeof basePayload === "object" ? basePayload : {};
+  const delta = patch && typeof patch === "object" ? patch : {};
+  return {
+    ...base,
+    ...delta,
+  };
+}
+
+export function compactPendingChanges() {
+  const order = [];
+  const mergedByKey = new Map();
+
+  for (const change of state.pendingChanges) {
+    if (!change || typeof change !== "object") {
+      continue;
+    }
+
+    const operation = String(change.operation || "").toLowerCase();
+    if (!["create", "update", "delete"].includes(operation)) {
+      continue;
+    }
+
+    const entryId = queuedEntryId(change);
+    const key = entryId === null ? `opaque:${order.length}` : `entry:${entryId}`;
+    if (!mergedByKey.has(key)) {
+      order.push(key);
+    }
+
+    const previous = mergedByKey.get(key) || null;
+    const next = {
+      operation,
+      entry_id: entryId,
+      payload: change.payload && typeof change.payload === "object" ? { ...change.payload } : undefined,
+      queued_at: change.queued_at || new Date().toISOString(),
+    };
+
+    if (!previous) {
+      mergedByKey.set(key, next);
+      continue;
+    }
+
+    if (previous.operation === "create") {
+      if (operation === "update") {
+        previous.payload = mergeCreatePayload(previous.payload, next.payload);
+        previous.queued_at = next.queued_at;
+        mergedByKey.set(key, previous);
+        continue;
+      }
+      if (operation === "delete") {
+        mergedByKey.set(key, null);
+        continue;
+      }
+      if (operation === "create") {
+        previous.payload = mergeCreatePayload(previous.payload, next.payload);
+        previous.queued_at = next.queued_at;
+        mergedByKey.set(key, previous);
+        continue;
+      }
+    }
+
+    if (operation === "update" && previous.operation === "update") {
+      previous.payload = mergeCreatePayload(previous.payload, next.payload);
+      previous.queued_at = next.queued_at;
+      mergedByKey.set(key, previous);
+      continue;
+    }
+
+    if (operation === "update" && previous.operation === "delete") {
+      mergedByKey.set(key, next);
+      continue;
+    }
+
+    if (operation === "delete") {
+      mergedByKey.set(key, {
+        operation: "delete",
+        entry_id: entryId,
+        queued_at: next.queued_at,
+      });
+      continue;
+    }
+
+    mergedByKey.set(key, next);
+  }
+
+  const compacted = [];
+  for (const key of order) {
+    const row = mergedByKey.get(key);
+    if (!row) {
+      continue;
+    }
+
+    if (row.operation === "create") {
+      compacted.push({
+        operation: "create",
+        payload: row.payload || {},
+        queued_at: row.queued_at,
+      });
+      continue;
+    }
+
+    if (row.operation === "update") {
+      if (row.entry_id === null) {
+        continue;
+      }
+      compacted.push({
+        operation: "update",
+        entry_id: row.entry_id,
+        payload: row.payload || {},
+        queued_at: row.queued_at,
+      });
+      continue;
+    }
+
+    if (row.operation === "delete") {
+      if (row.entry_id === null) {
+        continue;
+      }
+      compacted.push({
+        operation: "delete",
+        entry_id: row.entry_id,
+        queued_at: row.queued_at,
+      });
+    }
+  }
+
+  state.pendingChanges = compacted;
+}
+
 export function persistCache() {
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify(state));
@@ -107,6 +246,7 @@ export function loadCache() {
     state.pendingChanges = [];
     state.serverCursor = 0;
   }
+  compactPendingChanges();
   applyPendingChanges();
   persistCache();
 }
@@ -125,13 +265,14 @@ export function queueDeleteChange(entryId) {
     return;
   }
   state.pendingChanges = state.pendingChanges.filter(
-    (change) => shoppingItemId(change.entry_id) !== id,
+    (change) => queuedEntryId(change) !== id,
   );
   state.pendingChanges.push({
     operation: "delete",
     entry_id: id,
     queued_at: new Date().toISOString(),
   });
+  compactPendingChanges();
   delete state.itemsById[String(id)];
   persistCache();
 }
@@ -142,7 +283,7 @@ export function queueUpdateChange(entryId, patch) {
     return;
   }
   state.pendingChanges = state.pendingChanges.filter(
-    (change) => shoppingItemId(change.entry_id) !== id,
+    (change) => queuedEntryId(change) !== id,
   );
   state.pendingChanges.push({
     operation: "update",
@@ -150,6 +291,7 @@ export function queueUpdateChange(entryId, patch) {
     payload: patch,
     queued_at: new Date().toISOString(),
   });
+  compactPendingChanges();
   const row = state.itemsById[String(id)];
   if (row) {
     Object.assign(row, patch);
@@ -161,11 +303,18 @@ export function queueCreateChange(payload) {
   if (!payload || typeof payload !== "object") {
     return;
   }
+  const tempId = shoppingItemId(payload.id);
+  if (tempId !== null) {
+    state.pendingChanges = state.pendingChanges.filter(
+      (change) => queuedEntryId(change) !== tempId,
+    );
+  }
   state.pendingChanges.push({
     operation: "create",
     payload,
     queued_at: new Date().toISOString(),
   });
+  compactPendingChanges();
   applyPendingChanges();
   persistCache();
 }

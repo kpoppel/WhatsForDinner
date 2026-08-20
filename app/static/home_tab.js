@@ -40,9 +40,71 @@
     month: "short",
     day: "numeric",
   });
+  const MEAL_PLAN_CACHE_KEY = "wfd.meal-plans.cache.v1";
+  const HOME_ACTIVE_PLAN_CACHE_KEY = "wfd.home.active-plan.v1";
 
   let lastSelectedPlanId = null;
   let todayEntryId = null;
+
+  function readMealPlanCache() {
+    try {
+      const raw = localStorage.getItem(MEAL_PLAN_CACHE_KEY);
+      if (!raw) {
+        return { list: [], byId: {} };
+      }
+      const parsed = JSON.parse(raw);
+      const list = Array.isArray(parsed?.list) ? parsed.list : [];
+      const byId = parsed?.byId && typeof parsed.byId === "object" ? parsed.byId : {};
+      return { list, byId };
+    } catch {
+      return { list: [], byId: {} };
+    }
+  }
+
+  function writeMealPlanCache(nextCache) {
+    try {
+      localStorage.setItem(MEAL_PLAN_CACHE_KEY, JSON.stringify(nextCache));
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }
+
+  function readHomeActivePlanCache() {
+    try {
+      const raw = localStorage.getItem(HOME_ACTIVE_PLAN_CACHE_KEY);
+      if (!raw) {
+        return null;
+      }
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        return null;
+      }
+      const plan = parsed.plan;
+      if (!plan || typeof plan !== "object") {
+        return null;
+      }
+      return {
+        plan,
+        entries: sortEntries(plan.entries),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function writeHomeActivePlanCache(plan) {
+    if (!plan || typeof plan !== "object") {
+      return;
+    }
+    try {
+      localStorage.setItem(HOME_ACTIVE_PLAN_CACHE_KEY, JSON.stringify({
+        plan,
+        updatedAt: new Date().toISOString(),
+      }));
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }
 
   function setTab(tabName) {
     if (typeof window.WFD_setActiveTab === "function") {
@@ -315,7 +377,7 @@
 
     openPlansButton.textContent = "View Recipe";
     editDayButton.textContent = "Edit";
-    editDayButton.disabled = false;
+    editDayButton.disabled = navigator.onLine === false;
   }
 
   function renderUpcoming(entries) {
@@ -414,8 +476,17 @@
     const listPayload = await api("/meal-plans/stored");
     const rows = listPayload.data;
     if (!Array.isArray(rows) || rows.length === 0) {
+      const cache = readMealPlanCache();
+      writeMealPlanCache({ list: [], byId: cache.byId, updatedAt: new Date().toISOString() });
       return { plan: null, entries: [] };
     }
+
+    const cacheBeforeDetail = readMealPlanCache();
+    writeMealPlanCache({
+      list: rows,
+      byId: cacheBeforeDetail.byId,
+      updatedAt: new Date().toISOString(),
+    });
 
     const planId = Number(rows[0].plan_id);
     if (!Number.isInteger(planId)) {
@@ -428,14 +499,63 @@
     if (!plan || typeof plan !== "object") {
       return { plan: null, entries: [] };
     }
+    writeHomeActivePlanCache(plan);
+
+    const cache = readMealPlanCache();
+    writeMealPlanCache({
+      list: cache.list,
+      byId: {
+        ...cache.byId,
+        [String(planId)]: plan,
+      },
+      updatedAt: new Date().toISOString(),
+    });
 
     const entries = sortEntries(plan.entries);
     return { plan, entries };
   }
 
+  function fetchActivePlanFromCache() {
+    const cache = readMealPlanCache();
+    const rows = Array.isArray(cache.list) ? cache.list : [];
+    if (rows.length === 0) {
+      return { plan: null, entries: [] };
+    }
+
+    const planId = Number(rows[0].plan_id);
+    if (!Number.isInteger(planId)) {
+      return { plan: null, entries: [] };
+    }
+
+    lastSelectedPlanId = planId;
+    const plan = cache.byId[String(planId)];
+    if (plan && typeof plan === "object") {
+      return {
+        plan,
+        entries: sortEntries(plan.entries),
+      };
+    }
+
+    const homeFallback = readHomeActivePlanCache();
+    if (homeFallback) {
+      const cachedPlanId = Number(homeFallback.plan.plan_id);
+      if (Number.isInteger(cachedPlanId)) {
+        lastSelectedPlanId = cachedPlanId;
+      }
+      return homeFallback;
+    }
+
+    return { plan: null, entries: [] };
+  }
+
   async function refreshHome() {
     try {
-      const planResult = await fetchActivePlan();
+      let planResult;
+      try {
+        planResult = await fetchActivePlan();
+      } catch {
+        planResult = fetchActivePlanFromCache();
+      }
       const entries = planResult.entries;
 
       let reminderTexts = [];
@@ -449,6 +569,10 @@
       const todayEntry = resolveTodayEntry(entries);
       renderToday(todayEntry, reminderTexts);
       renderUpcoming(entries);
+
+      if (navigator.onLine === false) {
+        todayMeta.innerHTML += '<span> • Offline cache</span>';
+      }
     } catch {
       todayKicker.textContent = "Today";
       todayTitle.textContent = "Unable to load meal data";
