@@ -182,6 +182,38 @@ def _recipe_context_from_entry(entry: dict[str, Any]) -> str:
     return "Unassigned"
 
 
+def _recipe_url(recipe_id: int | None) -> str | None:
+    if recipe_id is None:
+        return None
+    return f"{settings.tandoor_base_url.rstrip('/')}/recipe/{recipe_id}"
+
+
+def _enrich_plan_recipe_urls(plan: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(plan, dict):
+        return plan
+    enriched = dict(plan)
+    entries = plan.get("entries")
+    if not isinstance(entries, list):
+        return enriched
+
+    enriched_entries: list[Any] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            enriched_entries.append(entry)
+            continue
+        enriched_entry = dict(entry)
+        recipe = entry.get("recipe")
+        if isinstance(recipe, dict):
+            enriched_recipe = dict(recipe)
+            recipe_id = recipe.get("id")
+            enriched_recipe["url"] = _recipe_url(recipe_id) if isinstance(recipe_id, int) else None
+            enriched_entry["recipe"] = enriched_recipe
+        enriched_entries.append(enriched_entry)
+
+    enriched["entries"] = enriched_entries
+    return enriched
+
+
 def _normalize_recipe_payload(raw_recipe: Any, fallback_name: str) -> dict[str, Any]:
     recipe_id: int | None = None
     recipe_name = fallback_name
@@ -206,6 +238,7 @@ def _normalize_recipe_payload(raw_recipe: Any, fallback_name: str) -> dict[str, 
         "id": recipe_id,
         "name": recipe_name,
         "image": recipe_image,
+        "url": _recipe_url(recipe_id),
     }
 
 
@@ -848,8 +881,9 @@ async def generate_meal_plan(payload: dict[str, Any] = Body(...)) -> dict:
                     recipe_history_dates[chosen_id].sort()
 
                 recipe_obj = {
-                    "id": chosen_obj.get("id"),
+                    "id": chosen_id,
                     "title": _recipe_title(chosen_obj),
+                    "url": _recipe_url(chosen_id),
                 }
                 last_recipe = recipe_obj
 
@@ -884,7 +918,7 @@ async def generate_meal_plan(payload: dict[str, Any] = Body(...)) -> dict:
     stored = stage2_state.create_meal_plan(plan_payload)
     stage2_state.append_sync_event("meal_plan_generated", stored)
 
-    return {"source": "tandoor+local-state", "data": stored}
+    return {"source": "tandoor+local-state", "data": _enrich_plan_recipe_urls(stored)}
 
 
 @router.get("/meal-plans/stored")
@@ -918,7 +952,7 @@ async def get_meal_plan_stage2(plan_id: int) -> dict:
     plan = stage2_state.get_meal_plan(plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="Meal plan not found.")
-    return {"source": "local-state", "data": plan}
+    return {"source": "local-state", "data": _enrich_plan_recipe_urls(plan)}
 
 
 @router.delete("/meal-plans/stored/{plan_id}")
@@ -980,7 +1014,7 @@ async def patch_meal_plan_stage2(plan_id: int, payload: dict[str, Any] = Body(..
         raise HTTPException(status_code=404, detail="Meal plan not found.")
 
     stage2_state.append_sync_event("meal_plan_updated", {"plan_id": plan_id, "payload": payload})
-    return {"source": "local-state", "data": updated}
+    return {"source": "local-state", "data": _enrich_plan_recipe_urls(updated)}
 
 
 def _normalize_plan_entries(entries: list[dict[str, Any]], plan_start_date: Any) -> list[dict[str, Any]]:
@@ -1045,7 +1079,7 @@ async def add_meal_plan_entry(plan_id: int, payload: dict[str, Any] = Body(...))
     )
     stage2_state.append_sync_event("meal_plan_entry_added", {"plan_id": plan_id, "entry": entry})
 
-    return {"source": "local-state", "data": updated}
+    return {"source": "local-state", "data": _enrich_plan_recipe_urls(updated)}
 
 
 @router.patch("/meal-plans/{plan_id}/entries/{entry_id}")
@@ -1128,7 +1162,7 @@ async def patch_meal_plan_entry(
         {"plan_id": plan_id, "entry_id": entry_id, "payload": payload},
     )
 
-    return {"source": "local-state", "data": updated}
+    return {"source": "local-state", "data": _enrich_plan_recipe_urls(updated)}
 
 
 @router.delete("/meal-plans/{plan_id}/entries/{entry_id}")

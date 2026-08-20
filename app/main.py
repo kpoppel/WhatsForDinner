@@ -41,7 +41,7 @@ async def versioned_redoc_docs() -> object:
 
 @app.get("/app", include_in_schema=False)
 async def user_app() -> object:
-    return render_user_app(settings.api_v1_prefix)
+    return render_user_app(settings.api_v1_prefix, settings.tandoor_base_url)
 
 
 @app.get("/inspect", include_in_schema=False)

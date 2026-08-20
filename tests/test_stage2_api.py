@@ -474,11 +474,10 @@ def test_stage2_shopping_view_and_sync(monkeypatch, tmp_path) -> None:
     assert {row["food_id"] for row in sections["remaining"]} == {500, 501}
     assert sections["completed"][0]["food_id"] == 702
     chicken_row = next(row for row in sections["remaining"] if row["id"] == 2)
-    assert chicken_row["recipe"] == {
-        "id": 911,
-        "name": "Chicken Casserole",
-        "image": "https://example.test/recipe-911.jpg",
-    }
+    assert chicken_row["recipe"]["id"] == 911
+    assert chicken_row["recipe"]["name"] == "Chicken Casserole"
+    assert chicken_row["recipe"]["image"] == "https://example.test/recipe-911.jpg"
+    assert chicken_row["recipe"]["url"].endswith("/recipe/911")
 
     store_layout = payload["grouped"]["store_layout"]["remaining"]
     assert list(store_layout.keys()) == ["6"]
