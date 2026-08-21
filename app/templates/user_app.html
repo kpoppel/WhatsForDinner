@@ -121,7 +121,11 @@
             <button id="wf-editor-view-store" class="wf-segment-btn is-active" type="button" role="tab" aria-selected="true" data-editor-view="store">By Store Group</button>
             <button id="wf-editor-view-recipe" class="wf-segment-btn" type="button" role="tab" aria-selected="false" data-editor-view="recipe">By Recipe</button>
           </div>
-          <button id="wf-editor-add-btn" class="wf-btn wf-btn-blue" type="button">+ Add Item</button>
+          <div class="wf-editor-toolbar-actions">
+            <button id="wf-editor-camera-btn" class="wf-btn wf-btn-outline wf-editor-camera-btn" type="button" aria-label="Scan handwritten list" title="Scan handwritten list">📷</button>
+            <button id="wf-editor-add-btn" class="wf-btn wf-btn-blue" type="button">+ Add Item</button>
+          </div>
+          <input id="wf-editor-camera-input" type="file" accept="image/*" capture="environment" hidden />
         </section>
 
         <article id="wf-editor-due-banner" class="wf-editor-due-banner" hidden></article>
@@ -240,6 +244,34 @@
       <div id="wf-merge-pick-list" class="wf-merge-pick-list" role="list"></div>
       <div class="wf-modal-actions">
         <button id="wf-merge-pick-cancel" class="wf-btn wf-btn-outline" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="wf-ocr-review-modal" class="wf-modal" hidden>
+    <div class="wf-modal-card wf-ocr-review-card" role="dialog" aria-modal="true" aria-labelledby="wf-ocr-review-title">
+      <h2 id="wf-ocr-review-title">Review Scanned Items</h2>
+
+      <p id="wf-ocr-review-loading" class="wf-ocr-review-loading" aria-live="polite" hidden>Reading photo...</p>
+
+      <div id="wf-ocr-review-error" class="wf-ocr-review-error" hidden>
+        <p id="wf-ocr-review-error-message"></p>
+        <div class="wf-modal-actions">
+          <button id="wf-ocr-review-error-cancel" class="wf-btn wf-btn-outline" type="button">Cancel</button>
+          <button id="wf-ocr-review-error-retry" class="wf-btn wf-btn-blue" type="button">Retry</button>
+        </div>
+      </div>
+
+      <div id="wf-ocr-review-results" hidden>
+        <label class="wf-field">Category (applies to all)
+          <select id="wf-ocr-category"></select>
+        </label>
+        <div id="wf-ocr-review-list" class="wf-ocr-review-list" role="list"></div>
+        <button id="wf-ocr-review-add-line" class="wf-btn wf-btn-outline wf-ocr-add-line-btn" type="button">+ Add line</button>
+        <div class="wf-modal-actions">
+          <button id="wf-ocr-review-cancel" class="wf-btn wf-btn-outline" type="button">Cancel</button>
+          <button id="wf-ocr-review-save" class="wf-btn wf-btn-blue" type="button">Add All to List</button>
+        </div>
       </div>
     </div>
   </div>

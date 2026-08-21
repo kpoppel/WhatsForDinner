@@ -20,6 +20,15 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="TANDOOR_TOKEN_VALID_DATE",
     )
+    google_llm_api_key: str = Field(
+        default="",
+        validation_alias="GOOGLE_LLM_API_KEY",
+    )
+    google_llm_model: str = Field(
+        default="gemini-2.5-flash",
+        validation_alias="GOOGLE_LLM_MODEL",
+    )
+    google_llm_timeout_seconds: float = Field(default=30.0)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -1181,6 +1181,19 @@ body {
   margin-bottom: 0.8rem;
 }
 
+.wf-editor-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.wf-editor-camera-btn {
+  flex: 0 0 auto;
+  padding: 0.58rem 0.7rem;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
 .wf-segment {
   display: inline-flex;
   border: 1px solid var(--wf-line);
@@ -1628,6 +1641,72 @@ body {
   color: var(--wf-ink);
   font-size: 0.8rem;
   font-weight: 600;
+}
+
+.wf-ocr-review-card {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.wf-ocr-review-loading {
+  margin: 0;
+  color: var(--wf-muted);
+  font-size: 0.88rem;
+}
+
+.wf-ocr-review-error {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.wf-ocr-review-error p {
+  margin: 0;
+  color: var(--wf-ink);
+  font-size: 0.88rem;
+}
+
+.wf-ocr-review-list {
+  display: grid;
+  gap: 0.4rem;
+  max-height: min(45vh, 320px);
+  overflow-y: auto;
+  padding-right: 0.15rem;
+}
+
+.wf-ocr-review-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.wf-ocr-review-row input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--wf-line);
+  border-radius: 9px;
+  min-height: 2.15rem;
+  padding: 0.38rem 0.55rem;
+  font: inherit;
+  color: var(--wf-ink);
+  background: #fff;
+}
+
+.wf-ocr-review-remove {
+  flex: 0 0 auto;
+  width: 2.15rem;
+  height: 2.15rem;
+  border: 1px solid var(--wf-line);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--wf-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wf-ocr-add-line-btn {
+  justify-self: start;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
 }
 
 .wf-field {

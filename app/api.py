@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
 
 from app.config import settings
 from app.models.contracts import (
@@ -15,10 +15,12 @@ from app.models.contracts import (
     SetSelectedKeywordsRequest,
     ShoppingEntryCreateRequest,
     ShoppingEntryPatchRequest,
+    ShoppingListOcrResponse,
     ShoppingSyncRequest,
     UserSettingsRequest,
 )
 from app.services.meal_plan_service import MealPlanService
+from app.services.ocr_client import GeminiOcrClient, OcrError
 from app.services.shopping_service import ShoppingService
 from app.services.stage2_state import Stage2State
 from app.services.tandoor_client import TandoorClient, TandoorError
@@ -39,7 +41,12 @@ def _shopping_service() -> ShoppingService:
 def _meal_plan_service() -> MealPlanService:
     return MealPlanService(stage2_state, client)
 
+
+def _ocr_client() -> GeminiOcrClient:
+    return GeminiOcrClient()
+
 SHOPPING_STATUSES = {"remaining", "skipped", "completed"}
+OCR_MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 
 def _ensure_tandoor_writes_enabled(operation: str) -> None:
@@ -843,6 +850,34 @@ async def shopping_sync_get(
         "server_cursor": stage2_state.current_sync_cursor(),
         "changes": changes,
     }
+
+
+@router.post("/shopping-list/ocr", response_model=ShoppingListOcrResponse)
+async def shopping_list_ocr(image: UploadFile = File(...)) -> ShoppingListOcrResponse:
+    if not settings.google_llm_api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="OCR is not configured (GOOGLE_LLM_API_KEY missing).",
+        )
+    content_type = image.content_type or ""
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Uploaded file must be an image.")
+
+    image_bytes = await image.read()
+    if len(image_bytes) > OCR_MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image is too large.")
+
+    try:
+        text = await _ocr_client().transcribe_handwritten_list(image_bytes, content_type)
+    except OcrError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    items = [
+        stripped
+        for line in text.splitlines()
+        if (stripped := line.strip().lstrip("-*•").strip())
+    ]
+    return ShoppingListOcrResponse(items=items)
 
 
 @router.post("/shopping-list/sync")

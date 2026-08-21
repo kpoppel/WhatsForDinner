@@ -88,6 +88,14 @@ Before deploying, ensure `.env` contains your Tandoor settings:
 #### Getting a Tandoor Token
 Visit your instance of Tandoor: https://<tandoor_url>/settings/api and create a new API token here. It needs read/write access to update meal plans and shopping lists.
 
+#### Handwritten Shopping List OCR
+To enable "scan a handwritten list" in the Shop Editor, set:
+
+- `GOOGLE_LLM_API_KEY` — a Google AI Studio API key with access to the Gemini API.
+- `GOOGLE_LLM_MODEL` — optional, defaults to `gemini-2.5-flash`.
+
+If `GOOGLE_LLM_API_KEY` is unset, the camera button's OCR request returns a 503 error.
+
 ### Deploy with Caddy
 
 From inside `docker/`, plain commands are:

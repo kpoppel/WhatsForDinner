@@ -36,3 +36,21 @@ export async function api(path, options = {}) {
     throw error;
   }
 }
+
+export async function apiUpload(path, formData) {
+  try {
+    const response = await fetch(`${apiPrefix}${path}`, {
+      method: "POST",
+      body: formData,
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(JSON.stringify(data));
+    }
+    setApiReachable(true);
+    return data;
+  } catch (error) {
+    setApiReachable(false);
+    throw error;
+  }
+}

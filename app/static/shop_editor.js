@@ -1,6 +1,6 @@
 import { state, persistCache, queueCreateChange, queueDeleteChange, queueUpdateChange } from "./js/state.js";
 import { refresh, run, syncPending } from "./js/sync.js";
-import { isOnline } from "./js/api.js";
+import { isOnline, apiUpload } from "./js/api.js";
 
 const VIEW_KEY = "wfd.shop-editor.view.v1";
 const SEGMENT_DEFAULT = "store";
@@ -11,6 +11,8 @@ const listNode = document.getElementById("wf-editor-list");
 const statusNode = document.getElementById("wf-editor-status");
 const dueBannerNode = document.getElementById("wf-editor-due-banner");
 const addButton = document.getElementById("wf-editor-add-btn");
+const cameraButton = document.getElementById("wf-editor-camera-btn");
+const cameraInput = document.getElementById("wf-editor-camera-input");
 const segmentButtons = Array.from(document.querySelectorAll("[data-editor-view]"));
 
 const addModal = document.getElementById("wf-editor-add-modal");
@@ -20,7 +22,20 @@ const mergePickModal = document.getElementById("wf-editor-merge-pick-modal");
 const mergePickList = document.getElementById("wf-merge-pick-list");
 const mergePickTitle = document.getElementById("wf-editor-merge-pick-title");
 
-if (!listNode || !statusNode || !dueBannerNode || !addButton || !addModal || !editModal || !editUnitLabel || !mergePickModal || !mergePickList || !mergePickTitle) {
+const ocrModal = document.getElementById("wf-ocr-review-modal");
+const ocrLoadingNode = document.getElementById("wf-ocr-review-loading");
+const ocrErrorNode = document.getElementById("wf-ocr-review-error");
+const ocrErrorMessageNode = document.getElementById("wf-ocr-review-error-message");
+const ocrResultsNode = document.getElementById("wf-ocr-review-results");
+const ocrCategorySelect = document.getElementById("wf-ocr-category");
+const ocrList = document.getElementById("wf-ocr-review-list");
+
+if (
+  !listNode || !statusNode || !dueBannerNode || !addButton || !addModal || !editModal ||
+  !editUnitLabel || !mergePickModal || !mergePickList || !mergePickTitle ||
+  !cameraButton || !cameraInput || !ocrModal || !ocrLoadingNode || !ocrErrorNode ||
+  !ocrErrorMessageNode || !ocrResultsNode || !ocrCategorySelect || !ocrList
+) {
   // Shop Editor UI is not mounted on this page.
 } else {
   initShopEditor();
@@ -71,6 +86,20 @@ function bindSegmentControls() {
 function bindToolbarControls() {
   addButton.addEventListener("click", () => {
     openAddModal();
+  });
+
+  cameraButton.addEventListener("click", () => {
+    cameraInput.click();
+  });
+
+  cameraInput.addEventListener("change", () => {
+    const file = cameraInput.files?.[0];
+    cameraInput.value = "";
+    if (!(file instanceof File)) {
+      return;
+    }
+    openOcrModal();
+    run(() => submitOcrPhoto(file));
   });
 }
 
@@ -148,6 +177,21 @@ function bindModalControls() {
   });
   document.getElementById("wf-edit-delete")?.addEventListener("click", () => {
     run(deleteFromEditModal);
+  });
+
+  document.getElementById("wf-ocr-review-cancel")?.addEventListener("click", closeOcrModal);
+  document.getElementById("wf-ocr-review-error-cancel")?.addEventListener("click", closeOcrModal);
+  document.getElementById("wf-ocr-review-error-retry")?.addEventListener("click", () => {
+    if (pendingOcrFile) {
+      showOcrLoadingState();
+      run(() => submitOcrPhoto(pendingOcrFile));
+    }
+  });
+  document.getElementById("wf-ocr-review-add-line")?.addEventListener("click", () => {
+    ocrList.appendChild(createOcrReviewRow(""));
+  });
+  document.getElementById("wf-ocr-review-save")?.addEventListener("click", () => {
+    run(saveOcrReviewModal);
   });
 }
 
@@ -764,6 +808,139 @@ async function saveAddModal() {
   }
 
   closeAddModal();
+}
+
+let pendingOcrFile = null;
+
+function openOcrModal() {
+  ocrModal.hidden = false;
+  showOcrLoadingState();
+}
+
+function closeOcrModal() {
+  ocrModal.hidden = true;
+  pendingOcrFile = null;
+  ocrList.innerHTML = "";
+}
+
+function showOcrLoadingState() {
+  ocrLoadingNode.hidden = false;
+  ocrErrorNode.hidden = true;
+  ocrResultsNode.hidden = true;
+}
+
+function showOcrErrorState(message) {
+  ocrLoadingNode.hidden = true;
+  ocrErrorNode.hidden = false;
+  ocrResultsNode.hidden = true;
+  ocrErrorMessageNode.textContent = message;
+}
+
+function showOcrResultsState(items) {
+  ocrLoadingNode.hidden = true;
+  ocrErrorNode.hidden = true;
+  ocrResultsNode.hidden = false;
+
+  const categories = serverStoreGroupNames();
+  const initialCategory = categories.includes("Other") ? "Other" : (categories[0] || "Other");
+  populateCategorySelect("wf-ocr-category", initialCategory);
+
+  ocrList.innerHTML = "";
+  for (const item of items) {
+    ocrList.appendChild(createOcrReviewRow(item));
+  }
+}
+
+function createOcrReviewRow(text) {
+  const row = document.createElement("div");
+  row.className = "wf-ocr-review-row";
+  row.setAttribute("role", "listitem");
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 120;
+  input.value = text;
+  row.appendChild(input);
+
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.className = "wf-ocr-review-remove";
+  removeButton.setAttribute("aria-label", "Remove line");
+  removeButton.textContent = "×";
+  removeButton.addEventListener("click", () => {
+    row.remove();
+  });
+  row.appendChild(removeButton);
+
+  return row;
+}
+
+async function submitOcrPhoto(file) {
+  pendingOcrFile = file;
+  showOcrLoadingState();
+
+  let response;
+  try {
+    const formData = new FormData();
+    formData.append("image", file);
+    response = await apiUpload("/shopping-list/ocr", formData);
+  } catch (error) {
+    showOcrErrorState("Could not read the photo. Check your connection and try again.");
+    return;
+  }
+
+  const items = Array.isArray(response?.items) ? response.items : [];
+  if (items.length === 0) {
+    showOcrErrorState("No text was recognized in that photo. Try again with a clearer shot.");
+    return;
+  }
+
+  showOcrResultsState(items);
+}
+
+async function saveOcrReviewModal() {
+  const category = getInputValue("wf-ocr-category").trim() || "Other";
+  const names = Array.from(ocrList.querySelectorAll("input"))
+    .map((input) => input.value.trim())
+    .filter((name) => name.length > 0);
+
+  if (names.length === 0) {
+    throw new Error("Add at least one item before saving.");
+  }
+
+  let tempId = nextTempId();
+  for (const name of names) {
+    const payload = {
+      id: tempId,
+      ad_hoc: true,
+      name,
+      amount: 0,
+      unit: "",
+      ingredient_type: "Other",
+      store_group: { id: null, name: category },
+      recipe_context: "Unassigned",
+      status: "remaining",
+      reminder_enabled: false,
+      reminder_date: null,
+      reminder_text: "",
+    };
+    queueCreateChange(payload);
+    tempId -= 1;
+  }
+  renderEditor();
+
+  if (isOnline()) {
+    await syncPending(false);
+    await refresh();
+    renderEditor();
+    setStatus(names.length === 1 ? "Item added." : `${names.length} items added.`);
+    publishDataChanged();
+  } else {
+    setStatus(`Offline: ${names.length} item${names.length === 1 ? "" : "s"} queued and will sync when online.`);
+    publishDataChanged();
+  }
+
+  closeOcrModal();
 }
 
 function openEditModal(item) {

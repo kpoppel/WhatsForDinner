@@ -117,8 +117,12 @@ export function compactPendingChanges() {
     }
 
     if (row.operation === "create") {
+      if (row.entry_id === null) {
+        continue;
+      }
       compacted.push({
         operation: "create",
+        entry_id: row.entry_id,
         payload: row.payload || {},
         queued_at: row.queued_at,
       });
@@ -166,15 +170,19 @@ export function applyPendingChanges() {
     if (!change) {
       continue;
     }
-    const id = shoppingItemId(change.entry_id);
-    if (id === null) {
-      continue;
-    }
     if (change.operation === "delete") {
+      const id = shoppingItemId(change.entry_id);
+      if (id === null) {
+        continue;
+      }
       delete state.itemsById[String(id)];
       continue;
     }
     if (change.operation === "update") {
+      const id = shoppingItemId(change.entry_id);
+      if (id === null) {
+        continue;
+      }
       const patch = change.payload;
       if (!patch || typeof patch !== "object") {
         continue;
@@ -194,7 +202,7 @@ export function applyPendingChanges() {
       if (!payload || typeof payload !== "object") {
         continue;
       }
-      const tempId = shoppingItemId(payload.id);
+      const tempId = shoppingItemId(payload.id) ?? shoppingItemId(change.entry_id);
       if (tempId === null) {
         continue;
       }
@@ -311,6 +319,7 @@ export function queueCreateChange(payload) {
   }
   state.pendingChanges.push({
     operation: "create",
+    entry_id: tempId,
     payload,
     queued_at: new Date().toISOString(),
   });

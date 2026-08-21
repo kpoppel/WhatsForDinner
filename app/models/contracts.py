@@ -158,3 +158,9 @@ class ShoppingSyncRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     changes: list[ShoppingSyncChange]
+
+
+class ShoppingListOcrResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[str]
