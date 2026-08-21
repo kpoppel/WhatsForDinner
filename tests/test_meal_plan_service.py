@@ -13,6 +13,8 @@ class FakeMealClient:
     def __init__(self) -> None:
         self.updated_shopping_calls = []
         self.deleted_shopping_calls = []
+        self.shopping_recipe_rows: dict[int, dict] = {}
+        self.next_shopping_recipe_id = 1
         self.meal_plan_rows: dict[int, dict] = {}
         self.next_meal_plan_row_id = 1
         self.next_entry_id = 2
@@ -34,25 +36,61 @@ class FakeMealClient:
         }
 
     async def get_recipe(self, recipe_id):
+        ingredient_id = 100 + recipe_id
         return {
             "id": recipe_id,
-            "steps": [{"ingredients": [{"id": 100 + recipe_id}]}],
+            "steps": [
+                {
+                    "ingredients": [
+                        {
+                            "id": ingredient_id,
+                            "amount": 1,
+                            "unit": {"id": 1, "name": "g"},
+                            "food": {
+                                "id": ingredient_id,
+                                "name": f"Ingredient {ingredient_id}",
+                                "ignore_shopping": False,
+                            },
+                        }
+                    ]
+                }
+            ],
             "ingredients": [],
         }
 
-    async def update_recipe_shopping(self, recipe_id, payload):
-        self.updated_shopping_calls.append((recipe_id, payload))
-        ingredients = payload.get("ingredients")
-        servings = payload.get("servings")
-        if isinstance(ingredients, list):
-            for ingredient_id in ingredients:
-                if not isinstance(ingredient_id, int):
+    async def create_shopping_list_from_recipe(self, payload):
+        row_id = self.next_shopping_recipe_id
+        self.next_shopping_recipe_id += 1
+        row = {"id": row_id, **payload}
+        self.shopping_recipe_rows[row_id] = row
+        return row
+
+    async def bulk_create_shopping_list_recipe_entries(self, shopping_recipe_id, payload):
+        row = self.shopping_recipe_rows.get(shopping_recipe_id)
+        if not isinstance(row, dict):
+            raise TandoorError("shopping-list-recipe missing")
+
+        recipe_id = row.get("recipe")
+        servings = row.get("servings")
+        entries = payload.get("entries") if isinstance(payload, dict) else None
+        if isinstance(entries, list):
+            for item in entries:
+                if not isinstance(item, dict):
+                    continue
+                food_id = item.get("food_id")
+                ingredient_id = item.get("ingredient_id")
+                amount = item.get("amount")
+                if not isinstance(food_id, int) or not isinstance(ingredient_id, int):
                     continue
                 self.shopping_entries.append(
                     {
                         "id": self.next_entry_id,
-                        "food": {"name": f"Ingredient {ingredient_id}", "category": "Other"},
-                        "amount": servings,
+                        "food": {
+                            "id": food_id,
+                            "name": f"Ingredient {food_id}",
+                            "category": "Other",
+                        },
+                        "amount": amount,
                         "checked": False,
                         "ingredient": ingredient_id,
                         "list_recipe_data": {
@@ -61,10 +99,21 @@ class FakeMealClient:
                                 "name": f"Recipe {recipe_id}",
                             }
                         },
+                        "shopping_recipe_id": shopping_recipe_id,
                     }
                 )
                 self.next_entry_id += 1
-        return {"ok": True, "recipe_id": recipe_id, "payload": payload}
+
+        self.updated_shopping_calls.append(
+            (
+                recipe_id,
+                {
+                    "servings": servings,
+                    "shopping_recipe_id": shopping_recipe_id,
+                },
+            )
+        )
+        return payload
 
     async def delete_shopping_entry(self, entry_id):
         self.deleted_shopping_calls.append(entry_id)
@@ -87,7 +136,25 @@ class FakeMealClient:
         return row
 
     async def delete_meal_plan(self, meal_id):
-        self.meal_plan_rows.pop(int(meal_id), None)
+        mealplan_id = int(meal_id)
+        self.meal_plan_rows.pop(mealplan_id, None)
+
+        removed_shopping_recipe_ids: set[int] = set()
+        for shopping_recipe_id, row in list(self.shopping_recipe_rows.items()):
+            if int(row.get("mealplan", -1)) != mealplan_id:
+                continue
+            removed_shopping_recipe_ids.add(shopping_recipe_id)
+            self.shopping_recipe_rows.pop(shopping_recipe_id, None)
+
+        self.shopping_entries = [
+            row
+            for row in self.shopping_entries
+            if not (
+                isinstance(row, dict)
+                and isinstance(row.get("shopping_recipe_id"), int)
+                and row.get("shopping_recipe_id") in removed_shopping_recipe_ids
+            )
+        ]
         return {"deleted": int(meal_id)}
 
     async def list_meal_types(self, limit=50):
@@ -272,12 +339,15 @@ def test_generate_shopping_from_plan_aggregates_success_and_failure(tmp_path) ->
         }
     )
 
-    async def failing_update(recipe_id, payload):
+    original_create_shopping = client.create_shopping_list_from_recipe
+
+    async def failing_create_shopping(payload):
+        recipe_id = payload.get("recipe") if isinstance(payload, dict) else None
         if recipe_id == 12:
             raise TandoorError("cannot update shopping")
-        return {"ok": True, "recipe_id": recipe_id, "payload": payload}
+        return await original_create_shopping(payload)
 
-    client.update_recipe_shopping = failing_update
+    client.create_shopping_list_from_recipe = failing_create_shopping
 
     result = asyncio.run(
         service.generate_shopping_from_plan(
@@ -294,7 +364,7 @@ def test_generate_shopping_from_plan_aggregates_success_and_failure(tmp_path) ->
     assert len(created_recipe_updates) == 1
     assert created_recipe_updates[0]["recipe_id"] == 11
     assert data["failed"][0]["recipe_id"] == 12
-    assert data["shopping_view"]["count"] == 1
+    assert data["shopping_view"]["count"] == 2
 
 
 def test_generate_shopping_from_plan_includes_all_extra_recipes(tmp_path) -> None:
@@ -427,13 +497,15 @@ def test_generate_shopping_from_plan_is_idempotent_and_syncs_add_remove(tmp_path
             build_shopping_view=build_shopping_view,
         )
     )
-    removal_rows = [
+    assert fourth["data"]["failed"] == []
+    recipe_13_entries = [
         row
-        for row in fourth["data"]["created"]
-        if row.get("operation") == "shopping_entry_delete" and row.get("recipe_id") == 13
+        for row in client.shopping_entries
+        if isinstance(row.get("list_recipe_data"), dict)
+        and isinstance(row["list_recipe_data"].get("recipe_data"), dict)
+        and row["list_recipe_data"]["recipe_data"].get("id") == 13
     ]
-    assert len(removal_rows) >= 1
-    assert removal_rows[0]["recipe_source"] == "sync_remove"
+    assert recipe_13_entries == []
 
 
 def test_generate_shopping_from_plan_same_recipe_on_second_day_increases_servings(tmp_path) -> None:
@@ -787,16 +859,14 @@ def test_patch_entry_recipe_removal_deletes_tracked_shopping_entries(tmp_path) -
     )
     created_recipe_updates = [row for row in first_sync["data"]["created"] if row.get("operation") == "recipe_shopping_update"]
     assert len(created_recipe_updates) == 1
-    added_ids = created_recipe_updates[0].get("added_entry_ids")
-    assert isinstance(added_ids, list)
-    assert len(added_ids) > 0
+    result_payload = created_recipe_updates[0].get("result")
+    assert isinstance(result_payload, dict)
+    assert int(result_payload.get("bulk_entries_created", 0)) > 0
 
     tracked_sync = state.get_meal_plan_instance_sync(plan_id)
     assert len(tracked_sync) == 1
     tracked_row = next(iter(tracked_sync.values()))
-    tracked_entry_ids = tracked_row.get("entry_ids")
-    assert isinstance(tracked_entry_ids, list)
-    assert sorted(tracked_entry_ids) == sorted(added_ids)
+    assert isinstance(tracked_row.get("shopping_recipe_id"), int)
 
     asyncio.run(
         service.patch_entry(
@@ -807,7 +877,7 @@ def test_patch_entry_recipe_removal_deletes_tracked_shopping_entries(tmp_path) -
         )
     )
 
-    assert sorted(client.deleted_shopping_calls) == sorted(added_ids)
+    assert client.deleted_shopping_calls == []
 
     remaining_recipe_entries = [
         row for row in client.shopping_entries
@@ -998,7 +1068,6 @@ def test_delete_plan_removes_tracked_shopping_before_meal_rows(tmp_path) -> None
                 "purpose": "meal",
                 "date": "2026-08-10",
                 "servings": 2,
-                "entry_ids": [501, 502],
                 "meal_plan_row_id": 9,
             }
         },
@@ -1009,7 +1078,7 @@ def test_delete_plan_removes_tracked_shopping_before_meal_rows(tmp_path) -> None
     result = asyncio.run(service.delete_plan(plan_id, ensure_tandoor_writes_enabled=ensure_writes_enabled))
 
     assert result["data"]["deleted"] is True
-    assert client.call_order == ["shopping:501", "shopping:502", "meal:9"]
+    assert client.call_order == ["meal:9"]
     assert state.get_meal_plan(plan_id) is None
     assert state.get_meal_plan_instance_sync(plan_id) == {}
 
@@ -1044,7 +1113,6 @@ def test_delete_plan_aborts_when_shopping_cleanup_fails(tmp_path) -> None:
                 "purpose": "meal",
                 "date": "2026-08-10",
                 "servings": 2,
-                "entry_ids": [501, 502],
                 "meal_plan_row_id": 9,
             }
         },
@@ -1052,14 +1120,13 @@ def test_delete_plan_aborts_when_shopping_cleanup_fails(tmp_path) -> None:
 
     client.meal_plan_rows[9] = {"id": 9, "title": "Row 9"}
 
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(service.delete_plan(plan_id, ensure_tandoor_writes_enabled=ensure_writes_enabled))
+    result = asyncio.run(service.delete_plan(plan_id, ensure_tandoor_writes_enabled=ensure_writes_enabled))
 
-    assert exc_info.value.status_code == 502
-    assert client.call_order == ["shopping:501", "shopping:502"]
-    assert state.get_meal_plan(plan_id) is not None
-    assert state.get_meal_plan_instance_sync(plan_id) != {}
-    assert 9 in client.meal_plan_rows
+    assert result["data"]["deleted"] is True
+    assert client.call_order == ["meal:9"]
+    assert state.get_meal_plan(plan_id) is None
+    assert state.get_meal_plan_instance_sync(plan_id) == {}
+    assert 9 not in client.meal_plan_rows
 
 
 def test_delete_plan_treats_missing_shopping_entries_as_already_removed(tmp_path) -> None:
@@ -1092,7 +1159,6 @@ def test_delete_plan_treats_missing_shopping_entries_as_already_removed(tmp_path
                 "purpose": "meal",
                 "date": "2026-08-10",
                 "servings": 2,
-                "entry_ids": [501, 502],
                 "meal_plan_row_id": 9,
             }
         },
@@ -1103,5 +1169,5 @@ def test_delete_plan_treats_missing_shopping_entries_as_already_removed(tmp_path
     result = asyncio.run(service.delete_plan(plan_id, ensure_tandoor_writes_enabled=ensure_writes_enabled))
 
     assert result["data"]["deleted"] is True
-    assert client.call_order == ["shopping:501", "shopping:502", "meal:9"]
+    assert client.call_order == ["meal:9"]
     assert state.get_meal_plan(plan_id) is None

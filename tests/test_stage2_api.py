@@ -27,7 +27,29 @@ class MealPlanRowStatefulClient:
         return row
 
     async def delete_meal_plan(self, meal_id):
-        self.meal_plan_rows.pop(int(meal_id), None)
+        mealplan_id = int(meal_id)
+        self.meal_plan_rows.pop(mealplan_id, None)
+
+        removed_shopping_recipe_ids: set[int] = set()
+        shopping_recipe_rows = getattr(self, "shopping_recipe_rows", None)
+        if not isinstance(shopping_recipe_rows, dict):
+            return {"deleted": int(meal_id)}
+
+        for shopping_recipe_id, row in list(shopping_recipe_rows.items()):
+            if int(row.get("mealplan", -1)) != mealplan_id:
+                continue
+            removed_shopping_recipe_ids.add(shopping_recipe_id)
+            shopping_recipe_rows.pop(shopping_recipe_id, None)
+
+        entries = getattr(self, "entries", None)
+        if not isinstance(entries, dict):
+            return {"deleted": int(meal_id)}
+
+        for entry_id, entry in list(entries.items()):
+            shopping_recipe_id = entry.get("shopping_recipe_id")
+            if isinstance(shopping_recipe_id, int) and shopping_recipe_id in removed_shopping_recipe_ids:
+                entries.pop(entry_id, None)
+
         return {"deleted": int(meal_id)}
 
     async def list_meal_types(self, limit=50):
@@ -60,6 +82,8 @@ class MealPlanShoppingStatefulClient:
     def __init__(self) -> None:
         self.entries: dict[int, dict] = {}
         self.next_entry_id = 1
+        self.shopping_recipe_rows: dict[int, dict] = {}
+        self.next_shopping_recipe_id = 1
         self.meal_plan_rows: dict[int, dict] = {}
         self.next_meal_plan_row_id = 1
 
@@ -73,29 +97,61 @@ class MealPlanShoppingStatefulClient:
         }
 
     async def get_recipe(self, recipe_id):
+        ingredient_id = 1000 + int(recipe_id)
         return {
             "id": recipe_id,
-            "steps": [{"ingredients": [{"id": 1000 + int(recipe_id)}]}],
+            "steps": [
+                {
+                    "ingredients": [
+                        {
+                            "id": ingredient_id,
+                            "amount": 1,
+                            "unit": {"id": 1, "name": "g"},
+                            "food": {
+                                "id": ingredient_id,
+                                "name": f"Ingredient {ingredient_id}",
+                                "ignore_shopping": False,
+                            },
+                        }
+                    ]
+                }
+            ],
             "ingredients": [],
         }
 
-    async def update_recipe_shopping(self, recipe_id, payload):
-        ingredients = payload.get("ingredients")
-        servings = payload.get("servings")
-        if isinstance(ingredients, list):
-            for ingredient_id in ingredients:
-                if not isinstance(ingredient_id, int):
+    async def create_shopping_list_from_recipe(self, payload):
+        row_id = self.next_shopping_recipe_id
+        self.next_shopping_recipe_id += 1
+        row = {"id": row_id, **payload}
+        self.shopping_recipe_rows[row_id] = row
+        return row
+
+    async def bulk_create_shopping_list_recipe_entries(self, shopping_recipe_id, payload):
+        row = self.shopping_recipe_rows.get(shopping_recipe_id)
+        if not isinstance(row, dict):
+            raise RuntimeError("shopping-list-recipe missing")
+
+        recipe_id = row.get("recipe")
+        entries = payload.get("entries") if isinstance(payload, dict) else None
+        if isinstance(entries, list):
+            for item in entries:
+                if not isinstance(item, dict):
+                    continue
+                food_id = item.get("food_id")
+                ingredient_id = item.get("ingredient_id")
+                amount = item.get("amount")
+                if not isinstance(food_id, int) or not isinstance(ingredient_id, int):
                     continue
                 entry_id = self.next_entry_id
                 self.next_entry_id += 1
                 self.entries[entry_id] = {
                     "id": entry_id,
                     "food": {
-                        "id": ingredient_id,
-                        "name": f"Ingredient {ingredient_id}",
+                        "id": food_id,
+                        "name": f"Ingredient {food_id}",
                         "category": "Other",
                     },
-                    "amount": servings,
+                    "amount": amount,
                     "checked": False,
                     "list_recipe_data": {
                         "recipe_data": {
@@ -103,8 +159,9 @@ class MealPlanShoppingStatefulClient:
                             "name": f"Recipe {recipe_id}",
                         }
                     },
+                    "shopping_recipe_id": shopping_recipe_id,
                 }
-        return {"updated_for": recipe_id, "payload": payload}
+        return payload
 
     async def delete_shopping_entry(self, entry_id):
         self.entries.pop(entry_id, None)
@@ -128,7 +185,21 @@ class MealPlanShoppingStatefulClient:
         return row
 
     async def delete_meal_plan(self, meal_id):
-        self.meal_plan_rows.pop(int(meal_id), None)
+        mealplan_id = int(meal_id)
+        self.meal_plan_rows.pop(mealplan_id, None)
+
+        removed_shopping_recipe_ids: set[int] = set()
+        for shopping_recipe_id, row in list(self.shopping_recipe_rows.items()):
+            if int(row.get("mealplan", -1)) != mealplan_id:
+                continue
+            removed_shopping_recipe_ids.add(shopping_recipe_id)
+            self.shopping_recipe_rows.pop(shopping_recipe_id, None)
+
+        for entry_id, entry in list(self.entries.items()):
+            shopping_recipe_id = entry.get("shopping_recipe_id")
+            if isinstance(shopping_recipe_id, int) and shopping_recipe_id in removed_shopping_recipe_ids:
+                self.entries.pop(entry_id, None)
+
         return {"deleted": int(meal_id)}
 
     async def list_meal_types(self, limit=50):
@@ -418,6 +489,10 @@ def test_stage2_meal_plan_generate_and_entry_ops(monkeypatch, tmp_path) -> None:
         def __init__(self) -> None:
             self.meal_plan_rows: dict[int, dict] = {}
             self.next_meal_plan_row_id = 1
+            self.shopping_recipe_rows: dict[int, dict] = {}
+            self.next_shopping_recipe_id = 1
+            self.shopping_entries: dict[int, dict] = {}
+            self.next_entry_id = 1000
 
         async def list_recipes(self, search=None, limit=20, keyword_ids=None):
             return {
@@ -428,31 +503,62 @@ def test_stage2_meal_plan_generate_and_entry_ops(monkeypatch, tmp_path) -> None:
             }
 
         async def get_recipe(self, recipe_id):
+            ingredient_id = 1000 + int(recipe_id)
             return {
                 "id": recipe_id,
                 "steps": [
                     {
                         "ingredients": [
-                            {"id": 1000 + int(recipe_id), "amount": 1, "food": {"name": "ingredient"}}
+                            {
+                                "id": ingredient_id,
+                                "amount": 1,
+                                "unit": {"id": 1, "name": "g"},
+                                "food": {
+                                    "id": ingredient_id,
+                                    "name": "ingredient",
+                                    "ignore_shopping": False,
+                                },
+                            }
                         ]
                     }
                 ],
             }
 
-        async def update_recipe_shopping(self, recipe_id, payload):
-            return {"updated_for": recipe_id, "payload": payload}
+        async def create_shopping_list_from_recipe(self, payload):
+            row_id = self.next_shopping_recipe_id
+            self.next_shopping_recipe_id += 1
+            row = {"id": row_id, **payload}
+            self.shopping_recipe_rows[row_id] = row
+            return row
+
+        async def bulk_create_shopping_list_recipe_entries(self, shopping_recipe_id, payload):
+            row = self.shopping_recipe_rows.get(shopping_recipe_id)
+            recipe_id = row.get("recipe") if isinstance(row, dict) else None
+            entries = payload.get("entries") if isinstance(payload, dict) else None
+            if isinstance(entries, list):
+                for item in entries:
+                    if not isinstance(item, dict):
+                        continue
+                    food_id = item.get("food_id")
+                    if not isinstance(food_id, int):
+                        continue
+                    self.shopping_entries[self.next_entry_id] = {
+                        "id": self.next_entry_id,
+                        "food": {"id": food_id, "name": "Tomato", "category": "Vegetables"},
+                        "amount": item.get("amount"),
+                        "checked": False,
+                        "list_recipe_data": {
+                            "recipe_data": {"id": recipe_id, "name": f"Recipe {recipe_id}"}
+                        },
+                        "shopping_recipe_id": shopping_recipe_id,
+                    }
+                    self.next_entry_id += 1
+            return payload
 
         async def list_shopping_entries(self, limit=100):
-            return {
-                "results": [
-                    {
-                        "id": 200,
-                        "food": {"name": "Tomato", "category": "Vegetables"},
-                        "amount": 3,
-                        "checked": False,
-                    }
-                ]
-            }
+            rows = list(self.shopping_entries.values())
+            rows.sort(key=lambda row: int(row.get("id", 0)))
+            return {"results": rows[:limit]}
 
         async def list_meal_plans(self, limit=50):
             rows = list(self.meal_plan_rows.values())
@@ -467,7 +573,17 @@ def test_stage2_meal_plan_generate_and_entry_ops(monkeypatch, tmp_path) -> None:
             return row
 
         async def delete_meal_plan(self, meal_id):
-            self.meal_plan_rows.pop(int(meal_id), None)
+            mealplan_id = int(meal_id)
+            self.meal_plan_rows.pop(mealplan_id, None)
+            removed_recipe_ids: set[int] = set()
+            for shopping_recipe_id, row in list(self.shopping_recipe_rows.items()):
+                if int(row.get("mealplan", -1)) != mealplan_id:
+                    continue
+                removed_recipe_ids.add(shopping_recipe_id)
+                self.shopping_recipe_rows.pop(shopping_recipe_id, None)
+            for entry_id, row in list(self.shopping_entries.items()):
+                if row.get("shopping_recipe_id") in removed_recipe_ids:
+                    self.shopping_entries.pop(entry_id, None)
             return {"deleted": int(meal_id)}
 
     monkeypatch.setattr("app.api.client", FakeClient())
@@ -1279,6 +1395,8 @@ def test_stage2_plan_shopping_uses_recipe_shopping_update(monkeypatch, tmp_path)
         def __init__(self) -> None:
             self.meal_plan_rows: dict[int, dict] = {}
             self.next_meal_plan_row_id = 1
+            self.shopping_recipe_rows: dict[int, dict] = {}
+            self.next_shopping_recipe_id = 1
 
         async def list_recipes(self, search=None, limit=20, keyword_ids=None):
             return {"results": [{"id": 88, "name": "Fallback Recipe"}]}
@@ -1289,16 +1407,33 @@ def test_stage2_plan_shopping_uses_recipe_shopping_update(monkeypatch, tmp_path)
                 "steps": [
                     {
                         "ingredients": [
-                            {"id": 9088, "amount": 1, "food": {"name": "onion"}},
-                            {"id": 9089, "amount": 2, "food": {"name": "garlic"}},
+                            {
+                                "id": 9088,
+                                "amount": 1,
+                                "unit": {"id": 1, "name": "g"},
+                                "food": {"id": 501, "name": "onion", "ignore_shopping": False},
+                            },
+                            {
+                                "id": 9089,
+                                "amount": 2,
+                                "unit": {"id": 1, "name": "g"},
+                                "food": {"id": 502, "name": "garlic", "ignore_shopping": False},
+                            },
                         ]
                     }
                 ],
             }
 
-        async def update_recipe_shopping(self, recipe_id, payload):
-            attempted_updates.append({"recipe_id": recipe_id, "payload": payload})
-            return {"ok": True, "recipe_id": recipe_id, "payload": payload}
+        async def create_shopping_list_from_recipe(self, payload):
+            row_id = self.next_shopping_recipe_id
+            self.next_shopping_recipe_id += 1
+            attempted_updates.append({"recipe_id": payload.get("recipe"), "payload": payload})
+            row = {"id": row_id, **payload}
+            self.shopping_recipe_rows[row_id] = row
+            return row
+
+        async def bulk_create_shopping_list_recipe_entries(self, shopping_recipe_id, payload):
+            return payload
 
         async def list_shopping_entries(self, limit=100):
             return {"results": []}
@@ -1341,7 +1476,6 @@ def test_stage2_plan_shopping_uses_recipe_shopping_update(monkeypatch, tmp_path)
     assert len(attempted_updates) == 1
     assert attempted_updates[0]["recipe_id"] == 88
     assert attempted_updates[0]["payload"]["servings"] == 2
-    assert attempted_updates[0]["payload"]["ingredients"] == [9088, 9089]
 
 
 def test_stage2_write_route_blocked_when_read_only(monkeypatch, tmp_path) -> None:

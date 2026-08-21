@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CURRENT_STATE_SCHEMA_VERSION = 2
+CURRENT_STATE_SCHEMA_VERSION = 3
 
 
 class MealPlanRulesModel(BaseModel):
@@ -40,8 +40,9 @@ class ShoppingInstanceSyncRowModel(BaseModel):
     purpose: str | None = None
     date: str
     servings: int
-    entry_ids: list[int] = Field(default_factory=list)
     meal_plan_row_id: int | None = None
+    shopping_recipe_id: int | None = None
+    shopping_activated: bool = False
 
 
 class MealPlanInstanceSyncModel(BaseModel):

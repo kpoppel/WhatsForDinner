@@ -13,14 +13,14 @@ def test_stage2_state_writes_schema_version(tmp_path) -> None:
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
 
 
 def test_stage2_state_invalid_payload_fails_fast(tmp_path) -> None:
     state = Stage2State(str(tmp_path))
 
     invalid_payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "selected_keyword_ids": [],
         "meal_plan_rules": {"no_repeat_days": "bad"},
         "user_settings": {
@@ -77,7 +77,7 @@ def test_stage2_state_sync_event_retention_by_max_age(tmp_path) -> None:
     assert parsed_new.astimezone(timezone.utc).year >= 2026
 
 
-def test_stage2_state_migrates_v1_payload_to_v2(tmp_path) -> None:
+def test_stage2_state_migrates_v1_payload_to_v3(tmp_path) -> None:
     state = Stage2State(str(tmp_path))
 
     legacy_payload = {
@@ -104,5 +104,58 @@ def test_stage2_state_migrates_v1_payload_to_v2(tmp_path) -> None:
     state.set_selected_keywords([])
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["meal_plan_instance_sync"] == {}
+
+
+def test_stage2_state_migrates_v2_payload_and_strips_entry_ids(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+
+    v2_payload = {
+        "schema_version": 2,
+        "selected_keyword_ids": [],
+        "meal_plan_rules": {"no_repeat_days": 30},
+        "user_settings": {
+            "default_diners": 2,
+            "default_notification_time": "08:00",
+        },
+        "meal_plans": {},
+        "next_meal_plan_id": 1,
+        "next_entry_id": 1,
+        "shopping_status_overrides": {},
+        "shopping_item_metadata": {},
+        "local_shopping_entries": {},
+        "next_local_shopping_entry_id": -1,
+        "meal_plan_instance_sync": {
+            "1": {
+                "instances": {
+                    "entry:1:primary:recipe:11": {
+                        "instance_key": "entry:1:primary:recipe:11",
+                        "entry_id": 1,
+                        "recipe_id": 11,
+                        "role": "primary",
+                        "slot_index": None,
+                        "purpose": "meal",
+                        "date": "2026-08-10",
+                        "servings": 2,
+                        "entry_ids": [100, 101],
+                        "meal_plan_row_id": 5,
+                        "shopping_recipe_id": 7,
+                        "shopping_activated": True,
+                    }
+                }
+            }
+        },
+        "shopping_sync_events": [],
+        "next_sync_event_id": 1,
+    }
+    state.state_file.write_text(json.dumps(v2_payload), encoding="utf-8")
+
+    assert state.selected_keywords() == []
+    state.set_selected_keywords([])
+    with state.state_file.open("r", encoding="utf-8") as fp:
+        payload = json.load(fp)
+
+    assert payload["schema_version"] == 3
+    instance = payload["meal_plan_instance_sync"]["1"]["instances"]["entry:1:primary:recipe:11"]
+    assert "entry_ids" not in instance

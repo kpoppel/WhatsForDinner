@@ -239,5 +239,13 @@ class TandoorClient:
     async def create_shopping_list_from_recipe(self, payload: dict[str, Any]) -> Any:
         return await self._request("POST", "/api/shopping-list-recipe/", json=payload)
 
-    async def update_recipe_shopping(self, recipe_id: int, payload: dict[str, Any]) -> Any:
-        return await self._request("PUT", f"/api/recipe/{recipe_id}/shopping/", json=payload)
+    async def bulk_create_shopping_list_recipe_entries(
+        self,
+        shopping_recipe_id: int,
+        payload: dict[str, Any],
+    ) -> Any:
+        return await self._request(
+            "POST",
+            f"/api/shopping-list-recipe/{shopping_recipe_id}/bulk_create_entries/",
+            json=payload,
+        )

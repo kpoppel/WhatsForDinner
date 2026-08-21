@@ -23,6 +23,25 @@ def _migrate_v1_to_v2(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v2_to_v3(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    plan_sync = next_payload.get("meal_plan_instance_sync")
+    if isinstance(plan_sync, dict):
+        for _, plan_value in plan_sync.items():
+            if not isinstance(plan_value, dict):
+                continue
+            instances = plan_value.get("instances")
+            if not isinstance(instances, dict):
+                continue
+            for _, instance_row in instances.items():
+                if not isinstance(instance_row, dict):
+                    continue
+                instance_row.pop("entry_ids", None)
+
+    next_payload["schema_version"] = 3
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(raw)
 
@@ -33,6 +52,10 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     if schema_version == 1:
         payload = _migrate_v1_to_v2(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 2:
+        payload = _migrate_v2_to_v3(payload)
         schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:
