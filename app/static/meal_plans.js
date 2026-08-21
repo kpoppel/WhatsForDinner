@@ -1,10 +1,10 @@
 import {
   api as storeApi,
-  cachePlanDetail as storeCachePlanDetail,
-  cachePlanListRows as storeCachePlanListRows,
-  writeActiveMealPlanId as storeWriteActiveMealPlanId,
+  cachePlanDetail,
+  cachePlanListRows,
+  writeActiveMealPlanId,
 } from "./js/store/commands.js";
-import { readMealPlanCache as storeReadMealPlanCache } from "./js/store/selectors.js";
+import { readMealPlanCache } from "./js/store/selectors.js";
 import { assertRequiredFields } from "./js/contracts.js";
 
 (() => {
@@ -136,24 +136,8 @@ import { assertRequiredFields } from "./js/contracts.js";
 
   const GENERATE_SHOPPING_LONG_PRESS_MS = 700;
 
-  function writeActiveMealPlanId(planId) {
-    storeWriteActiveMealPlanId(planId);
-  }
-
-  function readPlanCache() {
-    return storeReadMealPlanCache();
-  }
-
-  function cachePlanListRows(plans) {
-    storeCachePlanListRows(plans);
-  }
-
-  function cachePlanDetail(plan) {
-    storeCachePlanDetail(plan);
-  }
-
   function cachedPlanDetail(planId) {
-    const cache = readPlanCache();
+    const cache = readMealPlanCache();
     const row = cache.byId[String(planId)];
     if (row && typeof row === "object") {
       return row;
@@ -272,13 +256,6 @@ import { assertRequiredFields } from "./js/contracts.js";
     return `${shortDate.format(startDate)} - ${shortDate.format(endDate)}`;
   }
 
-  function toIsoDateLabel(sourceDate) {
-    const year = sourceDate.getFullYear();
-    const month = String(sourceDate.getMonth() + 1).padStart(2, "0");
-    const day = String(sourceDate.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  }
-
   function planListDateRangeLabel(plan) {
     const startRaw = String(plan.start_date);
     const startDate = parseIsoDate(startRaw);
@@ -288,11 +265,11 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     const lengthDays = Number(plan.length_days);
     if (!Number.isInteger(lengthDays) || lengthDays < 1) {
-      return toIsoDateLabel(startDate);
+      return toIsoDate(startDate);
     }
 
     const endDate = addDays(startDate, lengthDays - 1);
-    return `${toIsoDateLabel(startDate)} - ${toIsoDateLabel(endDate)}`;
+    return `${toIsoDate(startDate)} - ${toIsoDate(endDate)}`;
   }
 
   function planMetaText(plan) {
@@ -1112,7 +1089,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       cachePlanListRows(plans);
       listFromApi = true;
     } catch {
-      const cached = readPlanCache().list;
+      const cached = readMealPlanCache().list;
       plans = sortPlansMostRecentFirst(Array.isArray(cached) ? cached : []);
       if (plans.length > 0) {
         setStatus("Offline: showing cached meal plans.");
@@ -1208,7 +1185,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       plans = sortPlansMostRecentFirst(rawPlans);
       cachePlanListRows(plans);
     } catch {
-      plans = sortPlansMostRecentFirst(readPlanCache().list);
+      plans = sortPlansMostRecentFirst(readMealPlanCache().list);
     }
     renderPlanList(plans);
   }
@@ -1243,7 +1220,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       plans = sortPlansMostRecentFirst(rawPlans);
       cachePlanListRows(plans);
     } catch {
-      plans = sortPlansMostRecentFirst(readPlanCache().list);
+      plans = sortPlansMostRecentFirst(readMealPlanCache().list);
     }
     renderPlanList(plans);
 

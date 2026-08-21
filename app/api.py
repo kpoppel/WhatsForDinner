@@ -64,10 +64,6 @@ def _extract_results(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
-def _recipe_title(recipe: dict[str, Any]) -> str:
-    return str(recipe.get("name") or recipe.get("title") or f"Recipe {recipe.get('id')}")
-
-
 def _effective_status(entry: dict[str, Any], overrides: dict[str, str]) -> str:
     override = overrides.get(str(entry.get("id")))
     if override in SHOPPING_STATUSES:

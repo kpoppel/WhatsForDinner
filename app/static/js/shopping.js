@@ -1,6 +1,6 @@
 import { loadCache } from "./state.js";
 import { render, wireCollapsibleSection, updateStatusBadges, initRender } from "./render.js";
-import { isOnline, setApiReachable, browserOnline } from "./api.js";
+import { isOnline, setApiReachable } from "./api.js";
 import { run, refresh, setStatus, deleteEntry, setStatusMany, deleteEntries, refreshAndSyncIfNeeded } from "./sync.js";
 import { initGestures, createCard } from "./gestures.js";
 import { setupPullToRefresh } from "./ptr.js";

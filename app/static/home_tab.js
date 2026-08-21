@@ -1,13 +1,13 @@
 import {
-  api as storeApi,
-  writeActiveMealPlanId as storeWriteActiveMealPlanId,
-  writeHomeActivePlanCache as storeWriteHomeActivePlanCache,
-  writeMealPlanCache as storeWriteMealPlanCache,
+  api,
+  writeActiveMealPlanId,
+  writeHomeActivePlanCache,
+  writeMealPlanCache,
 } from "./js/store/commands.js";
 import {
-  readActiveMealPlanId as storeReadActiveMealPlanId,
-  readHomeActivePlanCache as storeReadHomeActivePlanCache,
-  readMealPlanCache as storeReadMealPlanCache,
+  readActiveMealPlanId,
+  readHomeActivePlanCache,
+  readMealPlanCache,
 } from "./js/store/selectors.js";
 import { assertRequiredFields } from "./js/contracts.js";
 
@@ -60,30 +60,6 @@ import { assertRequiredFields } from "./js/contracts.js";
   let todayEntryId = null;
   let todayRecipeUrl = null;
   let todayRecipeLookupTitle = "";
-
-  function readActiveMealPlanId() {
-    return storeReadActiveMealPlanId();
-  }
-
-  function writeActiveMealPlanId(planId) {
-    storeWriteActiveMealPlanId(planId);
-  }
-
-  function readMealPlanCache() {
-    return storeReadMealPlanCache();
-  }
-
-  function writeMealPlanCache(nextCache) {
-    storeWriteMealPlanCache(nextCache);
-  }
-
-  function readHomeActivePlanCache() {
-    return storeReadHomeActivePlanCache(sortEntries);
-  }
-
-  function writeHomeActivePlanCache(plan) {
-    storeWriteHomeActivePlanCache(plan);
-  }
 
   function setTab(tabName) {
     if (typeof window.WFD_setActiveTab === "function") {
@@ -154,10 +130,6 @@ import { assertRequiredFields } from "./js/contracts.js";
       const hh = String(hour24).padStart(2, "0");
       return `${hh}:${minute}`;
     });
-  }
-
-  async function api(path, options) {
-    return await storeApi(path, options);
   }
 
   function parseIsoDate(text) {
@@ -608,7 +580,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       };
     }
 
-    const homeFallback = readHomeActivePlanCache();
+    const homeFallback = readHomeActivePlanCache(sortEntries);
     if (homeFallback) {
       const cachedPlanId = Number(homeFallback.plan.plan_id);
       if (Number.isInteger(cachedPlanId)) {

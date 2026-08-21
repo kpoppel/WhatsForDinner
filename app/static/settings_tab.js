@@ -1,4 +1,4 @@
-import { api as storeApi } from "./js/store/commands.js";
+import { api } from "./js/store/commands.js";
 import { assertRequiredFields } from "./js/contracts.js";
 
 (() => {
@@ -121,10 +121,6 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
 
     return `${String(hour24).padStart(2, "0")}:${minute}`;
-  }
-
-  async function api(path, options) {
-    return await storeApi(path, options);
   }
 
   function selectedKeywordIds() {
