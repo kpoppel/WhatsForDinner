@@ -38,19 +38,32 @@ export async function api(path, options = {}) {
 }
 
 export async function apiUpload(path, formData) {
+  let response;
   try {
-    const response = await fetch(`${apiPrefix}${path}`, {
+    response = await fetch(`${apiPrefix}${path}`, {
       method: "POST",
       body: formData,
     });
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(JSON.stringify(data));
-    }
-    setApiReachable(true);
-    return data;
   } catch (error) {
     setApiReachable(false);
     throw error;
   }
+
+  let data = {};
+  try {
+    data = await response.json();
+  } catch {
+    data = {};
+  }
+
+  if (!response.ok) {
+    setApiReachable(true);
+    const detail = typeof data.detail === "string" ? data.detail : "Upload request failed.";
+    const error = new Error(detail);
+    error.status = response.status;
+    throw error;
+  }
+
+  setApiReachable(true);
+  return data;
 }

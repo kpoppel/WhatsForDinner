@@ -59,7 +59,6 @@ import { assertRequiredFields } from "./js/contracts.js";
   let lastSelectedPlanId = null;
   let todayEntryId = null;
   let todayRecipeUrl = null;
-  let todayRecipeLookupTitle = "";
 
   function setTab(tabName) {
     if (typeof window.WFD_setActiveTab === "function") {
@@ -261,70 +260,12 @@ import { assertRequiredFields } from "./js/contracts.js";
     return `${tandoorBaseUrl}/recipe/${recipeId}`;
   }
 
-  function recipeLookupTitleFromEntry(entry) {
-    if (!entry || typeof entry !== "object") {
-      return "";
-    }
-    const recipe = entry.recipe;
-    if (!recipe || typeof recipe !== "object") {
-      return "";
-    }
-
-    const title = typeof recipe.title === "string" ? recipe.title.trim() : "";
-    if (title.length > 0) {
-      return title;
-    }
-
-    const name = typeof recipe.name === "string" ? recipe.name.trim() : "";
-    return name;
-  }
-
-  async function resolveRecipeUrlByLookupTitle(title) {
-    const query = typeof title === "string" ? title.trim() : "";
-    if (query.length === 0 || !tandoorBaseUrl) {
-      return null;
-    }
-
-    const payload = await api(`/recipes?search=${encodeURIComponent(query)}&limit=20`);
-    const data = payload && typeof payload === "object" ? payload.data : null;
-    const rows = data && Array.isArray(data.results) ? data.results : [];
-    if (rows.length === 0) {
-      return null;
-    }
-
-    const normalizedQuery = query.toLowerCase();
-    let selected = null;
-    for (const row of rows) {
-      if (!row || typeof row !== "object") {
-        continue;
-      }
-      const label = String(row.name || row.title || "").trim().toLowerCase();
-      if (label === normalizedQuery) {
-        selected = row;
-        break;
-      }
-    }
-    if (!selected) {
-      selected = rows.find((row) => row && typeof row === "object") || null;
-    }
-    if (!selected) {
-      return null;
-    }
-
-    const recipeId = Number(selected.id);
-    if (!Number.isInteger(recipeId) || recipeId <= 0) {
-      return null;
-    }
-    return `${tandoorBaseUrl}/recipe/${recipeId}`;
-  }
-
-  function setViewRecipeButton(recipeUrl, lookupTitle = "") {
+  function setViewRecipeButton(recipeUrl) {
     todayRecipeUrl = typeof recipeUrl === "string" && recipeUrl.trim().length > 0
       ? recipeUrl.trim()
       : null;
-    todayRecipeLookupTitle = typeof lookupTitle === "string" ? lookupTitle.trim() : "";
     openPlansButton.textContent = VIEW_RECIPE_LABEL;
-    openPlansButton.disabled = !todayRecipeUrl && todayRecipeLookupTitle.length === 0;
+    openPlansButton.disabled = !todayRecipeUrl;
   }
 
   function setEditDayButton(enabled, label) {
@@ -338,7 +279,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     todayTitle.textContent = title;
     todayMeta.innerHTML = metaHtml;
     todayReminders.innerHTML = "";
-    setViewRecipeButton(null, "");
+    setViewRecipeButton(null);
     setEditDayButton(false, "Edit Day");
   }
 
@@ -356,7 +297,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       return;
     }
     todayEntryId = entryId;
-    setViewRecipeButton(recipeUrlFromEntry(entry), recipeLookupTitleFromEntry(entry));
+    setViewRecipeButton(recipeUrlFromEntry(entry));
 
     const parsedDate = parseIsoDate(String(entry.date));
     if (parsedDate === null) {
@@ -629,18 +570,7 @@ import { assertRequiredFields } from "./js/contracts.js";
   }
 
   openPlansButton.addEventListener("click", async () => {
-    let targetUrl = todayRecipeUrl;
-    if (!targetUrl && todayRecipeLookupTitle.length > 0) {
-      try {
-        targetUrl = await resolveRecipeUrlByLookupTitle(todayRecipeLookupTitle);
-        if (targetUrl) {
-          setViewRecipeButton(targetUrl, todayRecipeLookupTitle);
-        }
-      } catch {
-        targetUrl = null;
-      }
-    }
-
+    const targetUrl = todayRecipeUrl;
     if (!targetUrl) {
       return;
     }

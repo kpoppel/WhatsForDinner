@@ -875,6 +875,25 @@ function createOcrReviewRow(text) {
   return row;
 }
 
+function ocrUploadErrorMessage(error) {
+  const status = Number(error && error.status);
+  const message = String(error && error.message ? error.message : "").trim();
+
+  if (status === 413) {
+    return "Photo is too large. Try a smaller image.";
+  }
+  if (status === 503) {
+    return "Photo import is not configured on this server yet.";
+  }
+  if (status === 400 && message) {
+    return message;
+  }
+  if (status === 502) {
+    return "Could not read that photo. Try again with a clearer shot.";
+  }
+  return "Could not read the photo. Check your connection and try again.";
+}
+
 async function submitOcrPhoto(file) {
   pendingOcrFile = file;
   showOcrLoadingState();
@@ -885,7 +904,7 @@ async function submitOcrPhoto(file) {
     formData.append("image", file);
     response = await apiUpload("/shopping-list/ocr", formData);
   } catch (error) {
-    showOcrErrorState("Could not read the photo. Check your connection and try again.");
+    showOcrErrorState(ocrUploadErrorMessage(error));
     return;
   }
 
