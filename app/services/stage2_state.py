@@ -12,6 +12,7 @@ from typing import Any
 
 from app.models.state_schema import default_state_payload
 from app.services.state_migrations import StateSchemaError, migrate_and_validate_state
+from app.services.sync_event_compaction import compact_sync_event_payload
 
 DEFAULT_STATE_FILENAME = "state.json"
 logger = logging.getLogger(__name__)
@@ -23,14 +24,80 @@ class Stage2State:
         data_dir: str,
         sync_event_max_count: int = 2000,
         sync_event_max_age_days: int = 30,
+        archive_sync_event_max_count: int = 2000,
+        archive_meal_plan_max_count: int = 100,
     ) -> None:
         self.state_file = Path(data_dir) / DEFAULT_STATE_FILENAME
         self._sync_event_max_count = sync_event_max_count
         self._sync_event_max_age_days = sync_event_max_age_days
+        self._archive_sync_event_max_count = archive_sync_event_max_count
+        self._archive_meal_plan_max_count = archive_meal_plan_max_count
         self._lock = Lock()
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         if not self.state_file.exists():
             self._save(default_state_payload())
+        else:
+            with self._lock:
+                data = self._load()
+                self._prune_sync_events(data)
+                self._prune_archive(data)
+                self._save(data)
+
+    def _ensure_archive(self, data: dict[str, Any]) -> dict[str, Any]:
+        raw_archive = data.get("archive")
+        archive = raw_archive if isinstance(raw_archive, dict) else {}
+
+        meal_plans = archive.get("meal_plans")
+        if not isinstance(meal_plans, list):
+            meal_plans = []
+        archive["meal_plans"] = [row for row in meal_plans if isinstance(row, dict)]
+
+        sync_events = archive.get("sync_events")
+        if not isinstance(sync_events, list):
+            sync_events = []
+        archive["sync_events"] = [row for row in sync_events if isinstance(row, dict)]
+
+        data["archive"] = archive
+        return archive
+
+    def _prune_archive(self, data: dict[str, Any]) -> None:
+        archive = self._ensure_archive(data)
+
+        meal_plans = archive.get("meal_plans", [])
+        if self._archive_meal_plan_max_count > 0 and len(meal_plans) > self._archive_meal_plan_max_count:
+            archive["meal_plans"] = meal_plans[-self._archive_meal_plan_max_count :]
+
+        sync_events = archive.get("sync_events", [])
+        if self._archive_sync_event_max_count > 0 and len(sync_events) > self._archive_sync_event_max_count:
+            archive["sync_events"] = sync_events[-self._archive_sync_event_max_count :]
+
+    def _append_archive_sync_events(self, data: dict[str, Any], events: list[dict[str, Any]]) -> None:
+        if len(events) == 0:
+            return
+        archive = self._ensure_archive(data)
+        archive_events = archive.get("sync_events", [])
+        for event in events:
+            if isinstance(event, dict):
+                archive_events.append(deepcopy(event))
+        archive["sync_events"] = archive_events
+        self._prune_archive(data)
+
+    def _archive_meal_plan(self, data: dict[str, Any], meal_plan: dict[str, Any], reason: str) -> None:
+        plan_id = meal_plan.get("plan_id")
+        if not isinstance(plan_id, int):
+            return
+        archive = self._ensure_archive(data)
+        meal_plans = archive.get("meal_plans", [])
+        meal_plans.append(
+            {
+                "plan_id": plan_id,
+                "archived_at": datetime.now(timezone.utc).isoformat(),
+                "reason": reason,
+                "data": deepcopy(meal_plan),
+            }
+        )
+        archive["meal_plans"] = meal_plans
+        self._prune_archive(data)
 
     def _load(self) -> dict[str, Any]:
         with self.state_file.open("r", encoding="utf-8") as fp:
@@ -89,6 +156,7 @@ class Stage2State:
             return
 
         events: list[dict[str, Any]] = [event for event in raw_events if isinstance(event, dict)]
+        removed_events: list[dict[str, Any]] = []
 
         if self._sync_event_max_age_days > 0 and events:
             cutoff = datetime.now(timezone.utc) - timedelta(days=self._sync_event_max_age_days)
@@ -97,12 +165,16 @@ class Stage2State:
                 created_at = self._parse_event_created_at(event.get("created_at"))
                 if created_at is None or created_at >= cutoff:
                     kept_by_age.append(event)
+                else:
+                    removed_events.append(event)
             events = kept_by_age
 
         if self._sync_event_max_count > 0 and len(events) > self._sync_event_max_count:
+            removed_events.extend(events[: -self._sync_event_max_count])
             events = events[-self._sync_event_max_count :]
 
         data["shopping_sync_events"] = events
+        self._append_archive_sync_events(data, removed_events)
 
     def selected_keywords(self) -> list[int]:
         with self._lock:
@@ -210,6 +282,7 @@ class Stage2State:
             removed = data["meal_plans"].pop(str(plan_id), None)
             if not isinstance(removed, dict):
                 return None
+            self._archive_meal_plan(data, removed, reason="deleted")
             meal_plan_sync = data.get("meal_plan_instance_sync")
             if isinstance(meal_plan_sync, dict):
                 meal_plan_sync.pop(str(plan_id), None)
@@ -259,10 +332,11 @@ class Stage2State:
             data = self._load()
             event_id = int(data.get("next_sync_event_id", 1))
             data["next_sync_event_id"] = event_id + 1
+            compact_payload = compact_sync_event_payload(operation, payload)
             event = {
                 "cursor": event_id,
                 "operation": operation,
-                "payload": payload,
+                "payload": compact_payload,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
             data["shopping_sync_events"].append(event)

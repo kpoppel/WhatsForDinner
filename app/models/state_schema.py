@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CURRENT_STATE_SCHEMA_VERSION = 3
+CURRENT_STATE_SCHEMA_VERSION = 4
 
 
 class MealPlanRulesModel(BaseModel):
@@ -51,6 +51,22 @@ class MealPlanInstanceSyncModel(BaseModel):
     instances: dict[str, ShoppingInstanceSyncRowModel] = Field(default_factory=dict)
 
 
+class ArchivedMealPlanModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    plan_id: int
+    archived_at: str
+    reason: str
+    data: dict[str, Any]
+
+
+class StateArchiveModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    meal_plans: list[ArchivedMealPlanModel] = Field(default_factory=list)
+    sync_events: list[ShoppingSyncEventModel] = Field(default_factory=list)
+
+
 class Stage2StateDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -68,6 +84,7 @@ class Stage2StateDocument(BaseModel):
     meal_plan_instance_sync: dict[str, MealPlanInstanceSyncModel] = Field(default_factory=dict)
     shopping_sync_events: list[ShoppingSyncEventModel]
     next_sync_event_id: int
+    archive: StateArchiveModel = Field(default_factory=StateArchiveModel)
 
 
 def default_state_payload() -> dict[str, Any]:
@@ -89,4 +106,8 @@ def default_state_payload() -> dict[str, Any]:
         "meal_plan_instance_sync": {},
         "shopping_sync_events": [],
         "next_sync_event_id": 1,
+        "archive": {
+            "meal_plans": [],
+            "sync_events": [],
+        },
     }
