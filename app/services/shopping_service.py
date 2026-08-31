@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Callable
 
 from fastapi import HTTPException
@@ -14,6 +15,7 @@ class ShoppingService:
     def __init__(self, state: Stage2State, tandoor_client: TandoorClient) -> None:
         self._state = state
         self._client = tandoor_client
+        self._sync_lock = asyncio.Lock()
 
     async def get_view(
         self,
@@ -252,84 +254,85 @@ class ShoppingService:
         status_to_tandoor_fields: Callable[[str], dict[str, Any]],
         effective_status: Callable[[dict[str, Any], dict[str, str]], str],
     ) -> dict[str, Any]:
-        applied: list[dict[str, Any]] = []
-        rejected: list[dict[str, Any]] = []
+        async with self._sync_lock:
+            applied: list[dict[str, Any]] = []
+            rejected: list[dict[str, Any]] = []
 
-        for idx, change in enumerate(changes):
-            if not isinstance(change, dict):
-                rejected.append({"index": idx, "reason": "Change must be an object."})
-                continue
+            for idx, change in enumerate(changes):
+                if not isinstance(change, dict):
+                    rejected.append({"index": idx, "reason": "Change must be an object."})
+                    continue
 
-            raw_operation = change.get("operation")
-            if isinstance(raw_operation, str):
-                operation = raw_operation.lower()
-            else:
-                operation = str(getattr(raw_operation, "value", raw_operation) or "").lower()
-            entry_id = change.get("entry_id")
-            change_payload = change.get("payload") if isinstance(change.get("payload"), dict) else {}
-
-            try:
-                if operation == "create":
-                    result = await self.create_entry(
-                        payload=change_payload,
-                        ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
-                        extract_reminder_patch=extract_reminder_patch,
-                        build_local_entry_payload=build_local_entry_payload,
-                        status_to_tandoor_fields=status_to_tandoor_fields,
-                        operation_name="shopping_sync_post_create",
-                    )
-                    applied.append(
-                        {
-                            "index": idx,
-                            "cursor": result.get("cursor"),
-                            "operation": operation,
-                            "data": result.get("data"),
-                        }
-                    )
-                elif operation == "update":
-                    if not isinstance(entry_id, int):
-                        raise ValueError("entry_id is required for update")
-                    result = await self.update_entry(
-                        entry_id=entry_id,
-                        payload=change_payload,
-                        ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
-                        extract_reminder_patch=extract_reminder_patch,
-                        local_store_group_payload=local_store_group_payload,
-                        status_to_tandoor_fields=status_to_tandoor_fields,
-                        effective_status=effective_status,
-                        operation_name="shopping_sync_post_update",
-                    )
-                    applied.append(
-                        {
-                            "index": idx,
-                            "cursor": result.get("cursor"),
-                            "operation": operation,
-                            "data": result.get("data"),
-                        }
-                    )
-                elif operation == "delete":
-                    if not isinstance(entry_id, int):
-                        raise ValueError("entry_id is required for delete")
-                    result = await self.delete_entry(
-                        entry_id=entry_id,
-                        ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
-                        operation_name="shopping_sync_post_delete",
-                    )
-                    applied.append(
-                        {
-                            "index": idx,
-                            "cursor": result.get("cursor"),
-                            "operation": operation,
-                            "data": result.get("data"),
-                        }
-                    )
+                raw_operation = change.get("operation")
+                if isinstance(raw_operation, str):
+                    operation = raw_operation.lower()
                 else:
-                    rejected.append({"index": idx, "reason": f"Unsupported operation: {operation}"})
-            except (TandoorError, ValueError, HTTPException) as exc:
-                rejected.append({"index": idx, "reason": str(exc)})
+                    operation = str(getattr(raw_operation, "value", raw_operation) or "").lower()
+                entry_id = change.get("entry_id")
+                change_payload = change.get("payload") if isinstance(change.get("payload"), dict) else {}
 
-        return {
-            "server_cursor": self._state.current_sync_cursor(),
-            "applied": applied,
-            "rejected": rejected,
-        }
+                try:
+                    if operation == "create":
+                        result = await self.create_entry(
+                            payload=change_payload,
+                            ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
+                            extract_reminder_patch=extract_reminder_patch,
+                            build_local_entry_payload=build_local_entry_payload,
+                            status_to_tandoor_fields=status_to_tandoor_fields,
+                            operation_name="shopping_sync_post_create",
+                        )
+                        applied.append(
+                            {
+                                "index": idx,
+                                "cursor": result.get("cursor"),
+                                "operation": operation,
+                                "data": result.get("data"),
+                            }
+                        )
+                    elif operation == "update":
+                        if not isinstance(entry_id, int):
+                            raise ValueError("entry_id is required for update")
+                        result = await self.update_entry(
+                            entry_id=entry_id,
+                            payload=change_payload,
+                            ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
+                            extract_reminder_patch=extract_reminder_patch,
+                            local_store_group_payload=local_store_group_payload,
+                            status_to_tandoor_fields=status_to_tandoor_fields,
+                            effective_status=effective_status,
+                            operation_name="shopping_sync_post_update",
+                        )
+                        applied.append(
+                            {
+                                "index": idx,
+                                "cursor": result.get("cursor"),
+                                "operation": operation,
+                                "data": result.get("data"),
+                            }
+                        )
+                    elif operation == "delete":
+                        if not isinstance(entry_id, int):
+                            raise ValueError("entry_id is required for delete")
+                        result = await self.delete_entry(
+                            entry_id=entry_id,
+                            ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
+                            operation_name="shopping_sync_post_delete",
+                        )
+                        applied.append(
+                            {
+                                "index": idx,
+                                "cursor": result.get("cursor"),
+                                "operation": operation,
+                                "data": result.get("data"),
+                            }
+                        )
+                    else:
+                        rejected.append({"index": idx, "reason": f"Unsupported operation: {operation}"})
+                except (TandoorError, ValueError, HTTPException) as exc:
+                    rejected.append({"index": idx, "reason": str(exc)})
+
+            return {
+                "server_cursor": self._state.current_sync_cursor(),
+                "applied": applied,
+                "rejected": rejected,
+            }

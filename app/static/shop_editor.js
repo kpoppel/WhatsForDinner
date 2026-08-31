@@ -11,6 +11,7 @@ const listNode = document.getElementById("wf-editor-list");
 const statusNode = document.getElementById("wf-editor-status");
 const dueBannerNode = document.getElementById("wf-editor-due-banner");
 const addButton = document.getElementById("wf-editor-add-btn");
+const clearAllButton = document.getElementById("wf-editor-clear-all-btn");
 const cameraButton = document.getElementById("wf-editor-camera-btn");
 const cameraInput = document.getElementById("wf-editor-camera-input");
 const segmentButtons = Array.from(document.querySelectorAll("[data-editor-view]"));
@@ -33,7 +34,7 @@ const ocrList = document.getElementById("wf-ocr-review-list");
 if (
   !listNode || !statusNode || !dueBannerNode || !addButton || !addModal || !editModal ||
   !editUnitLabel || !mergePickModal || !mergePickList || !mergePickTitle ||
-  !cameraButton || !cameraInput || !ocrModal || !ocrLoadingNode || !ocrErrorNode ||
+  !cameraButton || !cameraInput || !clearAllButton || !ocrModal || !ocrLoadingNode || !ocrErrorNode ||
   !ocrErrorMessageNode || !ocrResultsNode || !ocrCategorySelect || !ocrList
 ) {
   // Shop Editor UI is not mounted on this page.
@@ -90,6 +91,10 @@ function bindToolbarControls() {
 
   cameraButton.addEventListener("click", () => {
     cameraInput.click();
+  });
+
+  clearAllButton.addEventListener("click", () => {
+    run(clearAllItems);
   });
 
   cameraInput.addEventListener("change", () => {
@@ -1016,6 +1021,32 @@ async function deleteFromEditModal() {
   closeEditModal();
   renderEditor();
   setStatus(isOnline() ? "Item deleted." : "Offline: delete queued.");
+  publishDataChanged();
+}
+
+async function clearAllItems() {
+  const allItems = Object.values(state.itemsById).filter((item) => item && item.id !== undefined && item.id !== null);
+  if (allItems.length === 0) {
+    setStatus("No items to clear.");
+    return;
+  }
+
+  if (!window.confirm(`Clear all ${allItems.length} item(s) from the shopping list? This action will also remove them from Tandoor.`)) {
+    return;
+  }
+
+  for (const item of allItems) {
+    queueDeleteChange(item.id);
+  }
+  renderEditor();
+
+  if (isOnline()) {
+    await syncPending(false);
+    await refresh();
+  }
+
+  renderEditor();
+  setStatus(isOnline() ? `${allItems.length} item(s) cleared.` : "Offline: deletions queued.");
   publishDataChanged();
 }
 

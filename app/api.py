@@ -492,7 +492,7 @@ def _parse_plan_start_date(value: Any) -> date | None:
         return None
 
 
-def _stored_plan_sort_key(plan: dict[str, Any]) -> tuple[int, int, int, int]:
+def _stored_plan_sort_key(plan: dict[str, Any]) -> tuple:
     today = date.today()
     start = _parse_plan_start_date(plan.get("start_date"))
     raw_id = plan.get("plan_id")
@@ -501,10 +501,19 @@ def _stored_plan_sort_key(plan: dict[str, Any]) -> tuple[int, int, int, int]:
     if start is None:
         return (10**9, 1, 0, -plan_id)
 
+    # Check if today falls within this plan's date range
+    length_days = plan.get("length_days")
+    if isinstance(length_days, int) and length_days > 0:
+        end = start + timedelta(days=length_days - 1)
+        if start <= today <= end:
+            # Plan contains today - prioritize it (comes first)
+            return (0, -plan_id)
+
+    # Plan does not contain today - sort by distance from today
     diff_days = (start - today).days
     distance = abs(diff_days)
     is_future_or_today = 0 if diff_days >= 0 else 1
-    return (distance, is_future_or_today, -start.toordinal(), -plan_id)
+    return (1, distance, is_future_or_today, -start.toordinal(), -plan_id)
 
 
 @router.get("/health")
