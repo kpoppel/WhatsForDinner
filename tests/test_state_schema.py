@@ -13,7 +13,7 @@ def test_stage2_state_writes_schema_version(tmp_path) -> None:
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 6
     assert payload["archive"] == {"meal_plans": [], "sync_events": []}
 
 
@@ -106,7 +106,7 @@ def test_stage2_state_migrates_v1_payload_to_v4(tmp_path) -> None:
     state.set_selected_keywords([])
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 6
     assert payload["meal_plan_instance_sync"] == {}
     assert payload["archive"] == {"meal_plans": [], "sync_events": []}
 
@@ -159,7 +159,7 @@ def test_stage2_state_migrates_v2_payload_and_strips_entry_ids(tmp_path) -> None
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 6
     instance = payload["meal_plan_instance_sync"]["1"]["instances"]["entry:1:primary:recipe:11"]
     assert "entry_ids" not in instance
 
@@ -206,7 +206,7 @@ def test_stage2_state_migrates_v3_payload_to_v4_with_archive_defaults(tmp_path) 
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 6
     assert payload["archive"] == {"meal_plans": [], "sync_events": []}
     compact_payload = payload["shopping_sync_events"][0]["payload"]
     assert compact_payload["plan_id"] == 4

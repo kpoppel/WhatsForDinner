@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any
+import uuid
 
 from pydantic import ValidationError
 
@@ -84,6 +85,32 @@ def _migrate_v3_to_v4(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v4_to_v5(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    if not isinstance(next_payload.get("derived_state_revision"), int):
+        next_payload["derived_state_revision"] = 0
+    if not isinstance(next_payload.get("recipe_use_history"), list):
+        next_payload["recipe_use_history"] = []
+    if not isinstance(next_payload.get("pending_projections"), dict):
+        next_payload["pending_projections"] = {}
+    next_payload["schema_version"] = 5
+    return next_payload
+
+
+def _migrate_v5_to_v6(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    meal_plans = next_payload.get("meal_plans")
+    if isinstance(meal_plans, dict):
+        for plan in meal_plans.values():
+            if not isinstance(plan, dict):
+                continue
+            plan_token = plan.get("plan_token")
+            if not isinstance(plan_token, str) or not plan_token:
+                plan["plan_token"] = uuid.uuid4().hex
+    next_payload["schema_version"] = 6
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(raw)
 
@@ -102,6 +129,14 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     if schema_version == 3:
         payload = _migrate_v3_to_v4(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 4:
+        payload = _migrate_v4_to_v5(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 5:
+        payload = _migrate_v5_to_v6(payload)
         schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:

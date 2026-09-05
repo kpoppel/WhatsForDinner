@@ -26,6 +26,11 @@ class MealPlanRowStatefulClient:
         self.meal_plan_rows[row_id] = row
         return row
 
+    async def update_meal_plan(self, meal_id, payload):
+        row = self.meal_plan_rows[int(meal_id)]
+        row.update(payload)
+        return row
+
     async def delete_meal_plan(self, meal_id):
         mealplan_id = int(meal_id)
         self.meal_plan_rows.pop(mealplan_id, None)
