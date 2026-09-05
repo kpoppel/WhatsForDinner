@@ -195,6 +195,19 @@ def _migrate_v11_to_v12(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v12_to_v13(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    plan_sync = next_payload.pop("meal_plan_instance_sync", {})
+    meal_plans = next_payload.get("meal_plans")
+    if isinstance(plan_sync, dict) and isinstance(meal_plans, dict):
+        for plan_id, sync in plan_sync.items():
+            plan = meal_plans.get(plan_id)
+            if isinstance(plan, dict) and isinstance(sync, dict):
+                plan["tandoor_sync"] = sync
+    next_payload["schema_version"] = 13
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(raw)
 
@@ -245,6 +258,10 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     if schema_version == 11:
         payload = _migrate_v11_to_v12(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 12:
+        payload = _migrate_v12_to_v13(payload)
         schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:

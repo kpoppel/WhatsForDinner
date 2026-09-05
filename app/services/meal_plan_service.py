@@ -569,7 +569,7 @@ class MealPlanService:
         desired_sync = self._desired_meal_plan_row_sync(plan_payload, entries)
 
         previous_sync: dict[str, dict[str, Any]] = {}
-        raw_previous_sync = self._state.get_meal_plan_instance_sync(plan_id)
+        raw_previous_sync = self._state.get_meal_plan_tandoor_sync(plan_id)
         for key, value in raw_previous_sync.items():
             if not isinstance(value, dict):
                 continue
@@ -626,7 +626,7 @@ class MealPlanService:
             next_sync[instance_key] = desired_row
 
         serializable_sync = self._serialize_instance_sync(next_sync)
-        self._state.set_meal_plan_instance_sync(plan_id, serializable_sync)
+        self._state.set_meal_plan_tandoor_sync(plan_id, serializable_sync)
 
     async def _delete_all_tandoor_meal_plan_rows(
         self,
@@ -636,7 +636,7 @@ class MealPlanService:
         operation_name: str,
     ) -> None:
         ensure_tandoor_writes_enabled(operation_name)
-        previous_sync = self._state.get_meal_plan_instance_sync(plan_id)
+        previous_sync = self._state.get_meal_plan_tandoor_sync(plan_id)
         for _, value in previous_sync.items():
             if not isinstance(value, dict):
                 continue
@@ -1145,7 +1145,7 @@ class MealPlanService:
     ) -> dict:
         def normalize_previous_instance_sync() -> dict[str, dict[str, Any]]:
             normalized: dict[str, dict[str, Any]] = {}
-            raw_instance_sync = self._state.get_meal_plan_instance_sync(plan_id)
+            raw_instance_sync = self._state.get_meal_plan_tandoor_sync(plan_id)
             for key, value in raw_instance_sync.items():
                 if not isinstance(value, dict):
                     continue
@@ -1168,7 +1168,7 @@ class MealPlanService:
         ) -> dict:
             serializable_sync = self._serialize_instance_sync(next_sync)
 
-            self._state.set_meal_plan_instance_sync(plan_id, serializable_sync)
+            self._state.set_meal_plan_tandoor_sync(plan_id, serializable_sync)
 
             shopping_view: dict[str, Any] | None = None
             shopping_view_error: str | None = None

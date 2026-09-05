@@ -308,19 +308,16 @@ class ServerState:
             removed = data["meal_plans"].pop(str(plan_id), None)
             if not isinstance(removed, dict):
                 return None
-            meal_plan_sync = data.get("meal_plan_instance_sync")
-            if isinstance(meal_plan_sync, dict):
-                meal_plan_sync.pop(str(plan_id), None)
             self._save(data)
             return deepcopy(removed)
 
-    def get_meal_plan_instance_sync(self, plan_id: int) -> dict[str, dict[str, Any]]:
+    def get_meal_plan_tandoor_sync(self, plan_id: int) -> dict[str, dict[str, Any]]:
         with self._lock:
             data = self._load()
-            raw_sync = data.get("meal_plan_instance_sync")
-            if not isinstance(raw_sync, dict):
+            plan = data["meal_plans"].get(str(plan_id))
+            if not isinstance(plan, dict):
                 return {}
-            plan_sync = raw_sync.get(str(plan_id))
+            plan_sync = plan.get("tandoor_sync")
             if not isinstance(plan_sync, dict):
                 return {}
             instances = plan_sync.get("instances")
@@ -332,16 +329,17 @@ class ServerState:
                     sanitized[str(key)] = deepcopy(value)
             return sanitized
 
-    def set_meal_plan_instance_sync(self, plan_id: int, instances: dict[str, dict[str, Any]]) -> None:
+    def set_meal_plan_tandoor_sync(self, plan_id: int, instances: dict[str, dict[str, Any]]) -> None:
         with self._lock:
             data = self._load()
-            if not isinstance(data.get("meal_plan_instance_sync"), dict):
-                data["meal_plan_instance_sync"] = {}
+            plan = data["meal_plans"].get(str(plan_id))
+            if not isinstance(plan, dict):
+                return
             sanitized: dict[str, dict[str, Any]] = {}
             for key, value in instances.items():
                 if isinstance(value, dict):
                     sanitized[str(key)] = deepcopy(value)
-            data["meal_plan_instance_sync"][str(plan_id)] = {"instances": sanitized}
+            plan["tandoor_sync"] = {"instances": sanitized}
             self._save(data)
 
     def allocate_entry_id(self) -> int:

@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CURRENT_STATE_SCHEMA_VERSION = 12
+CURRENT_STATE_SCHEMA_VERSION = 13
 
 
 class MealPlanRulesModel(BaseModel):
@@ -36,6 +36,12 @@ class MealPlanInstanceSyncModel(BaseModel):
     instances: dict[str, ShoppingInstanceSyncRowModel] = Field(default_factory=dict)
 
 
+class MealPlanModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    tandoor_sync: MealPlanInstanceSyncModel | None = None
+
+
 class RecipeUseModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -56,18 +62,17 @@ class PendingShoppingChangeModel(BaseModel):
 class ServerStateDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[12]
+    schema_version: Literal[13]
     selected_keyword_ids: list[int]
     meal_plan_rules: MealPlanRulesModel
     user_settings: UserSettingsModel
-    meal_plans: dict[str, dict[str, Any]]
+    meal_plans: dict[str, MealPlanModel]
     next_meal_plan_id: int
     next_entry_id: int
     shopping_status_overrides: dict[str, str]
     shopping_item_metadata: dict[str, dict[str, Any]]
     local_shopping_entries: dict[str, dict[str, Any]]
     next_local_shopping_entry_id: int
-    meal_plan_instance_sync: dict[str, MealPlanInstanceSyncModel] = Field(default_factory=dict)
     recipe_use_history: list[RecipeUseModel] = Field(default_factory=list)
     pending_shopping_changes: dict[str, PendingShoppingChangeModel] = Field(default_factory=dict)
 
@@ -88,7 +93,6 @@ def default_state_payload() -> dict[str, Any]:
         "shopping_item_metadata": {},
         "local_shopping_entries": {},
         "next_local_shopping_entry_id": -1,
-        "meal_plan_instance_sync": {},
         "recipe_use_history": [],
         "pending_shopping_changes": {},
     }

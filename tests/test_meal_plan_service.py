@@ -778,7 +778,7 @@ def test_sync_tandoor_meal_plan_includes_mode_only_rows_without_recipe(tmp_path)
     titles = [str(row.get("title") or "") for row in rows]
     assert set(titles) == {"Leftovers", "Pizza Palace", "The Bistro"}
 
-    tracked_sync = state.get_meal_plan_instance_sync(plan["plan_id"])
+    tracked_sync = state.get_meal_plan_tandoor_sync(plan["plan_id"])
     assert tracked_sync["entry:1:mode:leftover"]["recipe_title"] == "Leftovers"
     assert tracked_sync["entry:2:mode:takeout"]["recipe_title"] == "Pizza Palace"
     assert tracked_sync["entry:3:mode:empty"]["recipe_title"] == "The Bistro"
@@ -876,7 +876,7 @@ def test_patch_entry_recipe_removal_deletes_tracked_shopping_entries(tmp_path) -
     assert isinstance(result_payload, dict)
     assert int(result_payload.get("bulk_entries_created", 0)) > 0
 
-    tracked_sync = state.get_meal_plan_instance_sync(plan_id)
+    tracked_sync = state.get_meal_plan_tandoor_sync(plan_id)
     assert len(tracked_sync) == 1
     tracked_row = next(iter(tracked_sync.values()))
     assert isinstance(tracked_row.get("shopping_recipe_id"), int)
@@ -1033,7 +1033,7 @@ def test_patch_entry_move_updates_tracked_tandoor_row_in_place(tmp_path) -> None
             ensure_tandoor_writes_enabled=ensure_writes_enabled,
         )
     )
-    original_row_id = state.get_meal_plan_instance_sync(plan_id)["entry:1:mode:leftover"]["meal_plan_row_id"]
+    original_row_id = state.get_meal_plan_tandoor_sync(plan_id)["entry:1:mode:leftover"]["meal_plan_row_id"]
     client.updated_meal_plan_calls.clear()
 
     asyncio.run(
@@ -1130,7 +1130,7 @@ def test_delete_plan_removes_tracked_shopping_before_meal_rows(tmp_path) -> None
     )
     plan_id = int(plan["plan_id"])
 
-    state.set_meal_plan_instance_sync(
+    state.set_meal_plan_tandoor_sync(
         plan_id,
         {
             "entry:1:primary:recipe:11": {
@@ -1148,7 +1148,7 @@ def test_delete_plan_removes_tracked_shopping_before_meal_rows(tmp_path) -> None
     assert result["data"]["deleted"] is True
     assert client.call_order == ["meal:9"]
     assert state.get_meal_plan(plan_id) is None
-    assert state.get_meal_plan_instance_sync(plan_id) == {}
+    assert state.get_meal_plan_tandoor_sync(plan_id) == {}
 
 
 def test_delete_plan_aborts_when_shopping_cleanup_fails(tmp_path) -> None:
@@ -1169,7 +1169,7 @@ def test_delete_plan_aborts_when_shopping_cleanup_fails(tmp_path) -> None:
     )
     plan_id = int(plan["plan_id"])
 
-    state.set_meal_plan_instance_sync(
+    state.set_meal_plan_tandoor_sync(
         plan_id,
         {
             "entry:1:primary:recipe:11": {
@@ -1187,7 +1187,7 @@ def test_delete_plan_aborts_when_shopping_cleanup_fails(tmp_path) -> None:
     assert result["data"]["deleted"] is True
     assert client.call_order == ["meal:9"]
     assert state.get_meal_plan(plan_id) is None
-    assert state.get_meal_plan_instance_sync(plan_id) == {}
+    assert state.get_meal_plan_tandoor_sync(plan_id) == {}
     assert 9 not in client.meal_plan_rows
 
 
@@ -1209,7 +1209,7 @@ def test_delete_plan_treats_missing_shopping_entries_as_already_removed(tmp_path
     )
     plan_id = int(plan["plan_id"])
 
-    state.set_meal_plan_instance_sync(
+    state.set_meal_plan_tandoor_sync(
         plan_id,
         {
             "entry:1:primary:recipe:11": {
