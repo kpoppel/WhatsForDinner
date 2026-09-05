@@ -443,12 +443,12 @@ class MealPlanService:
                 return
             raise
 
-    async def _create_meal_plan_row_for_instance(self, instance: dict[str, Any]) -> int:
+    async def _meal_plan_row_payload_for_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         recipe_id = instance.get("recipe_id")
         servings = instance.get("servings")
         from_date = instance.get("date")
         if not isinstance(servings, int) or not isinstance(from_date, str):
-            raise TandoorError("Cannot create meal-plan row: instance is missing required fields.")
+            raise TandoorError("Cannot sync meal-plan row: instance is missing required fields.")
 
         meal_type_payload = await self._default_meal_type_payload()
         iso_date = f"{from_date}T18:00:00Z"
@@ -481,11 +481,19 @@ class MealPlanService:
         }
         if isinstance(recipe_id, int):
             payload["recipe"] = recipe_id
+        return payload
+
+    async def _create_meal_plan_row_for_instance(self, instance: dict[str, Any]) -> int:
+        payload = await self._meal_plan_row_payload_for_instance(instance)
         result = await self._client.create_meal_plan(payload)
         row_id = result.get("id") if isinstance(result, dict) else None
         if not isinstance(row_id, int) or row_id < 1:
             raise TandoorError("Tandoor meal-plan create did not return an id.")
         return row_id
+
+    async def _update_meal_plan_row_for_instance(self, row_id: int, instance: dict[str, Any]) -> None:
+        payload = await self._meal_plan_row_payload_for_instance(instance)
+        await self._client.update_meal_plan(row_id, payload)
 
     def _serialize_instance_sync(self, instance_sync: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
         serialized: dict[str, dict[str, Any]] = {}
@@ -569,7 +577,13 @@ class MealPlanService:
                     next_sync[instance_key] = desired_row
                     continue
 
-                await self._delete_meal_plan_row_if_present(previous_row_id)
+                if isinstance(previous_row_id, int):
+                    await self._update_meal_plan_row_for_instance(previous_row_id, desired_row)
+                    desired_row["meal_plan_row_id"] = previous_row_id
+                    desired_row["shopping_recipe_id"] = previous_row.get("shopping_recipe_id")
+                    desired_row["shopping_activated"] = bool(previous_row.get("shopping_activated", False))
+                    next_sync[instance_key] = desired_row
+                    continue
 
             created_row_id = await self._create_meal_plan_row_for_instance(desired_row)
             desired_row["meal_plan_row_id"] = created_row_id

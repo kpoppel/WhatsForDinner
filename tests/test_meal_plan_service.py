@@ -17,6 +17,7 @@ class FakeMealClient:
         self.next_shopping_recipe_id = 1
         self.meal_plan_rows: dict[int, dict] = {}
         self.next_meal_plan_row_id = 1
+        self.updated_meal_plan_calls: list[tuple[int, dict]] = []
         self.next_entry_id = 2
         self.shopping_entries = [
             {
@@ -133,6 +134,13 @@ class FakeMealClient:
         self.next_meal_plan_row_id += 1
         row = {"id": row_id, **payload}
         self.meal_plan_rows[row_id] = row
+        return row
+
+    async def update_meal_plan(self, meal_id, payload):
+        mealplan_id = int(meal_id)
+        self.updated_meal_plan_calls.append((mealplan_id, payload))
+        row = self.meal_plan_rows[mealplan_id]
+        row.update(payload)
         return row
 
     async def delete_meal_plan(self, meal_id):
@@ -963,14 +971,77 @@ def test_patch_entry_keeps_unchanged_mode_rows_when_remote_snapshot_is_sparse(tm
         )
     )
 
-    # Only the changed planned row should be rotated once.
-    assert client.create_calls == initial_create_calls + 1
-    assert client.delete_calls == initial_delete_calls + 1
+    # Only the changed planned row should be updated in place.
+    assert client.create_calls == initial_create_calls
+    assert client.delete_calls == initial_delete_calls
+    assert len(client.updated_meal_plan_calls) == 1
 
     rows = list(client.meal_plan_rows.values())
     assert len(rows) == 4
     titles = [str(row.get("title") or "") for row in rows]
     assert set(titles) == {"Roast Veg", "Leftovers", "Takeout", "Eating Out"}
+
+
+def test_patch_entry_move_updates_tracked_tandoor_row_in_place(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+    client = FakeMealClient()
+    service = MealPlanService(state, client)
+
+    plan = state.create_meal_plan(
+        {
+            "start_date": "2026-08-10",
+            "length_days": 2,
+            "diners": 2,
+            "entries": [
+                {
+                    "entry_id": 1,
+                    "day_index": 0,
+                    "date": "2026-08-10",
+                    "mode": "leftover",
+                    "recipe": None,
+                    "extra_recipes": [],
+                    "servings": 2,
+                },
+                {
+                    "entry_id": 2,
+                    "day_index": 1,
+                    "date": "2026-08-11",
+                    "mode": "empty",
+                    "recipe": None,
+                    "extra_recipes": [],
+                    "servings": 2,
+                },
+            ],
+            "keyword_ids": [],
+            "constraints": {"leftover_days": [], "takeout_days": [], "empty_days": []},
+            "no_repeat_days": 30,
+        }
+    )
+    plan_id = int(plan["plan_id"])
+
+    asyncio.run(
+        service.patch_plan(
+            plan_id,
+            {"entries": plan["entries"]},
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+        )
+    )
+    original_row_id = state.get_meal_plan_instance_sync(plan_id)["entry:1:mode:leftover"]["meal_plan_row_id"]
+    client.updated_meal_plan_calls.clear()
+
+    asyncio.run(
+        service.patch_entry(
+            plan_id,
+            1,
+            {"target_day_index": 1},
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+        )
+    )
+
+    assert [meal_id for meal_id, _ in client.updated_meal_plan_calls] == [original_row_id, 2]
+    assert client.updated_meal_plan_calls[0][1]["from_date"] == "2026-08-11T18:00:00Z"
+    assert client.updated_meal_plan_calls[1][1]["from_date"] == "2026-08-10T18:00:00Z"
+    assert set(client.meal_plan_rows) == {original_row_id, 2}
 
 
 def test_generate_shopping_sync_preserves_mode_only_rows(tmp_path) -> None:
