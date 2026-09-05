@@ -1209,6 +1209,11 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
 
   async function refreshPlans() {
     /** Fetch stored plans and refresh the visible list projection. */
+    const cachedPlans = sortPlansMostRecentFirst(readMealPlanCache().list);
+    if (cachedPlans.length > 0) {
+      renderPlanList(cachedPlans, { source: "cache" });
+    }
+
     let plans = [];
     let listFromApi = false;
 
