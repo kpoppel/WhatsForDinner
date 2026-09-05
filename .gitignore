@@ -9,6 +9,7 @@ __pycache__/
 htmlcov/
 .DS_Store
 ignore/
+*.code-workspace
 
 # Runtime app state (contains user/account and instance-specific synced data)
 /data/
