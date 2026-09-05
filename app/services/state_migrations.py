@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import date
 from typing import Any
 import uuid
 
@@ -111,6 +112,62 @@ def _migrate_v9_to_v10(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v10_to_v11(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    history = next_payload["recipe_use_history"]
+    existing_uses = {
+        (item["recipe_id"], item["used_date"], item["plan_id"], item["entry_id"])
+        for item in history
+        if isinstance(item, dict)
+    }
+    meal_plans = next_payload["meal_plans"]
+    for raw_plan_id, plan in meal_plans.items():
+        if not isinstance(plan, dict):
+            continue
+        try:
+            plan_id = int(raw_plan_id)
+        except ValueError:
+            continue
+        entries = plan.get("entries")
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            entry_id = entry.get("entry_id")
+            used_date = entry.get("date")
+            if not isinstance(entry_id, int) or not isinstance(used_date, str):
+                continue
+            try:
+                date.fromisoformat(used_date)
+            except ValueError:
+                continue
+            recipes = [entry.get("recipe")]
+            extra_recipes = entry.get("extra_recipes")
+            if isinstance(extra_recipes, list):
+                recipes.extend(extra_recipes)
+            for recipe in recipes:
+                if not isinstance(recipe, dict):
+                    continue
+                recipe_id = recipe.get("id")
+                if not isinstance(recipe_id, int):
+                    continue
+                recipe_use = (recipe_id, used_date, plan_id, entry_id)
+                if recipe_use in existing_uses:
+                    continue
+                history.append(
+                    {
+                        "recipe_id": recipe_id,
+                        "used_date": used_date,
+                        "plan_id": plan_id,
+                        "entry_id": entry_id,
+                    }
+                )
+                existing_uses.add(recipe_use)
+    next_payload["schema_version"] = 11
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(raw)
 
@@ -153,6 +210,10 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     if schema_version == 9:
         payload = _migrate_v9_to_v10(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 10:
+        payload = _migrate_v10_to_v11(payload)
         schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:

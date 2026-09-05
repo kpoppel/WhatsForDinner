@@ -1,4 +1,5 @@
 import json
+from datetime import date, timedelta
 
 import pytest
 
@@ -12,7 +13,7 @@ def test_stage2_state_writes_schema_version(tmp_path) -> None:
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 10
+    assert payload["schema_version"] == 11
     assert "archive" not in payload
     assert "shopping_sync_events" not in payload
 
@@ -26,6 +27,118 @@ def test_stage2_state_flush_persists_memory_changes(tmp_path) -> None:
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
     assert payload["selected_keyword_ids"] == [4]
+
+
+def test_recipe_use_history_is_append_only_across_plan_changes(tmp_path) -> None:
+    state = ServerState(str(tmp_path))
+    plan = state.create_meal_plan(
+        {
+            "entries": [
+                {
+                    "entry_id": 1,
+                    "date": "2026-09-01",
+                    "recipe": {"id": 11, "title": "Roast Veg"},
+                    "extra_recipes": [{"id": 12, "title": "Rice Bowl"}],
+                }
+            ]
+        }
+    )
+
+    state.update_meal_plan(plan["plan_id"], {"diners": 4})
+    state.update_meal_plan(
+        plan["plan_id"],
+        {
+            "entries": [
+                {
+                    "entry_id": 1,
+                    "date": "2026-09-02",
+                    "recipe": {"id": 13, "title": "Pasta"},
+                    "extra_recipes": [],
+                }
+            ]
+        },
+    )
+    state.delete_meal_plan(plan["plan_id"])
+    state.flush()
+
+    with state.state_file.open("r", encoding="utf-8") as fp:
+        payload = json.load(fp)
+    assert payload["recipe_use_history"] == [
+        {"recipe_id": 11, "used_date": "2026-09-01", "plan_id": 1, "entry_id": 1},
+        {"recipe_id": 12, "used_date": "2026-09-01", "plan_id": 1, "entry_id": 1},
+        {"recipe_id": 13, "used_date": "2026-09-02", "plan_id": 1, "entry_id": 1},
+    ]
+
+
+def test_recipe_use_history_backfills_existing_plans_on_startup(tmp_path) -> None:
+    state = ServerState(str(tmp_path))
+    state.create_meal_plan(
+        {
+            "entries": [
+                {
+                    "entry_id": 1,
+                    "date": "2026-09-01",
+                    "recipe": {"id": 11, "title": "Roast Veg"},
+                }
+            ]
+        }
+    )
+    state.flush()
+
+    payload = json.loads(state.state_file.read_text(encoding="utf-8"))
+    payload["schema_version"] = 10
+    payload["recipe_use_history"] = []
+    state.state_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    restored = ServerState(str(tmp_path))
+    restored.flush()
+
+    with restored.state_file.open("r", encoding="utf-8") as fp:
+        restored_payload = json.load(fp)
+    assert restored_payload["recipe_use_history"] == [
+        {"recipe_id": 11, "used_date": "2026-09-01", "plan_id": 1, "entry_id": 1}
+    ]
+
+
+def test_recipe_use_history_prunes_to_the_configured_window(tmp_path) -> None:
+    state = ServerState(str(tmp_path))
+    today = date.today()
+    plan = state.create_meal_plan(
+        {
+            "entries": [
+                {
+                    "entry_id": 1,
+                    "date": (today - timedelta(days=31)).isoformat(),
+                    "recipe": {"id": 11, "title": "Old Recipe"},
+                },
+                {
+                    "entry_id": 2,
+                    "date": (today - timedelta(days=30)).isoformat(),
+                    "recipe": {"id": 12, "title": "Recent Recipe"},
+                },
+            ]
+        }
+    )
+
+    state.set_meal_plan_rules(30)
+    state.flush()
+
+    with state.state_file.open("r", encoding="utf-8") as fp:
+        payload = json.load(fp)
+    assert payload["recipe_use_history"] == [
+        {
+            "recipe_id": 12,
+            "used_date": (today - timedelta(days=30)).isoformat(),
+            "plan_id": plan["plan_id"],
+            "entry_id": 2,
+        }
+    ]
+
+    state.set_meal_plan_rules(0)
+    state.flush()
+    with state.state_file.open("r", encoding="utf-8") as fp:
+        payload = json.load(fp)
+    assert payload["recipe_use_history"] == []
 
 
 def test_stage2_state_persists_compact_pending_shopping_changes(tmp_path) -> None:
@@ -101,7 +214,7 @@ def test_stage2_state_migrates_v1_payload_to_v8(tmp_path) -> None:
     state.set_selected_keywords([])
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
-    assert payload["schema_version"] == 10
+    assert payload["schema_version"] == 11
     assert payload["meal_plan_instance_sync"] == {}
     assert "archive" not in payload
 
@@ -154,7 +267,7 @@ def test_stage2_state_migrates_v2_payload_and_strips_entry_ids(tmp_path) -> None
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 10
+    assert payload["schema_version"] == 11
     instance = payload["meal_plan_instance_sync"]["1"]["instances"]["entry:1:primary:recipe:11"]
     assert "entry_ids" not in instance
 
@@ -201,7 +314,7 @@ def test_stage2_state_migrates_v3_payload_to_v8_without_event_history(tmp_path) 
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 10
+    assert payload["schema_version"] == 11
     assert "archive" not in payload
     assert "shopping_sync_events" not in payload
     assert "next_sync_event_id" not in payload
@@ -235,7 +348,7 @@ def test_stage2_state_migrates_v8_payload_without_shopping_snapshot(tmp_path) ->
 
     with state_file.open("r", encoding="utf-8") as fp:
         migrated_payload = json.load(fp)
-    assert migrated_payload["schema_version"] == 10
+    assert migrated_payload["schema_version"] == 11
     assert "shopping_snapshot" not in migrated_payload
 
 

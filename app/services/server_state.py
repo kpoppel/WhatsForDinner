@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 import json
 import logging
 import os
@@ -34,6 +35,7 @@ class ServerState:
             self._write(self._data)
         else:
             self._data = self._read()
+            self._prune_recipe_use_history(self._data)
             self._write(self._data)
 
     def _read(self) -> dict[str, Any]:
@@ -109,6 +111,20 @@ class ServerState:
                 if tmp_path is not None and tmp_path.exists():
                     tmp_path.unlink(missing_ok=True)
 
+    def _prune_recipe_use_history(self, data: dict[str, Any]) -> None:
+        """Remove recipe uses that are outside the current no-repeat window."""
+        no_repeat_days = data["meal_plan_rules"]["no_repeat_days"]
+        if no_repeat_days <= 0:
+            data["recipe_use_history"] = []
+            return
+
+        cutoff_date = date.today() - timedelta(days=no_repeat_days)
+        data["recipe_use_history"] = [
+            item
+            for item in data["recipe_use_history"]
+            if date.fromisoformat(item["used_date"]) >= cutoff_date
+        ]
+
     def selected_keywords(self) -> list[int]:
         with self._lock:
             data = self._load()
@@ -136,6 +152,7 @@ class ServerState:
         with self._lock:
             data = self._load()
             data["meal_plan_rules"] = {"no_repeat_days": no_repeat_days}
+            self._prune_recipe_use_history(data)
             self._save(data)
         return {"no_repeat_days": no_repeat_days}
 
@@ -185,6 +202,7 @@ class ServerState:
             }
             data["meal_plan_rules"] = {"no_repeat_days": no_repeat_days}
             data["selected_keyword_ids"] = keyword_ids
+            self._prune_recipe_use_history(data)
             self._save(data)
 
         return {
@@ -196,6 +214,53 @@ class ServerState:
             "selected_keyword_ids": keyword_ids,
         }
 
+    def _record_recipe_uses(self, data: dict[str, Any], plan_id: int, plan: dict[str, Any]) -> None:
+        """Append unique recipe-use events from the plan without removing historical records."""
+        self._prune_recipe_use_history(data)
+        entries = plan.get("entries")
+        if not isinstance(entries, list):
+            return
+
+        history = data["recipe_use_history"]
+        existing_uses = {
+            (item["recipe_id"], item["used_date"], item["plan_id"], item["entry_id"])
+            for item in history
+        }
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            entry_id = entry.get("entry_id")
+            used_date = entry.get("date")
+            if not isinstance(entry_id, int) or not isinstance(used_date, str):
+                continue
+            try:
+                date.fromisoformat(used_date)
+            except ValueError:
+                continue
+
+            recipes = [entry.get("recipe")]
+            extra_recipes = entry.get("extra_recipes")
+            if isinstance(extra_recipes, list):
+                recipes.extend(extra_recipes)
+            for recipe in recipes:
+                if not isinstance(recipe, dict):
+                    continue
+                recipe_id = recipe.get("id")
+                if not isinstance(recipe_id, int):
+                    continue
+                recipe_use = (recipe_id, used_date, plan_id, entry_id)
+                if recipe_use in existing_uses:
+                    continue
+                history.append(
+                    {
+                        "recipe_id": recipe_id,
+                        "used_date": used_date,
+                        "plan_id": plan_id,
+                        "entry_id": entry_id,
+                    }
+                )
+                existing_uses.add(recipe_use)
+
     def create_meal_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             data = self._load()
@@ -203,6 +268,7 @@ class ServerState:
             data["next_meal_plan_id"] = plan_id + 1
             payload["plan_id"] = plan_id
             data["meal_plans"][str(plan_id)] = payload
+            self._record_recipe_uses(data, plan_id, payload)
             self._save(data)
         return payload
 
@@ -232,6 +298,7 @@ class ServerState:
                 return None
             current.update(payload)
             data["meal_plans"][key] = current
+            self._record_recipe_uses(data, plan_id, current)
             self._save(data)
             return deepcopy(current)
 
