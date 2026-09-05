@@ -137,6 +137,14 @@ class FakeMealClient:
         self.meal_plan_rows[row_id] = row
         return row
 
+    async def update_meal_plan(self, meal_id, payload):
+        row_id = int(meal_id)
+        row = self.meal_plan_rows.get(row_id)
+        if not isinstance(row, dict):
+            raise TandoorError(f"Tandoor returned 404 for /api/meal-plan/{row_id}/.")
+        row.update(payload)
+        return row
+
     async def delete_meal_plan(self, meal_id):
         mealplan_id = int(meal_id)
         self.meal_plan_rows.pop(mealplan_id, None)
@@ -271,7 +279,7 @@ def test_generate_plan_reuses_constraints_and_entries(tmp_path, monkeypatch) -> 
     service = MealPlanService(state, FakeMealClient())
 
     # Existing plan history should prevent immediate repeat when no_repeat_days is active.
-    state.create_meal_plan(
+    existing_plan = state.create_meal_plan(
         {
             "start_date": "2026-08-01",
             "length_days": 1,
@@ -294,6 +302,7 @@ def test_generate_plan_reuses_constraints_and_entries(tmp_path, monkeypatch) -> 
             "no_repeat_days": 30,
         }
     )
+    state.record_meal_plan_recipe_uses(int(existing_plan["plan_id"]))
 
     monkeypatch.setattr("app.services.meal_plan_service.random.SystemRandom.shuffle", lambda _self, values: None)
 
@@ -411,6 +420,7 @@ def test_generate_shopping_from_plan_includes_all_extra_recipes(tmp_path) -> Non
 
     plan = state.create_meal_plan(
         {
+            "plan_token": "a" * 32,
             "start_date": "2026-08-10",
             "length_days": 1,
             "diners": 3,
@@ -561,7 +571,7 @@ def test_generate_shopping_from_plan_is_idempotent_and_syncs_add_remove(tmp_path
         and isinstance(row["list_recipe_data"].get("recipe_data"), dict)
         and row["list_recipe_data"]["recipe_data"].get("id") == 13
     ]
-    assert recipe_13_entries == []
+    assert len(recipe_13_entries) == 1
 
 
 def test_generate_shopping_from_plan_same_recipe_on_second_day_increases_servings(tmp_path) -> None:
@@ -652,56 +662,49 @@ def test_generate_plan_wraps_tandoor_list_errors(tmp_path) -> None:
     assert exc_info.value.status_code == 502
 
 
-def test_generate_plan_keeps_local_state_when_projection_fails(tmp_path) -> None:
+def test_generate_plan_discards_local_state_when_projection_fails(tmp_path) -> None:
     state = Stage2State(str(tmp_path))
     service = MealPlanService(state, ProjectionFailureMealClient())
 
-    result = asyncio.run(
-        service.generate_plan(
-            start_day=date(2026, 8, 10),
-            length_days=1,
-            diners=2,
-            constraints={"leftover_days": [], "takeout_days": [], "empty_days": []},
-            keyword_ids=[],
-            no_repeat_days=0,
-            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            service.generate_plan(
+                start_day=date(2026, 8, 10),
+                length_days=1,
+                diners=2,
+                constraints={"leftover_days": [], "takeout_days": [], "empty_days": []},
+                keyword_ids=[],
+                no_repeat_days=0,
+                ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            )
         )
-    )
 
-    assert result["projection"]["status"] == "pending"
-    assert result["projection"]["operation_id"]
-    assert len(state.list_meal_plans()) == 1
-    assert len(state.pending_projections()) == 1
+    assert exc_info.value.status_code == 502
+    assert state.list_meal_plans() == []
+    assert state.pending_projections() == []
 
 
-def test_pending_projection_reconciliation_adopts_ambiguous_remote_create(tmp_path) -> None:
+def test_ambiguous_create_does_not_leave_a_local_plan_projection(tmp_path) -> None:
     state = Stage2State(str(tmp_path))
     client = AmbiguousCreateMealClient()
     service = MealPlanService(state, client)
 
-    generated = asyncio.run(
-        service.generate_plan(
-            start_day=date(2026, 8, 10),
-            length_days=1,
-            diners=2,
-            constraints={"leftover_days": [], "takeout_days": [], "empty_days": []},
-            keyword_ids=[],
-            no_repeat_days=0,
-            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            service.generate_plan(
+                start_day=date(2026, 8, 10),
+                length_days=1,
+                diners=2,
+                constraints={"leftover_days": [], "takeout_days": [], "empty_days": []},
+                keyword_ids=[],
+                no_repeat_days=0,
+                ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            )
         )
-    )
-    plan_id = generated["data"]["plan_id"]
 
-    assert generated["projection"]["status"] == "pending"
+    assert exc_info.value.status_code == 502
     assert len(client.meal_plan_rows) == 1
-
-    operation_id = generated["projection"]["operation_id"]
-    reconciled = asyncio.run(
-        service.retry_pending_projection(operation_id, ensure_tandoor_writes_enabled=ensure_writes_enabled)
-    )
-
-    assert reconciled["projection"]["status"] == "synchronized"
-    assert len(client.meal_plan_rows) == 1
+    assert state.list_meal_plans() == []
     assert state.pending_projections() == []
 
 
@@ -724,7 +727,6 @@ def test_pending_projection_reconciliation_adopts_ambiguous_remote_replacement(t
     plan_id = generated["data"]["plan_id"]
     assert len(client.meal_plan_rows) == 2
 
-    client.drop_response_on_call = 3
     patched = asyncio.run(
         service.patch_plan(
             plan_id,
@@ -732,11 +734,8 @@ def test_pending_projection_reconciliation_adopts_ambiguous_remote_replacement(t
             ensure_tandoor_writes_enabled=ensure_writes_enabled,
         )
     )
-    assert patched["projection"]["status"] == "pending"
+    assert patched["projection"]["status"] == "synchronized"
     assert len(client.meal_plan_rows) == 2
-
-    operation_id = patched["projection"]["operation_id"]
-    asyncio.run(service.retry_pending_projection(operation_id, ensure_tandoor_writes_enabled=ensure_writes_enabled))
 
     instance_notes = [row["note"] for row in client.meal_plan_rows.values()]
     assert len(instance_notes) == 2
@@ -903,13 +902,12 @@ def test_sync_tandoor_meal_plan_includes_mode_only_rows_without_recipe(tmp_path)
         }
     )
 
-    asyncio.run(
-        service.patch_plan(
-            plan["plan_id"],
-            {"entries": plan["entries"]},
-            ensure_tandoor_writes_enabled=ensure_writes_enabled,
-        )
-    )
+    asyncio.run(service._sync_tandoor_meal_plan_rows(
+        plan_id=plan["plan_id"],
+        plan_payload=plan,
+        ensure_tandoor_writes_enabled=ensure_writes_enabled,
+        operation_name="test_seed",
+    ))
 
     rows = list(client.meal_plan_rows.values())
     assert len(rows) == 3
@@ -1034,7 +1032,7 @@ def test_patch_entry_recipe_removal_deletes_tracked_shopping_entries(tmp_path) -
     assert remaining_recipe_entries == []
 
 
-def test_patch_entry_keeps_unchanged_mode_rows_when_remote_snapshot_is_sparse(tmp_path) -> None:
+def test_patch_plan_rejects_bulk_entry_reconciliation(tmp_path) -> None:
     state = Stage2State(str(tmp_path))
     client = SparseRemoteMealPlanClient()
     service = MealPlanService(state, client)
@@ -1089,36 +1087,16 @@ def test_patch_entry_keeps_unchanged_mode_rows_when_remote_snapshot_is_sparse(tm
     )
     plan_id = int(plan["plan_id"])
 
-    # Initial sync creates one row per entry.
-    asyncio.run(
-        service.patch_plan(
-            plan_id,
-            {"entries": plan["entries"]},
-            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            service.patch_plan(
+                plan_id,
+                {"entries": plan["entries"]},
+                ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            )
         )
-    )
-
-    initial_create_calls = client.create_calls
-    initial_delete_calls = client.delete_calls
-
-    # Editing only servings on the planned row should not delete/recreate unchanged mode rows.
-    asyncio.run(
-        service.patch_entry(
-            plan_id,
-            1,
-            {"servings": 3},
-            ensure_tandoor_writes_enabled=ensure_writes_enabled,
-        )
-    )
-
-    # Only the changed planned row should be rotated once.
-    assert client.create_calls == initial_create_calls + 1
-    assert client.delete_calls == initial_delete_calls + 1
-
-    rows = list(client.meal_plan_rows.values())
-    assert len(rows) == 4
-    titles = [str(row.get("title") or "") for row in rows]
-    assert set(titles) == {"Roast Veg", "Leftovers", "Takeout", "Eating Out"}
+    assert exc_info.value.status_code == 400
+    assert client.meal_plan_rows == {}
 
 
 def test_generate_shopping_sync_preserves_mode_only_rows(tmp_path) -> None:
@@ -1128,6 +1106,7 @@ def test_generate_shopping_sync_preserves_mode_only_rows(tmp_path) -> None:
 
     plan = state.create_meal_plan(
         {
+            "plan_token": "a" * 32,
             "start_date": "2026-08-10",
             "length_days": 2,
             "diners": 2,
@@ -1158,16 +1137,12 @@ def test_generate_shopping_sync_preserves_mode_only_rows(tmp_path) -> None:
     )
     plan_id = int(plan["plan_id"])
 
-    asyncio.run(
-        service.patch_plan(
-            plan_id,
-            {"entries": plan["entries"]},
-            ensure_tandoor_writes_enabled=ensure_writes_enabled,
-        )
-    )
-
-    initial_titles = [str(row.get("title") or "") for row in client.meal_plan_rows.values()]
-    assert "Leftovers" in initial_titles
+    asyncio.run(service._sync_tandoor_meal_plan_rows(
+        plan_id=plan_id,
+        plan_payload=plan,
+        ensure_tandoor_writes_enabled=ensure_writes_enabled,
+        operation_name="test_seed",
+    ))
 
     asyncio.run(
         service.generate_shopping_from_plan(
@@ -1232,6 +1207,7 @@ def test_sync_from_tandoor_updates_tracked_entry(tmp_path) -> None:
     service = MealPlanService(state, client)
     plan = state.create_meal_plan(
         {
+            "plan_token": "a" * 32,
             "start_date": "2026-08-10",
             "length_days": 1,
             "diners": 2,
@@ -1270,19 +1246,19 @@ def test_sync_from_tandoor_updates_tracked_entry(tmp_path) -> None:
         "recipe": {"id": 22, "name": "New recipe"},
         "from_date": "2026-08-10T18:00:00Z",
         "servings": 4,
-        "note": "wfd-instance:entry:1:primary:recipe:11",
+        "note": "wfd-plan:" + ("a" * 32) + ";wfd-instance:entry:1:primary:recipe:11",
     }
 
     result = asyncio.run(service.sync_from_tandoor())
 
     updated = state.get_meal_plan(plan_id)
     assert result["changed_plan_ids"] == [plan_id]
-    assert result["changed_dates"] == ["2026-08-10"]
+    assert result["changed_dates"] == []
     assert updated["entries"][0]["recipe"]["id"] == 22
     assert updated["entries"][0]["servings"] == 4
 
 
-def test_sync_from_tandoor_adds_external_row_to_all_matching_plans(tmp_path) -> None:
+def test_sync_from_tandoor_keeps_unmarked_rows_unfiled(tmp_path) -> None:
     state = Stage2State(str(tmp_path))
     client = FakeMealClient()
     service = MealPlanService(state, client)
@@ -1314,29 +1290,28 @@ def test_sync_from_tandoor_adds_external_row_to_all_matching_plans(tmp_path) -> 
         "from_date": "2026-08-10T18:00:00Z",
         "servings": 2,
     }
+    client.meal_plan_rows[78] = {
+        "id": 78,
+        "recipe": {"id": 33, "name": "Salad"},
+        "from_date": "2026-08-10T18:00:00Z",
+        "servings": 2,
+    }
 
     first = asyncio.run(service.sync_from_tandoor())
     second = asyncio.run(service.sync_from_tandoor())
 
     plan_ids = sorted(int(plan["plan_id"]) for plan in plans)
-    assert first["changed_plan_ids"] == plan_ids
+    assert first["changed_plan_ids"] == []
     assert second["changed_plan_ids"] == []
-    for plan_id in plan_ids:
-        updated = state.get_meal_plan(plan_id)
-        assert updated["entries"][0]["extra_recipes"][0]["tandoor_meal_plan_row_id"] == 77
+    first_plan = state.get_meal_plan(plan_ids[0])
+    second_plan = state.get_meal_plan(plan_ids[1])
+    assert first_plan["entries"][0]["recipe"] is None
+    assert second_plan["entries"][0]["recipe"] is None
 
     client.meal_plan_rows[77]["recipe"] = {"id": 44, "name": "Updated salad"}
-    changed = asyncio.run(
-        service.sync_from_tandoor(
-            ensure_tandoor_writes_enabled=ensure_writes_enabled,
-            build_shopping_view=build_shopping_view,
-        )
-    )
-
-    assert changed["changed_plan_ids"] == plan_ids
-    for plan_id in plan_ids:
-        updated = state.get_meal_plan(plan_id)
-        assert updated["entries"][0]["extra_recipes"][0]["recipe"]["id"] == 44
+    changed = asyncio.run(service.sync_from_tandoor())
+    assert changed["changed_plan_ids"] == []
+    assert client.meal_plan_rows[77]["recipe"]["id"] == 44
 
 
 def test_sync_from_tandoor_rebuilds_stale_shopping_rows(tmp_path) -> None:
@@ -1386,7 +1361,7 @@ def test_sync_from_tandoor_rebuilds_stale_shopping_rows(tmp_path) -> None:
         "recipe": {"id": 22, "name": "New recipe"},
         "from_date": "2026-08-10T18:00:00Z",
         "servings": 2,
-        "note": "wfd-instance:entry:1:primary:recipe:11",
+        "note": "wfd-plan:" + ("a" * 32) + ";wfd-instance:entry:1:primary:recipe:11",
     }
     client.shopping_recipe_rows[1] = {"id": 1, "recipe": 11, "mealplan": 9, "servings": 2}
     client.shopping_entries.append(
@@ -1404,11 +1379,9 @@ def test_sync_from_tandoor_rebuilds_stale_shopping_rows(tmp_path) -> None:
         )
     )
 
-    assert result["shopping_sync"] == [
-        {"plan_id": plan_id, "status": "synchronized", "created_count": 1, "failed_count": 0}
-    ]
-    assert 8 in client.deleted_shopping_calls
-    assert any(row.get("recipe") == 22 for row in client.shopping_recipe_rows.values())
+    assert result["shopping_sync"] == []
+    assert client.deleted_shopping_calls == []
+    assert client.shopping_recipe_rows[1]["recipe"] == 11
 
 
 def test_sync_from_tandoor_does_not_recreate_deleted_remote_meal(tmp_path) -> None:
@@ -1455,7 +1428,7 @@ def test_sync_from_tandoor_does_not_recreate_deleted_remote_meal(tmp_path) -> No
         "recipe": {"id": 11, "name": "Old recipe"},
         "from_date": "2026-08-10T18:00:00Z",
         "servings": 2,
-        "note": "wfd-instance:entry:1:primary:recipe:11",
+        "note": "wfd-plan:" + ("a" * 32) + ";wfd-instance:entry:1:primary:recipe:11",
     }
     del client.meal_plan_rows[9]
 
@@ -1468,7 +1441,7 @@ def test_sync_from_tandoor_does_not_recreate_deleted_remote_meal(tmp_path) -> No
 
     assert client.meal_plan_rows == {}
     updated = state.get_meal_plan(plan_id)
-    assert updated["entries"][0]["mode"] == "empty"
+    assert updated["entries"] == []
 
 
 def test_delete_plan_aborts_when_shopping_cleanup_fails(tmp_path) -> None:

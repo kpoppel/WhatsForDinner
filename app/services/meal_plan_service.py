@@ -8,7 +8,10 @@ ambiguous upstream creates reconcilable without duplicating meal-plan rows.
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import random
+import re
+import uuid
 from datetime import date, timedelta
 from typing import Any
 
@@ -33,6 +36,19 @@ class MealPlanService:
         if plan_id not in self._meal_plan_mutation_locks:
             self._meal_plan_mutation_locks[plan_id] = asyncio.Lock()
         return self._meal_plan_mutation_locks[plan_id]
+
+    def _ensure_plan_token(self, plan_id: int, plan_payload: dict[str, Any]) -> str:
+        """Persist the immutable marker used to associate Tandoor rows with one plan."""
+        plan_token = plan_payload.get("plan_token")
+        if isinstance(plan_token, str) and plan_token:
+            return plan_token
+
+        plan_token = uuid.uuid4().hex
+        updated = self._state.update_meal_plan(plan_id, {"plan_token": plan_token})
+        if updated is None:
+            raise TandoorError("Meal plan no longer exists while assigning its ownership token.")
+        plan_payload["plan_token"] = plan_token
+        return plan_token
 
     def _response(
         self,
@@ -170,19 +186,91 @@ class MealPlanService:
         return None
 
     def _normalize_plan_entries(self, entries: list[dict[str, Any]], plan_start_date: Any) -> list[dict[str, Any]]:
+        normalized, _ = self._merge_duplicate_date_entries(entries)
         start_day: date | None
         try:
             start_day = date.fromisoformat(str(plan_start_date))
         except ValueError:
             start_day = None
 
-        normalized = [row for row in entries if isinstance(row, dict)]
         normalized.sort(key=lambda row: int(row.get("day_index", 0)))
         for idx, row in enumerate(normalized):
             row["day_index"] = idx
             if start_day is not None:
                 row["date"] = (start_day + timedelta(days=idx)).isoformat()
         return normalized
+
+    def _merge_duplicate_date_entries(
+        self,
+        entries: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], dict[int, int]]:
+        """Keep one card per date while preserving recipes from merged cards."""
+        merged: list[dict[str, Any]] = []
+        by_date: dict[str, dict[str, Any]] = {}
+        entry_id_remap: dict[int, int] = {}
+
+        for raw_entry in entries:
+            if not isinstance(raw_entry, dict):
+                continue
+            entry = dict(raw_entry)
+            entry_date = entry.get("date")
+            if not isinstance(entry_date, str) or entry_date in by_date:
+                canonical = by_date.get(entry_date) if isinstance(entry_date, str) else None
+                if canonical is None:
+                    merged.append(entry)
+                    continue
+
+                duplicate_id = entry.get("entry_id")
+                canonical_id = canonical.get("entry_id")
+                if isinstance(duplicate_id, int) and isinstance(canonical_id, int):
+                    entry_id_remap[duplicate_id] = canonical_id
+
+                canonical_recipe = canonical.get("recipe")
+                duplicate_recipe = entry.get("recipe")
+                if not isinstance(canonical_recipe, dict) and isinstance(duplicate_recipe, dict):
+                    canonical["recipe"] = duplicate_recipe
+                    canonical["mode"] = entry.get("mode", "planned")
+                elif isinstance(duplicate_recipe, dict):
+                    canonical_extras = canonical.get("extra_recipes")
+                    if not isinstance(canonical_extras, list):
+                        canonical_extras = []
+                        canonical["extra_recipes"] = canonical_extras
+                    canonical_extras.append(
+                        {"recipe": duplicate_recipe, "purpose": "merged", "source": "local"}
+                    )
+
+                duplicate_extras = entry.get("extra_recipes")
+                if isinstance(duplicate_extras, list):
+                    canonical_extras = canonical.get("extra_recipes")
+                    if not isinstance(canonical_extras, list):
+                        canonical_extras = []
+                        canonical["extra_recipes"] = canonical_extras
+                    canonical_extras.extend(
+                        extra for extra in duplicate_extras if isinstance(extra, dict)
+                    )
+                continue
+
+            by_date[entry_date] = entry
+            merged.append(entry)
+
+        for entry in merged:
+            extras = entry.get("extra_recipes")
+            if not isinstance(extras, list):
+                continue
+            seen_row_ids: set[int] = set()
+            deduplicated_extras: list[dict[str, Any]] = []
+            for extra in extras:
+                if not isinstance(extra, dict):
+                    continue
+                row_id = extra.get("tandoor_meal_plan_row_id")
+                if isinstance(row_id, int):
+                    if row_id in seen_row_ids:
+                        continue
+                    seen_row_ids.add(row_id)
+                deduplicated_extras.append(extra)
+            entry["extra_recipes"] = deduplicated_extras
+
+        return merged, entry_id_remap
 
     def _enrich_plan_recipe_urls(self, plan: dict[str, Any] | None) -> dict[str, Any] | None:
         if not isinstance(plan, dict):
@@ -463,23 +551,180 @@ class MealPlanService:
         for row in rows:
             note = row.get("note")
             row_id = row.get("id")
-            if not isinstance(note, str) or not note.startswith("wfd-instance:"):
+            if not isinstance(note, str) or not note.startswith("wfd-plan:"):
                 continue
             if not isinstance(row_id, int) or row_id < 1:
                 continue
-            by_instance[note.removeprefix("wfd-instance:")] = row
+            _, separator, instance_key = note.partition(";wfd-instance:")
+            if not separator or not instance_key:
+                continue
+            by_instance[note] = row
         return by_instance
+
+    def _parse_tandoor_plan_marker(self, row: dict[str, Any]) -> tuple[str, str] | None:
+        """Return immutable server ownership fields from a Tandoor row note."""
+        note = row.get("note")
+        if not isinstance(note, str):
+            return None
+        match = re.fullmatch(r"wfd-plan:([0-9a-f]{32});wfd-instance:(.+)", note)
+        if match is None:
+            return None
+        return match.group(1), match.group(2)
+
+    def _entry_id_from_instance_key(self, instance_key: str) -> int | None:
+        """Extract the server entry identity from an immutable instance marker."""
+        match = re.match(r"entry:(\d+):", instance_key)
+        return int(match.group(1)) if match is not None else None
+
+    def _entry_from_tandoor_row(
+        self,
+        *,
+        row: dict[str, Any],
+        instance_key: str,
+        previous: dict[str, Any] | None,
+        plan_start_date: str,
+    ) -> dict[str, Any] | None:
+        """Build one local presentation entry from one authoritative Tandoor row."""
+        entry_id = self._entry_id_from_instance_key(instance_key)
+        raw_date = str(row.get("from_date") or "").split("T", 1)[0]
+        row_id = row.get("id")
+        servings = row.get("servings")
+        if entry_id is None or not isinstance(row_id, int) or not isinstance(servings, int):
+            return None
+        try:
+            day_index = (date.fromisoformat(raw_date) - date.fromisoformat(plan_start_date)).days
+        except ValueError:
+            return None
+
+        recipe_data = row.get("recipe")
+        recipe_id = recipe_data.get("id") if isinstance(recipe_data, dict) else recipe_data
+        recipe_title = (
+            recipe_data.get("name") or recipe_data.get("title")
+            if isinstance(recipe_data, dict)
+            else row.get("title")
+        )
+        mode_match = re.fullmatch(r"entry:\d+:mode:(leftover|takeout|empty)", instance_key)
+        mode = mode_match.group(1) if mode_match is not None else "planned"
+        recipe = (
+            {"id": recipe_id, "title": str(recipe_title or f"Recipe {recipe_id}"), "url": self._recipe_url(recipe_id)}
+            if isinstance(recipe_id, int)
+            else None
+        )
+        return {
+            "entry_id": entry_id,
+            "day_index": day_index,
+            "date": raw_date,
+            "mode": mode,
+            "recipe": recipe,
+            "extra_recipes": [],
+            "servings": servings,
+            "reminder_enabled": bool(previous.get("reminder_enabled", False)) if previous else False,
+            "reminder_text": str(previous.get("reminder_text") or "") if previous else "",
+            "notes": str(previous.get("notes") or "") if previous else "",
+        }
 
     async def sync_from_tandoor(
         self,
         ensure_tandoor_writes_enabled=None,
         build_shopping_view=None,
     ) -> dict[str, Any]:
-        """Reconcile local meal-plan entries with the current Tandoor rows."""
+        """Rebuild local plan projections from the authoritative Tandoor snapshot."""
         try:
             payload = await self._client.list_meal_plans(limit=500)
         except TandoorError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        rows_by_plan_token: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+        for row in self._extract_results(payload):
+            marker = self._parse_tandoor_plan_marker(row)
+            if marker is None:
+                continue
+            plan_token, instance_key = marker
+            rows_by_plan_token.setdefault(plan_token, []).append((instance_key, row))
+
+        changed_plan_ids: list[int] = []
+        for plan in self._state.list_meal_plans():
+            plan_id = plan.get("plan_id")
+            if not isinstance(plan_id, int):
+                continue
+            plan_token = self._ensure_plan_token(plan_id, plan)
+            entries = plan.get("entries")
+            if not isinstance(entries, list):
+                entries = []
+            previous_entries: dict[int, dict[str, Any]] = {}
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                entry_id = entry.get("entry_id")
+                if isinstance(entry_id, int):
+                    previous_entries[entry_id] = entry
+            rebuilt_entries: dict[int, dict[str, Any]] = {}
+            rebuilt_sync: dict[str, dict[str, Any]] = {}
+            for instance_key, row in rows_by_plan_token.get(plan_token, []):
+                entry = self._entry_from_tandoor_row(
+                    row=row,
+                    instance_key=instance_key,
+                    previous=previous_entries.get(self._entry_id_from_instance_key(instance_key)),
+                    plan_start_date=str(plan.get("start_date") or ""),
+                )
+                if entry is None:
+                    continue
+                entry_id = int(entry["entry_id"])
+                if ":extra:" in instance_key:
+                    primary = rebuilt_entries.setdefault(
+                        entry_id,
+                        {
+                            **entry,
+                            "recipe": None,
+                            "mode": "planned",
+                            "extra_recipes": [],
+                        },
+                    )
+                    primary["extra_recipes"].append({"recipe": entry["recipe"], "purpose": "extra", "source": "tandoor", "tandoor_meal_plan_row_id": row["id"]})
+                else:
+                    existing = rebuilt_entries.get(entry_id)
+                    if existing is not None:
+                        entry["extra_recipes"] = existing["extra_recipes"]
+                    rebuilt_entries[entry_id] = entry
+                recipe_id = entry["recipe"].get("id") if isinstance(entry["recipe"], dict) else None
+                rebuilt_sync[instance_key] = {
+                    "instance_key": instance_key,
+                    "entry_id": entry_id,
+                    "recipe_id": recipe_id,
+                    "recipe_title": entry["recipe"].get("title") if isinstance(entry["recipe"], dict) else None,
+                    "role": "extra" if ":extra:" in instance_key else "primary",
+                    "slot_index": None,
+                    "purpose": entry["mode"],
+                    "date": entry["date"],
+                    "servings": entry["servings"],
+                    "meal_plan_row_id": row["id"],
+                    "shopping_recipe_id": None,
+                    "shopping_activated": False,
+                }
+            for entry_id, previous_entry in previous_entries.items():
+                if entry_id in rebuilt_entries:
+                    continue
+                if isinstance(previous_entry.get("recipe"), dict):
+                    continue
+                extra_recipes = previous_entry.get("extra_recipes")
+                if isinstance(extra_recipes, list) and extra_recipes:
+                    continue
+                rebuilt_entries[entry_id] = dict(previous_entry)
+            next_entries = sorted(rebuilt_entries.values(), key=lambda entry: (entry["day_index"], entry["entry_id"]))
+            if entries != next_entries:
+                self._state.update_meal_plan(plan_id, {"entries": next_entries})
+                changed_plan_ids.append(plan_id)
+            self._state.set_meal_plan_instance_sync(plan_id, rebuilt_sync)
+            self._state.record_meal_plan_recipe_uses(plan_id)
+
+        return {
+            "source": "tandoor-projection",
+            "revision": self._state.current_revision(),
+            "changed_plan_ids": sorted(changed_plan_ids),
+            "changed_dates": [],
+            "shopping_stale_plan_ids": [],
+            "shopping_sync": [],
+        }
 
         rows = self._extract_results(payload)
         rows_by_instance: dict[str, dict[str, Any]] = {}
@@ -505,12 +750,25 @@ class MealPlanService:
 
         local_plans = self._state.list_meal_plans()
         plan_ids_by_date: dict[str, list[int]] = {}
+        globally_tracked_row_ids: set[int] = set()
         for plan in local_plans:
             plan_id = plan.get("plan_id")
             entries = plan.get("entries")
             if not isinstance(plan_id, int) or not isinstance(entries, list):
                 continue
+            for instance in self._state.get_meal_plan_instance_sync(plan_id).values():
+                if isinstance(instance, dict):
+                    row_id = instance.get("meal_plan_row_id")
+                    if isinstance(row_id, int):
+                        globally_tracked_row_ids.add(row_id)
             for entry in entries:
+                if isinstance(entry, dict):
+                    extra_recipes = entry.get("extra_recipes")
+                    if isinstance(extra_recipes, list):
+                        for extra in extra_recipes:
+                            row_id = extra.get("tandoor_meal_plan_row_id") if isinstance(extra, dict) else None
+                            if isinstance(row_id, int):
+                                globally_tracked_row_ids.add(row_id)
                 entry_date = entry.get("date") if isinstance(entry, dict) else None
                 if isinstance(entry_date, str):
                     plan_ids_by_date.setdefault(entry_date, []).append(plan_id)
@@ -529,6 +787,39 @@ class MealPlanService:
             plan_changed = False
             plan_shopping_stale = False
             tracked_sync = self._state.get_meal_plan_instance_sync(plan_id)
+            normalized_entries, entry_id_remap = self._merge_duplicate_date_entries(entries)
+            if normalized_entries != entries:
+                entries = normalized_entries
+                plan_changed = True
+            if entry_id_remap:
+                remapped_sync: dict[str, dict[str, Any]] = {}
+                for instance_key, instance in tracked_sync.items():
+                    if not isinstance(instance, dict):
+                        continue
+                    next_instance = dict(instance)
+                    entry_id = next_instance.get("entry_id")
+                    if isinstance(entry_id, int) and entry_id in entry_id_remap:
+                        next_instance["entry_id"] = entry_id_remap[entry_id]
+                        recipe_id = next_instance.get("recipe_id")
+                        role = str(next_instance.get("role") or "primary")
+                        if isinstance(recipe_id, int):
+                            instance_key = self._instance_key_for_recipe(
+                                entry_id=entry_id_remap[entry_id],
+                                role=role,
+                                recipe_id=recipe_id,
+                                slot_index=next_instance.get("slot_index")
+                                if isinstance(next_instance.get("slot_index"), int)
+                                else None,
+                            )
+                        else:
+                            instance_key = self._instance_key_for_mode(
+                                entry_id=entry_id_remap[entry_id],
+                                mode=str(next_instance.get("purpose") or "empty"),
+                            )
+                        next_instance["instance_key"] = instance_key
+                        plan_changed = True
+                    remapped_sync[instance_key] = next_instance
+                tracked_sync = remapped_sync
             tracked_by_row_id: dict[int, dict[str, Any]] = {}
             for instance in tracked_sync.values():
                 if not isinstance(instance, dict):
@@ -697,7 +988,9 @@ class MealPlanService:
 
                 for remote_row in rows_by_date.get(entry_date, []):
                     row_id = remote_row.get("id")
-                    if not isinstance(row_id, int) or row_id in tracked_by_row_id:
+                    if not isinstance(row_id, int) or row_id in globally_tracked_row_ids:
+                        continue
+                    if plan_id != min(plan_ids_by_date.get(entry_date, [plan_id])):
                         continue
                     remote_recipe = remote_row.get("recipe")
                     recipe_id = remote_recipe.get("id") if isinstance(remote_recipe, dict) else remote_recipe
@@ -755,6 +1048,7 @@ class MealPlanService:
                         "shopping_recipe_id": None,
                         "shopping_activated": False,
                     }
+                    globally_tracked_row_ids.add(row_id)
 
             if plan_changed:
                 self._state.update_meal_plan(plan_id, {"entries": entries})
@@ -852,7 +1146,10 @@ class MealPlanService:
             "to_date": iso_date,
             "meal_type": meal_type_payload,
             "addshopping": False,
-            "note": f"wfd-instance:{instance.get('instance_key')}",
+            "note": (
+                f"wfd-plan:{instance['plan_token']};"
+                f"wfd-instance:{instance['instance_key']}"
+            ),
         }
         if isinstance(recipe_id, int):
             payload["recipe"] = recipe_id
@@ -861,6 +1158,31 @@ class MealPlanService:
         if not isinstance(row_id, int) or row_id < 1:
             raise TandoorError("Tandoor meal-plan create did not return an id.")
         return row_id
+
+    async def _update_meal_plan_row_for_instance(self, row_id: int, instance: dict[str, Any]) -> None:
+        """Update one known Tandoor row without changing its upstream identity."""
+        recipe_id = instance.get("recipe_id")
+        servings = instance.get("servings")
+        from_date = instance.get("date")
+        plan_token = instance.get("plan_token")
+        instance_key = instance.get("instance_key")
+        if (
+            not isinstance(servings, int)
+            or not isinstance(from_date, str)
+            or not isinstance(plan_token, str)
+            or not isinstance(instance_key, str)
+        ):
+            raise TandoorError("Cannot update meal-plan row: instance is missing required fields.")
+
+        payload: dict[str, Any] = {
+            "servings": servings,
+            "from_date": f"{from_date}T18:00:00Z",
+            "to_date": f"{from_date}T18:00:00Z",
+            "note": f"wfd-plan:{plan_token};wfd-instance:{instance_key}",
+        }
+        if isinstance(recipe_id, int):
+            payload["recipe"] = recipe_id
+        await self._client.update_meal_plan(row_id, payload)
 
     def _serialize_instance_sync(self, instance_sync: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
         serialized: dict[str, dict[str, Any]] = {}
@@ -900,6 +1222,9 @@ class MealPlanService:
             entries = []
 
         desired_sync = self._desired_meal_plan_row_sync(plan_payload, entries)
+        plan_token = self._ensure_plan_token(plan_id, plan_payload)
+        for desired_row in desired_sync.values():
+            desired_row["plan_token"] = plan_token
         pending_operation_ids = self._pending_operation_ids_for_plan(plan_id)
         remote_by_instance = (
             await self._remote_meal_plan_rows_by_instance()
@@ -934,7 +1259,9 @@ class MealPlanService:
         for instance_key in sorted(desired_sync.keys()):
             desired_row = dict(desired_sync[instance_key])
             previous_row = previous_sync.get(instance_key)
-            remote_row = remote_by_instance.get(instance_key)
+            remote_row = remote_by_instance.get(
+                f"wfd-plan:{plan_token};wfd-instance:{instance_key}"
+            )
 
             if isinstance(remote_row, dict):
                 remote_row_id = remote_row.get("id")
@@ -945,7 +1272,11 @@ class MealPlanService:
                         desired_row["shopping_activated"] = bool(previous_row.get("shopping_activated", False))
                     next_sync[instance_key] = desired_row
                     continue
-                await self._delete_meal_plan_row_if_present(remote_row_id)
+                if isinstance(remote_row_id, int):
+                    await self._update_meal_plan_row_for_instance(remote_row_id, desired_row)
+                    desired_row["meal_plan_row_id"] = remote_row_id
+                    next_sync[instance_key] = desired_row
+                    continue
 
             if isinstance(previous_row, dict):
                 unchanged = (
@@ -962,7 +1293,13 @@ class MealPlanService:
                     next_sync[instance_key] = desired_row
                     continue
 
-                await self._delete_meal_plan_row_if_present(previous_row_id)
+                if isinstance(previous_row_id, int):
+                    await self._update_meal_plan_row_for_instance(previous_row_id, desired_row)
+                    desired_row["meal_plan_row_id"] = previous_row_id
+                    desired_row["shopping_recipe_id"] = None
+                    desired_row["shopping_activated"] = False
+                    next_sync[instance_key] = desired_row
+                    continue
 
             created_row_id = await self._create_meal_plan_row_for_instance(desired_row)
             desired_row["meal_plan_row_id"] = created_row_id
@@ -1025,6 +1362,14 @@ class MealPlanService:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         return self._response("tandoor+local-state", self._enrich_plan_recipe_urls(plan))
+
+    async def _canonical_plan_response(self, plan_id: int) -> dict[str, Any]:
+        """Reread Tandoor and return the resulting authoritative plan projection."""
+        await self.sync_from_tandoor()
+        plan = self._state.get_meal_plan(plan_id)
+        if plan is None:
+            raise HTTPException(status_code=404, detail="Meal plan is absent from the canonical projection.")
+        return self._response("tandoor-projection", self._enrich_plan_recipe_urls(plan))
 
     async def generate_plan(
         self,
@@ -1135,6 +1480,7 @@ class MealPlanService:
             )
 
         plan_payload = {
+            "plan_token": uuid.uuid4().hex,
             "start_date": start_day.isoformat(),
             "length_days": length_days,
             "diners": diners,
@@ -1158,22 +1504,26 @@ class MealPlanService:
                     operation_name="meal_plan_generate",
                 )
             except TandoorError as exc:
-                return self._pending_projection_response(
-                    self._enrich_plan_recipe_urls(stored),
-                    "generate",
-                    {"plan_id": stored["plan_id"]},
-                    str(exc),
-                )
+                self._state.delete_meal_plan(int(stored["plan_id"]))
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
         self._state.append_sync_event("meal_plan_generated", stored)
-        return self._response("tandoor+local-state", self._enrich_plan_recipe_urls(stored))
+        if ensure_tandoor_writes_enabled is not None:
+            return await self._canonical_plan_response(int(stored["plan_id"]))
+        return self._response("local-state", self._enrich_plan_recipe_urls(stored))
 
     async def patch_plan(self, plan_id: int, payload: dict[str, Any], ensure_tandoor_writes_enabled=None) -> dict:
         """Patch one plan under its per-plan lock and synchronize its rows."""
+        if "entries" in payload:
+            raise HTTPException(
+                status_code=400,
+                detail="Bulk meal-plan entry replacement is not supported; mutate one entry at a time.",
+            )
         lock = self._get_plan_mutation_lock(plan_id)
         async with lock:
             current = self._state.get_meal_plan(plan_id)
             if current is None:
                 raise HTTPException(status_code=404, detail="Meal plan not found.")
+            previous_sync = self._state.get_meal_plan_instance_sync(plan_id)
 
             mutable: dict[str, Any] = {}
             start_date_override: str | None = None
@@ -1191,9 +1541,6 @@ class MealPlanService:
             for key in ("start_date", "length_days", "diners", "constraints", "keyword_ids"):
                 if key in payload and key != "start_date":
                     mutable[key] = payload[key]
-
-            if "entries" in payload and isinstance(payload["entries"], list):
-                mutable["entries"] = payload["entries"]
 
             if start_date_override is not None:
                 entries_source = mutable.get("entries")
@@ -1219,14 +1566,13 @@ class MealPlanService:
                         operation_name="meal_plan_patch",
                     )
                 except TandoorError as exc:
-                    return self._pending_projection_response(
-                        self._enrich_plan_recipe_urls(updated),
-                        "patch",
-                        {"plan_id": plan_id, "payload": payload},
-                        str(exc),
-                    )
+                    self._state.update_meal_plan(plan_id, current)
+                    self._state.set_meal_plan_instance_sync(plan_id, previous_sync)
+                    raise HTTPException(status_code=502, detail=str(exc)) from exc
 
             self._state.append_sync_event("meal_plan_updated", {"plan_id": plan_id, "payload": payload})
+            if ensure_tandoor_writes_enabled is not None:
+                return await self._canonical_plan_response(plan_id)
             return self._response("local-state", self._enrich_plan_recipe_urls(updated))
 
     async def add_entry(self, plan_id: int, payload: dict[str, Any], ensure_tandoor_writes_enabled=None) -> dict:
@@ -1236,6 +1582,8 @@ class MealPlanService:
             plan = self._state.get_meal_plan(plan_id)
             if plan is None:
                 raise HTTPException(status_code=404, detail="Meal plan not found.")
+            previous_sync = self._state.get_meal_plan_instance_sync(plan_id)
+            previous_plan = deepcopy(plan)
 
             entries = plan.get("entries")
             if not isinstance(entries, list):
@@ -1286,15 +1634,14 @@ class MealPlanService:
                         operation_name="meal_plan_add_entry",
                     )
                 except TandoorError as exc:
-                    return self._pending_projection_response(
-                        self._enrich_plan_recipe_urls(updated),
-                        "add_entry",
-                        {"plan_id": plan_id, "entry": entry},
-                        str(exc),
-                    )
+                    self._state.update_meal_plan(plan_id, previous_plan)
+                    self._state.set_meal_plan_instance_sync(plan_id, previous_sync)
+                    raise HTTPException(status_code=502, detail=str(exc)) from exc
 
             self._state.append_sync_event("meal_plan_entry_added", {"plan_id": plan_id, "entry": entry})
 
+            if ensure_tandoor_writes_enabled is not None:
+                return await self._canonical_plan_response(plan_id)
             return self._response("local-state", self._enrich_plan_recipe_urls(updated))
 
     async def patch_entry(
@@ -1309,6 +1656,8 @@ class MealPlanService:
             plan = self._state.get_meal_plan(plan_id)
             if plan is None:
                 raise HTTPException(status_code=404, detail="Meal plan not found.")
+            previous_plan = deepcopy(plan)
+            previous_sync = self._state.get_meal_plan_instance_sync(plan_id)
 
             entry = self._find_entry(plan, entry_id)
             if entry is None:
@@ -1389,18 +1738,17 @@ class MealPlanService:
                         operation_name="meal_plan_patch_entry",
                     )
                 except TandoorError as exc:
-                    return self._pending_projection_response(
-                        self._enrich_plan_recipe_urls(updated),
-                        "patch_entry",
-                        {"plan_id": plan_id, "entry_id": entry_id, "payload": payload},
-                        str(exc),
-                    )
+                    self._state.update_meal_plan(plan_id, previous_plan)
+                    self._state.set_meal_plan_instance_sync(plan_id, previous_sync)
+                    raise HTTPException(status_code=502, detail=str(exc)) from exc
 
             self._state.append_sync_event(
                 "meal_plan_entry_updated",
                 {"plan_id": plan_id, "entry_id": entry_id, "payload": payload},
             )
 
+            if ensure_tandoor_writes_enabled is not None:
+                return await self._canonical_plan_response(plan_id)
             return self._response("local-state", self._enrich_plan_recipe_urls(updated))
 
     async def delete_entry(self, plan_id: int, entry_id: int, ensure_tandoor_writes_enabled=None) -> dict:
@@ -1409,6 +1757,8 @@ class MealPlanService:
             plan = self._state.get_meal_plan(plan_id)
             if plan is None:
                 raise HTTPException(status_code=404, detail="Meal plan not found.")
+            previous_plan = deepcopy(plan)
+            previous_sync = self._state.get_meal_plan_instance_sync(plan_id)
 
             entries = plan.get("entries")
             if not isinstance(entries, list):
@@ -1437,15 +1787,14 @@ class MealPlanService:
                         operation_name="meal_plan_delete_entry",
                     )
                 except TandoorError as exc:
-                    return self._pending_projection_response(
-                        self._enrich_plan_recipe_urls(updated),
-                        "delete_entry",
-                        {"plan_id": plan_id, "entry_id": entry_id},
-                        str(exc),
-                    )
+                    self._state.update_meal_plan(plan_id, previous_plan)
+                    self._state.set_meal_plan_instance_sync(plan_id, previous_sync)
+                    raise HTTPException(status_code=502, detail=str(exc)) from exc
 
             self._state.append_sync_event("meal_plan_entry_deleted", {"plan_id": plan_id, "entry_id": entry_id})
 
+            if ensure_tandoor_writes_enabled is not None:
+                return await self._canonical_plan_response(plan_id)
             return self._response("local-state", updated)
 
     async def delete_plan(self, plan_id: int, ensure_tandoor_writes_enabled=None) -> dict:
@@ -1456,26 +1805,20 @@ class MealPlanService:
         if ensure_tandoor_writes_enabled is not None:
             ensure_tandoor_writes_enabled("meal_plan_delete")
 
-        previous_sync = self._state.get_meal_plan_instance_sync(plan_id)
-        deleted = self._state.delete_meal_plan(plan_id)
-        if deleted is None:
-            raise HTTPException(status_code=404, detail="Meal plan not found.")
-
         if ensure_tandoor_writes_enabled is not None:
             try:
                 await self._delete_all_tandoor_meal_plan_rows(
                     plan_id=plan_id,
-                    previous_sync=previous_sync,
+                    previous_sync=self._state.get_meal_plan_instance_sync(plan_id),
                     ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
                     operation_name="meal_plan_delete",
                 )
             except TandoorError as exc:
-                return self._pending_projection_response(
-                    {"deleted": True, "plan_id": plan_id},
-                    "delete_plan",
-                    {"plan_id": plan_id, "instance_sync": previous_sync},
-                    str(exc),
-                )
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        deleted = self._state.delete_meal_plan(plan_id)
+        if deleted is None:
+            raise HTTPException(status_code=404, detail="Meal plan not found.")
 
         self._state.append_sync_event("meal_plan_deleted", {"plan_id": plan_id})
         return self._response("local-state", {"deleted": True, "plan_id": plan_id})
@@ -1595,7 +1938,7 @@ class MealPlanService:
         mode: str = "sync",
         ensure_tandoor_writes_enabled,
         build_shopping_view,
-        sync_meal_plan_rows: bool = True,
+        sync_meal_plan_rows: bool = False,
     ) -> dict:
         def normalize_previous_instance_sync() -> dict[str, dict[str, Any]]:
             normalized: dict[str, dict[str, Any]] = {}
@@ -1674,24 +2017,22 @@ class MealPlanService:
                 if not isinstance(entries, list):
                     entries = []
 
-                # Ensure meal-plan row sync is current before activating shopping.
+                # Refresh the cached projection before deriving shopping entries.
                 if sync_meal_plan_rows:
-                    try:
-                        await self._sync_tandoor_meal_plan_rows(
-                            plan_id=plan_id,
-                            plan_payload=plan,
-                            ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
-                            operation_name="meal_plan_to_shopping_list_sync_rows",
-                        )
-                    except TandoorError as exc:
-                        raise HTTPException(status_code=502, detail=str(exc)) from exc
+                    await self.sync_from_tandoor()
+                    plan = self._state.get_meal_plan(plan_id)
+                    if plan is None:
+                        raise HTTPException(status_code=404, detail="Meal plan not found.")
+                    entries = plan.get("entries")
+                    if not isinstance(entries, list):
+                        entries = []
 
                 created: list[dict[str, Any]] = []
                 failed: list[dict[str, Any]] = []
 
                 previous_sync = normalize_previous_instance_sync()
                 desired_sync = self._desired_instance_sync(plan, entries)
-                next_sync: dict[str, dict[str, Any]] = dict(previous_sync)
+                next_sync: dict[str, dict[str, Any]] = {}
                 recipe_source = "regenerate_missing" if mode == "regenerate_missing" else "sync"
 
                 for instance_key in sorted(desired_sync.keys()):
@@ -1711,31 +2052,19 @@ class MealPlanService:
 
                     meal_plan_row_id = desired_row.get("meal_plan_row_id")
                     if not isinstance(meal_plan_row_id, int) or meal_plan_row_id < 1:
-                        try:
-                            meal_plan_row_id = await self._create_meal_plan_row_for_instance(desired_row)
-                        except TandoorError as exc:
+                        if sync_meal_plan_rows:
                             failed.append(
                                 {
-                                    "operation": "meal_plan_upsert",
+                                    "operation": "shopping_generation",
                                     "recipe_source": recipe_source,
                                     "instance_key": instance_key,
                                     "recipe_id": desired_row.get("recipe_id"),
-                                    "errors": [str(exc)],
+                                    "errors": ["Meal-plan row is absent from the canonical Tandoor projection."],
                                 }
                             )
-                            if isinstance(previous_row, dict):
-                                next_sync[instance_key] = dict(previous_row)
                             continue
-
-                        created.append(
-                            {
-                                "operation": "meal_plan_upsert",
-                                "recipe_source": recipe_source,
-                                "instance_key": instance_key,
-                                "recipe_id": desired_row.get("recipe_id"),
-                                "result": {"id": meal_plan_row_id},
-                            }
-                        )
+                        desired_row["plan_token"] = self._ensure_plan_token(plan_id, plan)
+                        meal_plan_row_id = await self._create_meal_plan_row_for_instance(desired_row)
                         desired_row["meal_plan_row_id"] = meal_plan_row_id
                         desired_row["shopping_recipe_id"] = None
                         desired_row["shopping_activated"] = False

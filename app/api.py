@@ -766,7 +766,7 @@ async def generate_meal_plan(payload: GenerateMealPlanRequest = Body(...)) -> di
 
 @router.get("/meal-plans/stored")
 async def list_stored_meal_plans() -> dict:
-    """List local meal-plan summaries in newest-first order."""
+    """List cached summaries rebuilt from authoritative Tandoor meal rows."""
     plans = stage2_state.list_meal_plans()
     summary: list[dict[str, Any]] = []
     for plan in plans:
@@ -785,7 +785,7 @@ async def list_stored_meal_plans() -> dict:
     summary.sort(key=_stored_plan_sort_key)
 
     return {
-        "source": "local-state",
+        "source": "tandoor-projection",
         "revision": stage2_state.current_revision(),
         "count": len(summary),
         "data": summary,
@@ -803,12 +803,12 @@ async def sync_meal_plans() -> dict:
 
 @router.get("/meal-plans/{plan_id}")
 async def get_meal_plan_stage2(plan_id: int) -> dict:
-    """Return one local meal plan with enriched recipe links."""
+    """Return one cached projection rebuilt from authoritative Tandoor rows."""
     plan = stage2_state.get_meal_plan(plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="Meal plan not found.")
     return {
-        "source": "local-state",
+        "source": "tandoor-projection",
         "revision": stage2_state.current_revision(),
         "projection": {"status": "synchronized"},
         "data": _enrich_plan_recipe_urls(plan),
@@ -826,7 +826,7 @@ async def delete_stored_meal_plan(plan_id: int) -> dict:
 
 @router.patch("/meal-plans/{plan_id}")
 async def patch_meal_plan_stage2(plan_id: int, payload: MealPlanPatchRequest = Body(...)) -> dict:
-    """Patch one local plan through the meal-plan service."""
+    """Patch plan metadata through the meal-plan service."""
     return await _meal_plan_service().patch_plan(
         plan_id,
         payload.model_dump(mode="python", exclude_unset=True),
@@ -882,6 +882,7 @@ async def meal_plan_to_shopping_list(
         mode=mode,
         ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
         build_shopping_view=_build_shopping_view,
+        sync_meal_plan_rows=True,
     )
 
 
@@ -969,9 +970,9 @@ async def retry_pending_projection(operation_id: str) -> dict:
     if pending is None:
         raise HTTPException(status_code=404, detail="Pending projection not found.")
     if pending.get("domain") == "meal_plan":
-        return await _meal_plan_service().retry_pending_projection(
-            operation_id,
-            ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
+        raise HTTPException(
+            status_code=410,
+            detail="Legacy meal-plan projections cannot be retried; synchronize from Tandoor instead.",
         )
     if pending.get("domain") == "shopping":
         return await _shopping_service().retry_pending_reconciliation(

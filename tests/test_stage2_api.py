@@ -34,6 +34,14 @@ class MealPlanRowStatefulClient:
         self.meal_plan_rows[row_id] = row
         return row
 
+    async def update_meal_plan(self, meal_id, payload):
+        row_id = int(meal_id)
+        row = self.meal_plan_rows.get(row_id)
+        if not isinstance(row, dict):
+            raise RuntimeError("meal-plan row missing")
+        row.update(payload)
+        return row
+
     async def delete_meal_plan(self, meal_id):
         mealplan_id = int(meal_id)
         self.meal_plan_rows.pop(mealplan_id, None)
@@ -122,11 +130,12 @@ def test_retry_pending_meal_plan_projection_reuses_marker(monkeypatch, tmp_path)
         "from_date": "2026-08-24",
         "to_date": "2026-08-24",
         "recipe": 301,
-        "note": "wfd-instance:entry:1:primary:recipe:301",
+            "note": "wfd-plan:" + ("a" * 32) + ";wfd-instance:entry:1:primary:recipe:301",
     }
     fake_client.next_meal_plan_row_id = 2
     monkeypatch.setattr("app.api.client", fake_client)
     plan = state.create_meal_plan({
+            "plan_token": "a" * 32,
         "diners": 2,
         "entries": [{
             "entry_id": 1,
@@ -144,9 +153,8 @@ def test_retry_pending_meal_plan_projection_reuses_marker(monkeypatch, tmp_path)
 
     response = client.post(f"/api/v1/sync/pending/{pending['operation_id']}/retry")
 
-    assert response.status_code == 200
+    assert response.status_code == 410
     assert len(fake_client.meal_plan_rows) == 1
-    assert state.pending_projections() == []
 
 
 class MealPlanShoppingStatefulClient:

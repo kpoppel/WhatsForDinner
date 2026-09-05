@@ -18,6 +18,13 @@ As a user the flow of work would ideally be something like:
 3. We need to change the meal plan -> change the meal plan
 4. We need to change the shopping list -> update the shopping list -> family members sync when home -> shop
 
+# Governance
+- Tandoor is authoritative for meal-plan rows and recipes.
+- The server maintains the synchronized projection and app-specific metadata.
+- The client only edits/visualizes server state and caches it for offline viewing.
+- Local state must not resurrect or preserve meal data that Tandoor no longer contains.
+- Meal-plan offline mode remains read-only.
+
 # Requirements
 These are the requirements the project must ultimately fulfil:
 

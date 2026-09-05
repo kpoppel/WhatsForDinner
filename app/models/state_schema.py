@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CURRENT_STATE_SCHEMA_VERSION = 5
+CURRENT_STATE_SCHEMA_VERSION = 6
 
 
 class MealPlanRulesModel(BaseModel):

@@ -8,6 +8,7 @@ import {
   assertOnlineMutation,
   cachePlanDetail,
   cachePlanListRows,
+  invalidateMealPlanDetails,
   mealPlanCommands,
   recipeCommands,
   settingsCommands,
@@ -1216,12 +1217,17 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
 
     let plans = [];
     let listFromApi = false;
+    const changedPlanIds = new Set();
 
     if (!isMealPlanOfflineReadOnly()) {
       const syncPayload = await mealPlanCommands.sync();
       assertRequiredFields(syncPayload, ["revision", "changed_plan_ids"], "Meal plan sync response");
       setRevision(syncPayload.revision, "meal-plan-sync");
       if (syncPayload.changed_plan_ids instanceof Array && syncPayload.changed_plan_ids.length > 0) {
+        for (const planId of syncPayload.changed_plan_ids) {
+          changedPlanIds.add(Number(planId));
+        }
+        invalidateMealPlanDetails(changedPlanIds);
         publishDataChanged();
       }
     }
@@ -1265,7 +1271,10 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
       }
     }
 
-    if (Number.isInteger(activePlanId) && !planPreviewTitlesById.has(activePlanId)) {
+    if (
+      Number.isInteger(activePlanId)
+      && (!planPreviewTitlesById.has(activePlanId) || changedPlanIds.has(activePlanId))
+    ) {
       try {
         const activePayload = await mealPlanCommands.get(activePlanId);
         assertRequiredFields(activePayload, ["data"], "Meal plan detail response");

@@ -16,6 +16,7 @@ import {
   setRevision,
   setSyncState,
   takeShoppingPendingChanges,
+  mealPlanCommands,
 } from "./store/commands.js";
 import { SHOPPING_STATUSES } from "./store/index.js";
 import { selectPendingProjections, selectShoppingPendingChanges } from "./store/selectors.js";
@@ -72,6 +73,13 @@ export async function refreshAndSyncIfNeeded() {
     setApiReachable(false);
     updateStatusBadges();
     return;
+  }
+  const mealPlanPayload = await mealPlanCommands.sync();
+  if (Number.isInteger(mealPlanPayload.revision)) {
+    setRevision(mealPlanPayload.revision, "meal-plan-refresh");
+  }
+  if (Array.isArray(mealPlanPayload.changed_plan_ids) && mealPlanPayload.changed_plan_ids.length > 0) {
+    publishDataChanged();
   }
   await refresh();
   if (selectShoppingPendingChanges().length > 0) {

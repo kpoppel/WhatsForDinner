@@ -270,6 +270,16 @@ class Stage2State:
             history = data.get("recipe_use_history")
             return deepcopy(history) if isinstance(history, list) else []
 
+    def record_meal_plan_recipe_uses(self, plan_id: int) -> None:
+        """Confirm recipe history after its authoritative projection is available."""
+        with self._lock:
+            data = self._load()
+            meal_plan = data["meal_plans"].get(str(plan_id))
+            if not isinstance(meal_plan, dict):
+                return
+            self._record_recipe_uses(data, meal_plan)
+            self._save(data)
+
     def current_revision(self) -> int:
         """Read the monotonic revision assigned to the latest saved state."""
         with self._lock:
@@ -407,14 +417,13 @@ class Stage2State:
         }
 
     def create_meal_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Allocate, persist, and index a new local meal plan."""
+        """Allocate and persist new plan metadata before its upstream rows are created."""
         with self._lock:
             data = self._load()
             plan_id = int(data.get("next_meal_plan_id", 1))
             data["next_meal_plan_id"] = plan_id + 1
             payload["plan_id"] = plan_id
             data["meal_plans"][str(plan_id)] = payload
-            self._record_recipe_uses(data, payload)
             self._save(data)
         return payload
 
@@ -438,7 +447,7 @@ class Stage2State:
             return values
 
     def update_meal_plan(self, plan_id: int, payload: dict[str, Any]) -> dict[str, Any] | None:
-        """Merge a validated plan patch and record any newly seen recipe uses."""
+        """Merge a validated plan patch without confirming recipe-use history."""
         with self._lock:
             data = self._load()
             key = str(plan_id)
@@ -447,7 +456,6 @@ class Stage2State:
                 return None
             current.update(payload)
             data["meal_plans"][key] = current
-            self._record_recipe_uses(data, current)
             self._save(data)
             return deepcopy(current)
 

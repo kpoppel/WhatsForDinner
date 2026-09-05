@@ -80,6 +80,23 @@ export function cachePlanDetail(plan) {
   });
 }
 
+/** Remove stale plan details after a canonical server synchronization. */
+export function invalidateMealPlanDetails(planIds) {
+  const invalidIds = new Set(planIds);
+  const current = readMealPlanCache();
+  const nextById = {};
+  for (const [planId, plan] of Object.entries(current.byId)) {
+    if (!invalidIds.has(Number(planId))) {
+      nextById[planId] = plan;
+    }
+  }
+  writeMealPlanCache({
+    list: current.list,
+    byId: nextById,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 /** Persist the plan projection used by the home tab. */
 export function writeHomeActivePlanCache(plan) {
   if (!plan || typeof plan !== "object") {

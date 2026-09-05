@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any
+import uuid
 
 from pydantic import ValidationError
 
@@ -107,6 +108,21 @@ def _migrate_v4_to_v5(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v5_to_v6(payload: dict[str, Any]) -> dict[str, Any]:
+    """Assign one immutable Tandoor ownership token to every stored plan."""
+    next_payload = deepcopy(payload)
+    meal_plans = next_payload.get("meal_plans")
+    if isinstance(meal_plans, dict):
+        for plan in meal_plans.values():
+            if not isinstance(plan, dict):
+                continue
+            plan_token = plan.get("plan_token")
+            if not isinstance(plan_token, str) or not plan_token:
+                plan["plan_token"] = uuid.uuid4().hex
+    next_payload["schema_version"] = 6
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     """Migrate a state document to the current version and return validated data."""
 
@@ -131,6 +147,10 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     if schema_version == 4:
         payload = _migrate_v4_to_v5(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 5:
+        payload = _migrate_v5_to_v6(payload)
         schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:
