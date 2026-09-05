@@ -402,18 +402,6 @@ class ServerState:
             self._save(data)
             return deepcopy(removed)
 
-    def set_shopping_snapshot(self, entries: list[dict[str, Any]]) -> None:
-        with self._lock:
-            data = self._load()
-            data["shopping_snapshot"] = deepcopy(entries)
-            self._save(data)
-
-    def shopping_snapshot(self) -> list[dict[str, Any]]:
-        with self._lock:
-            data = self._load()
-            snapshot = data.get("shopping_snapshot", [])
-            return deepcopy(snapshot) if isinstance(snapshot, list) else []
-
     def set_pending_shopping_changes(self, changes: list[dict[str, Any]]) -> None:
         with self._lock:
             data = self._load()

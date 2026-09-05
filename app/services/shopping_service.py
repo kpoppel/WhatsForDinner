@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Callable
 
+from app.services.server_state import ServerState
 from fastapi import HTTPException
 
-from app.services.server_state import ServerState
 from app.services.tandoor_client import TandoorClient, TandoorError
 
 SHOPPING_STATUSES = {"remaining", "skipped", "completed"}
@@ -24,16 +24,9 @@ class ShoppingService:
         extract_results: Callable[[Any], list[dict[str, Any]]],
         build_shopping_view: Callable[[list[dict[str, Any]]], dict[str, Any]],
     ) -> dict[str, Any]:
-        try:
-            data = await self._client.list_shopping_entries(limit=limit)
-            entries = extract_results(data)
-            self._state.set_shopping_snapshot(entries)
-            source = "tandoor+local-state"
-        except TandoorError as exc:
-            entries = self._state.shopping_snapshot()
-            if not entries:
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
-            source = "cached-tandoor+local-state"
+        data = await self._client.list_shopping_entries(limit=limit)
+        entries = extract_results(data)
+        source = "tandoor+local-state"
         view = build_shopping_view(entries)
 
         return {

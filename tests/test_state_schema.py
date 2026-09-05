@@ -12,7 +12,7 @@ def test_stage2_state_writes_schema_version(tmp_path) -> None:
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 8
+    assert payload["schema_version"] == 9
     assert "archive" not in payload
     assert "shopping_sync_events" not in payload
 
@@ -101,7 +101,7 @@ def test_stage2_state_migrates_v1_payload_to_v8(tmp_path) -> None:
     state.set_selected_keywords([])
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
-    assert payload["schema_version"] == 8
+    assert payload["schema_version"] == 9
     assert payload["meal_plan_instance_sync"] == {}
     assert "archive" not in payload
 
@@ -154,7 +154,7 @@ def test_stage2_state_migrates_v2_payload_and_strips_entry_ids(tmp_path) -> None
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 8
+    assert payload["schema_version"] == 9
     instance = payload["meal_plan_instance_sync"]["1"]["instances"]["entry:1:primary:recipe:11"]
     assert "entry_ids" not in instance
 
@@ -201,7 +201,39 @@ def test_stage2_state_migrates_v3_payload_to_v8_without_event_history(tmp_path) 
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 8
+    assert payload["schema_version"] == 9
     assert "archive" not in payload
     assert "shopping_sync_events" not in payload
     assert "next_sync_event_id" not in payload
+
+
+def test_stage2_state_migrates_v8_payload_without_shopping_snapshot(tmp_path) -> None:
+    payload = {
+        "schema_version": 8,
+        "selected_keyword_ids": [],
+        "meal_plan_rules": {"no_repeat_days": 30},
+        "user_settings": {
+            "default_diners": 2,
+            "default_notification_time": "08:00",
+        },
+        "meal_plans": {},
+        "next_meal_plan_id": 1,
+        "next_entry_id": 1,
+        "shopping_status_overrides": {},
+        "shopping_item_metadata": {},
+        "local_shopping_entries": {},
+        "next_local_shopping_entry_id": -1,
+        "meal_plan_instance_sync": {},
+        "recipe_use_history": [],
+        "shopping_snapshot": [{"id": 1, "name": "Large remote entry"}],
+        "pending_shopping_changes": {},
+    }
+    state_file = tmp_path / "state.json"
+    state_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    ServerState(str(tmp_path))
+
+    with state_file.open("r", encoding="utf-8") as fp:
+        migrated_payload = json.load(fp)
+    assert migrated_payload["schema_version"] == 9
+    assert "shopping_snapshot" not in migrated_payload

@@ -91,6 +91,13 @@ def _migrate_v7_to_v8(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v8_to_v9(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    next_payload.pop("shopping_snapshot", None)
+    next_payload["schema_version"] = 9
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(raw)
 
@@ -125,6 +132,10 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     if schema_version == 7:
         payload = _migrate_v7_to_v8(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 8:
+        payload = _migrate_v8_to_v9(payload)
         schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:

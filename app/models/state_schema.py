@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CURRENT_STATE_SCHEMA_VERSION = 8
+CURRENT_STATE_SCHEMA_VERSION = 9
 
 
 class MealPlanRulesModel(BaseModel):
@@ -76,7 +76,6 @@ class ServerStateDocument(BaseModel):
     next_local_shopping_entry_id: int
     meal_plan_instance_sync: dict[str, MealPlanInstanceSyncModel] = Field(default_factory=dict)
     recipe_use_history: list[RecipeUseModel] = Field(default_factory=list)
-    shopping_snapshot: list[dict[str, Any]] = Field(default_factory=list)
     pending_shopping_changes: dict[str, PendingShoppingChangeModel] = Field(default_factory=dict)
 
 
@@ -98,6 +97,5 @@ def default_state_payload() -> dict[str, Any]:
         "next_local_shopping_entry_id": -1,
         "meal_plan_instance_sync": {},
         "recipe_use_history": [],
-        "shopping_snapshot": [],
         "pending_shopping_changes": {},
     }
