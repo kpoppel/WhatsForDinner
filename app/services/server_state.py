@@ -220,10 +220,9 @@ class ServerState:
             except ValueError:
                 continue
 
-            recipes = [entry.get("recipe")]
-            extra_recipes = entry.get("extra_recipes")
-            if isinstance(extra_recipes, list):
-                recipes.extend(extra_recipes)
+            recipes = entry.get("recipes")
+            if not isinstance(recipes, list):
+                continue
             for recipe in recipes:
                 if not isinstance(recipe, dict):
                     continue
@@ -296,9 +295,7 @@ class ServerState:
         entry = next(row for row in plan["entries"] if row["entry_id"] == entry_id)
         if len(parts) == 4:
             return entry
-        if len(parts) == 5:
-            return entry["recipe"]
-        return entry["extra_recipes"][int(parts[3])]["recipe"]
+        return entry["recipes"][int(parts[3])]
 
     def get_meal_plan_tandoor_sync(self, plan_id: int) -> dict[str, dict[str, Any]]:
         with self._lock:
@@ -309,13 +306,9 @@ class ServerState:
             sanitized: dict[str, dict[str, Any]] = {}
             for entry in plan["entries"]:
                 entry_id = entry["entry_id"]
-                recipe = entry["recipe"]
-                if recipe is not None and "tandoor_sync" in recipe:
-                    sanitized[f"entry:{entry_id}:primary:recipe:{recipe['id']}"] = deepcopy(recipe["tandoor_sync"])
-                for index, extra_recipe in enumerate(entry["extra_recipes"]):
-                    recipe = extra_recipe["recipe"]
+                for index, recipe in enumerate(entry["recipes"]):
                     if "tandoor_sync" in recipe:
-                        sanitized[f"entry:{entry_id}:extra:{index}:recipe:{recipe['id']}"] = deepcopy(recipe["tandoor_sync"])
+                        sanitized[f"entry:{entry_id}:recipe:{index}:id:{recipe['id']}"] = deepcopy(recipe["tandoor_sync"])
                 if "tandoor_sync" in entry:
                     sanitized[f"entry:{entry_id}:mode:{entry['mode']}"] = deepcopy(entry["tandoor_sync"])
             return sanitized
@@ -328,13 +321,12 @@ class ServerState:
                 return
             for entry in plan["entries"]:
                 entry.pop("tandoor_sync", None)
-                recipe = entry["recipe"]
-                if recipe is not None:
+                for recipe in entry["recipes"]:
                     recipe.pop("tandoor_sync", None)
-                for extra_recipe in entry["extra_recipes"]:
-                    extra_recipe["recipe"].pop("tandoor_sync", None)
             for key, value in instances.items():
                 owner = self._tandoor_sync_owner(plan, str(key))
+                if owner is None:
+                    raise ValueError(f"Invalid meal plan sync instance key: {key}")
                 owner["tandoor_sync"] = deepcopy(value)
             self._save(data)
 

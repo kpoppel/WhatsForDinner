@@ -312,6 +312,41 @@ def _migrate_v14_to_v15(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v15_to_v16(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    meal_plans = next_payload.get("meal_plans")
+    if isinstance(meal_plans, dict):
+        for plan in meal_plans.values():
+            if not isinstance(plan, dict):
+                continue
+            entries = plan.get("entries")
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                recipes: list[dict[str, Any]] = []
+                primary_recipe = entry.pop("recipe", None)
+                if isinstance(primary_recipe, dict):
+                    primary_recipe["purpose"] = "meal"
+                    recipes.append(primary_recipe)
+                extra_recipes = entry.pop("extra_recipes", [])
+                if isinstance(extra_recipes, list):
+                    for extra_recipe in extra_recipes:
+                        if not isinstance(extra_recipe, dict):
+                            continue
+                        recipe = extra_recipe.get("recipe")
+                        if not isinstance(recipe, dict):
+                            continue
+                        recipe["purpose"] = (
+                            "shopping_only" if extra_recipe.get("purpose") == "shopping_only" else "meal"
+                        )
+                        recipes.append(recipe)
+                entry["recipes"] = recipes
+    next_payload["schema_version"] = 16
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(raw)
 
@@ -374,6 +409,10 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     if schema_version == 14:
         payload = _migrate_v14_to_v15(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 15:
+        payload = _migrate_v15_to_v16(payload)
         schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:

@@ -203,12 +203,16 @@ def _enrich_plan_recipe_urls(plan: dict[str, Any] | None) -> dict[str, Any] | No
             enriched_entries.append(entry)
             continue
         enriched_entry = dict(entry)
-        recipe = entry.get("recipe")
-        if isinstance(recipe, dict):
-            enriched_recipe = dict(recipe)
-            recipe_id = recipe.get("id")
-            enriched_recipe["url"] = _recipe_url(recipe_id) if isinstance(recipe_id, int) else None
-            enriched_entry["recipe"] = enriched_recipe
+        recipes = entry.get("recipes")
+        if isinstance(recipes, list):
+            enriched_entry["recipes"] = [
+                {
+                    **recipe,
+                    "url": _recipe_url(recipe.get("id")) if isinstance(recipe.get("id"), int) else None,
+                }
+                for recipe in recipes
+                if isinstance(recipe, dict)
+            ]
         enriched_entries.append(enriched_entry)
 
     enriched["entries"] = enriched_entries

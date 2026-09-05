@@ -13,7 +13,7 @@ def test_stage2_state_writes_schema_version(tmp_path) -> None:
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 15
+    assert payload["schema_version"] == 16
     assert "archive" not in payload
     assert "shopping_sync_events" not in payload
 
@@ -37,8 +37,10 @@ def test_recipe_use_history_is_append_only_across_plan_changes(tmp_path) -> None
                 {
                     "entry_id": 1,
                     "date": "2026-09-01",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
-                    "extra_recipes": [{"id": 12, "title": "Rice Bowl"}],
+                    "recipes": [
+                        {"id": 11, "title": "Roast Veg", "purpose": "meal"},
+                        {"id": 12, "title": "Rice Bowl", "purpose": "meal"},
+                    ],
                 }
             ]
         }
@@ -52,8 +54,7 @@ def test_recipe_use_history_is_append_only_across_plan_changes(tmp_path) -> None
                 {
                     "entry_id": 1,
                     "date": "2026-09-02",
-                    "recipe": {"id": 13, "title": "Pasta"},
-                    "extra_recipes": [],
+                    "recipes": [{"id": 13, "title": "Pasta", "purpose": "meal"}],
                 }
             ]
         },
@@ -78,7 +79,7 @@ def test_recipe_use_history_backfills_existing_plans_on_startup(tmp_path) -> Non
                 {
                     "entry_id": 1,
                     "date": "2026-09-01",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
+                        "recipe": {"id": 11, "title": "Roast Veg"},
                 }
             ]
         }
@@ -109,12 +110,12 @@ def test_recipe_use_history_prunes_to_the_configured_window(tmp_path) -> None:
                 {
                     "entry_id": 1,
                     "date": (today - timedelta(days=31)).isoformat(),
-                    "recipe": {"id": 11, "title": "Old Recipe"},
+                    "recipes": [{"id": 11, "title": "Old Recipe", "purpose": "meal"}],
                 },
                 {
                     "entry_id": 2,
                     "date": (today - timedelta(days=30)).isoformat(),
-                    "recipe": {"id": 12, "title": "Recent Recipe"},
+                    "recipes": [{"id": 12, "title": "Recent Recipe", "purpose": "meal"}],
                 },
             ]
         }
@@ -214,7 +215,7 @@ def test_stage2_state_migrates_v1_payload_to_v8(tmp_path) -> None:
     state.set_selected_keywords([])
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
-    assert payload["schema_version"] == 15
+    assert payload["schema_version"] == 16
     assert "meal_plan_instance_sync" not in payload
     assert "archive" not in payload
 
@@ -278,8 +279,8 @@ def test_stage2_state_migrates_v2_payload_and_strips_entry_ids(tmp_path) -> None
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 15
-    recipe = payload["meal_plans"]["1"]["entries"][0]["recipe"]
+    assert payload["schema_version"] == 16
+    recipe = payload["meal_plans"]["1"]["entries"][0]["recipes"][0]
     assert recipe["tandoor_sync"] == {"meal_plan_row_id": 5, "shopping_recipe_id": 7}
     assert "tandoor_sync" not in payload["meal_plans"]["1"]
 
@@ -326,7 +327,7 @@ def test_stage2_state_migrates_v3_payload_to_v8_without_event_history(tmp_path) 
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 15
+    assert payload["schema_version"] == 16
     assert "archive" not in payload
     assert "shopping_sync_events" not in payload
     assert "next_sync_event_id" not in payload
@@ -360,7 +361,7 @@ def test_stage2_state_migrates_v8_payload_without_shopping_snapshot(tmp_path) ->
 
     with state_file.open("r", encoding="utf-8") as fp:
         migrated_payload = json.load(fp)
-    assert migrated_payload["schema_version"] == 15
+    assert migrated_payload["schema_version"] == 16
     assert "shopping_snapshot" not in migrated_payload
 
 

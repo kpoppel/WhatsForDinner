@@ -77,8 +77,7 @@ class MealPlanEntryCreateRequest(BaseModel):
     date: str | None = None
     title: str | None = None
     mode: str | None = None
-    recipe: dict[str, Any] | None = None
-    extra_recipes: list[dict[str, Any]] | None = None
+    recipes: list[dict[str, Any]] | None = None
     servings: int | None = None
     reminder_enabled: bool | None = None
     reminder_text: str | None = None
@@ -92,8 +91,7 @@ class MealPlanEntryPatchRequest(BaseModel):
     date: str | None = None
     title: str | None = None
     mode: str | None = None
-    recipe: dict[str, Any] | None = None
-    extra_recipes: list[dict[str, Any]] | None = None
+    recipes: list[dict[str, Any]] | None = None
     servings: int | None = None
     reminder_enabled: bool | None = None
     reminder_text: str | None = None

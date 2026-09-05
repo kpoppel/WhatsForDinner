@@ -481,7 +481,7 @@ def test_stage2_meal_plan_uses_all_recipes_when_no_keywords_selected(monkeypatch
         },
     )
     assert res.status_code == 200
-    assert res.json()["data"]["entries"][0]["recipe"]["id"] == 9
+    assert res.json()["data"]["entries"][0]["recipes"][0]["id"] == 9
 
 
 def test_stage2_meal_plan_uses_default_diners_when_missing(monkeypatch, tmp_path) -> None:
@@ -647,7 +647,7 @@ def test_stage2_meal_plan_generate_and_entry_ops(monkeypatch, tmp_path) -> None:
 
     add_res = client.post(
         f"/api/v1/meal-plans/{plan_id}/entries",
-        json={"mode": "planned", "servings": 3, "recipe": None},
+        json={"mode": "planned", "servings": 3, "recipes": []},
     )
     assert add_res.status_code == 200
     updated_after_add = add_res.json()["data"]
@@ -687,7 +687,7 @@ def test_stage2_meal_plan_shopping_generate_add_remove_sequences(monkeypatch, tm
 
     set_primary = client.patch(
         f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
-        json={"recipe": {"id": 301, "title": "Enchiladas"}, "extra_recipes": []},
+        json={"recipes": [{ "id": 301, "title": "Enchiladas", "purpose": "meal" }]},
     )
     assert set_primary.status_code == 200
 
@@ -698,7 +698,7 @@ def test_stage2_meal_plan_shopping_generate_add_remove_sequences(monkeypatch, tm
 
     remove_primary = client.patch(
         f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
-        json={"recipe": None, "extra_recipes": []},
+        json={"recipes": []},
     )
     assert remove_primary.status_code == 200
     second_generate = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
@@ -708,9 +708,9 @@ def test_stage2_meal_plan_shopping_generate_add_remove_sequences(monkeypatch, tm
     add_two_meal_recipes = client.patch(
         f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
         json={
-            "recipe": {"id": 301, "title": "Enchiladas"},
-            "extra_recipes": [
-                {"purpose": "meal", "recipe": {"id": 302, "title": "One Pot Pasta"}}
+            "recipes": [
+                {"id": 301, "title": "Enchiladas", "purpose": "meal"},
+                {"id": 302, "title": "One Pot Pasta", "purpose": "meal"},
             ],
         },
     )
@@ -723,8 +723,7 @@ def test_stage2_meal_plan_shopping_generate_add_remove_sequences(monkeypatch, tm
     remove_one_recipe = client.patch(
         f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
         json={
-            "recipe": {"id": 301, "title": "Enchiladas"},
-            "extra_recipes": [],
+            "recipes": [{ "id": 301, "title": "Enchiladas", "purpose": "meal" }],
         },
     )
     assert remove_one_recipe.status_code == 200
@@ -735,7 +734,7 @@ def test_stage2_meal_plan_shopping_generate_add_remove_sequences(monkeypatch, tm
 
     remove_last_recipe = client.patch(
         f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
-        json={"recipe": None, "extra_recipes": []},
+        json={"recipes": []},
     )
     assert remove_last_recipe.status_code == 200
     fifth_generate = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
@@ -763,9 +762,9 @@ def test_stage2_meal_plan_shopping_generate_with_shopping_only_and_removals(monk
     configure_mixed = client.patch(
         f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
         json={
-            "recipe": {"id": 301, "title": "Enchiladas"},
-            "extra_recipes": [
-                {"purpose": "shopping_only", "recipe": {"id": 303, "title": "Pantry Refill"}}
+            "recipes": [
+                {"id": 301, "title": "Enchiladas", "purpose": "meal"},
+                {"id": 303, "title": "Pantry Refill", "purpose": "shopping_only"},
             ],
         },
     )
@@ -777,12 +776,7 @@ def test_stage2_meal_plan_shopping_generate_with_shopping_only_and_removals(monk
 
     remove_primary_keep_shopping = client.patch(
         f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
-        json={
-            "recipe": None,
-            "extra_recipes": [
-                {"purpose": "shopping_only", "recipe": {"id": 303, "title": "Pantry Refill"}}
-            ],
-        },
+        json={"recipes": [{"id": 303, "title": "Pantry Refill", "purpose": "shopping_only"}]},
     )
     assert remove_primary_keep_shopping.status_code == 200
     second_generate = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
@@ -791,7 +785,7 @@ def test_stage2_meal_plan_shopping_generate_with_shopping_only_and_removals(monk
 
     remove_shopping_only = client.patch(
         f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
-        json={"recipe": None, "extra_recipes": []},
+        json={"recipes": []},
     )
     assert remove_shopping_only.status_code == 200
     third_generate = client.post(f"/api/v1/meal-plans/{plan_id}/shopping-list")
@@ -837,7 +831,7 @@ def test_stage2_meal_plan_shopping_regenerate_missing_adds_only_missing(monkeypa
 
     set_primary = client.patch(
         f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
-        json={"recipe": {"id": 301, "title": "Enchiladas"}, "extra_recipes": []},
+        json={"recipes": [{ "id": 301, "title": "Enchiladas", "purpose": "meal" }]},
     )
     assert set_primary.status_code == 200
 
@@ -885,7 +879,7 @@ def test_stage2_meal_plan_remove_and_readd_same_recipe_on_day_regenerates_items(
 
     set_primary = client.patch(
         f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
-        json={"recipe": {"id": 301, "title": "Enchiladas"}, "extra_recipes": []},
+        json={"recipes": [{ "id": 301, "title": "Enchiladas", "purpose": "meal" }]},
     )
     assert set_primary.status_code == 200
 
@@ -896,7 +890,7 @@ def test_stage2_meal_plan_remove_and_readd_same_recipe_on_day_regenerates_items(
 
     remove_recipe = client.patch(
         f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
-        json={"recipe": None, "extra_recipes": []},
+        json={"recipes": []},
     )
     assert remove_recipe.status_code == 200
 
@@ -906,7 +900,7 @@ def test_stage2_meal_plan_remove_and_readd_same_recipe_on_day_regenerates_items(
 
     readd_recipe = client.patch(
         f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",
-        json={"recipe": {"id": 301, "title": "Enchiladas"}, "extra_recipes": []},
+        json={"recipes": [{ "id": 301, "title": "Enchiladas", "purpose": "meal" }]},
     )
     assert readd_recipe.status_code == 200
 
@@ -970,7 +964,7 @@ def test_stage2_no_repeat_blocks_recent_recipe(monkeypatch, tmp_path) -> None:
         },
     )
     assert first.status_code == 200
-    assert first.json()["data"]["entries"][0]["recipe"]["id"] == 101
+    assert first.json()["data"]["entries"][0]["recipes"][0]["id"] == 101
 
     second = client.post(
         "/api/v1/meal-plans/generate",
@@ -982,7 +976,7 @@ def test_stage2_no_repeat_blocks_recent_recipe(monkeypatch, tmp_path) -> None:
     )
     assert second.status_code == 200
     assert second.json()["data"]["no_repeat_days"] == 30
-    assert second.json()["data"]["entries"][0]["recipe"] is None
+    assert second.json()["data"]["entries"][0]["recipes"] == []
 
 
 def test_stage2_no_repeat_zero_allows_reuse(monkeypatch, tmp_path) -> None:
@@ -1005,7 +999,7 @@ def test_stage2_no_repeat_zero_allows_reuse(monkeypatch, tmp_path) -> None:
         },
     )
     assert first.status_code == 200
-    assert first.json()["data"]["entries"][0]["recipe"]["id"] == 202
+    assert first.json()["data"]["entries"][0]["recipes"][0]["id"] == 202
 
     second = client.post(
         "/api/v1/meal-plans/generate",
@@ -1017,7 +1011,7 @@ def test_stage2_no_repeat_zero_allows_reuse(monkeypatch, tmp_path) -> None:
     )
     assert second.status_code == 200
     assert second.json()["data"]["no_repeat_days"] == 0
-    assert second.json()["data"]["entries"][0]["recipe"]["id"] == 202
+    assert second.json()["data"]["entries"][0]["recipes"][0]["id"] == 202
 
 
 def test_stage2_stored_meal_plan_list_and_delete(monkeypatch, tmp_path) -> None:

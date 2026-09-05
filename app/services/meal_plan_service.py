@@ -99,12 +99,6 @@ class MealPlanService:
             for entry in entries:
                 if not isinstance(entry, dict):
                     continue
-                recipe = entry.get("recipe")
-                if not isinstance(recipe, dict):
-                    continue
-                recipe_id = recipe.get("id")
-                if not isinstance(recipe_id, int):
-                    continue
                 date_value = entry.get("date")
                 if not isinstance(date_value, str):
                     continue
@@ -113,7 +107,15 @@ class MealPlanService:
                 except ValueError:
                     continue
 
-                history.setdefault(recipe_id, []).append(entry_date)
+                recipes = entry.get("recipes")
+                if not isinstance(recipes, list):
+                    continue
+                for recipe in recipes:
+                    if not isinstance(recipe, dict):
+                        continue
+                    recipe_id = recipe.get("id")
+                    if isinstance(recipe_id, int):
+                        history.setdefault(recipe_id, []).append(entry_date)
 
         for recipe_id, dates in history.items():
             dates.sort()
@@ -178,12 +180,16 @@ class MealPlanService:
                 enriched_entries.append(entry)
                 continue
             enriched_entry = dict(entry)
-            recipe = entry.get("recipe")
-            if isinstance(recipe, dict):
-                enriched_recipe = dict(recipe)
-                recipe_id = recipe.get("id")
-                enriched_recipe["url"] = self._recipe_url(recipe_id) if isinstance(recipe_id, int) else None
-                enriched_entry["recipe"] = enriched_recipe
+            recipes = entry.get("recipes")
+            if isinstance(recipes, list):
+                enriched_entry["recipes"] = [
+                    {
+                        **recipe,
+                        "url": self._recipe_url(recipe.get("id")) if isinstance(recipe.get("id"), int) else None,
+                    }
+                    for recipe in recipes
+                    if isinstance(recipe, dict)
+                ]
             enriched_entries.append(enriched_entry)
 
         enriched["entries"] = enriched_entries
@@ -193,13 +199,10 @@ class MealPlanService:
         self,
         *,
         entry_id: int,
-        role: str,
         recipe_id: int,
-        slot_index: int | None,
+        slot_index: int,
     ) -> str:
-        if role == "extra" and isinstance(slot_index, int):
-            return f"entry:{entry_id}:extra:{slot_index}:recipe:{recipe_id}"
-        return f"entry:{entry_id}:primary:recipe:{recipe_id}"
+        return f"entry:{entry_id}:recipe:{slot_index}:id:{recipe_id}"
 
     def _desired_instance_sync(self, plan_payload: dict[str, Any], plan_entries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         desired: dict[str, dict[str, Any]] = {}
@@ -220,48 +223,17 @@ class MealPlanService:
             entry_date = entry.get("date")
             entry_date_text = str(entry_date) if isinstance(entry_date, str) else ""
 
-            primary_recipe = entry.get("recipe")
-            if isinstance(primary_recipe, dict):
-                recipe_id = primary_recipe.get("id")
-                if isinstance(recipe_id, int):
-                    key = self._instance_key_for_recipe(
-                        entry_id=entry_id,
-                        role="primary",
-                        recipe_id=recipe_id,
-                        slot_index=None,
-                    )
-                    desired[key] = {
-                        "instance_key": key,
-                        "entry_id": entry_id,
-                        "recipe_id": recipe_id,
-                        "recipe_title": self._recipe_title(primary_recipe),
-                        "role": "primary",
-                        "slot_index": None,
-                        "purpose": "meal",
-                        "date": entry_date_text,
-                        "servings": servings,
-                        "meal_plan_row_id": None,
-                        "shopping_recipe_id": None,
-                        "shopping_activated": False,
-                    }
-
-            extra_recipes = entry.get("extra_recipes")
-            if not isinstance(extra_recipes, list):
+            recipes = entry.get("recipes")
+            if not isinstance(recipes, list):
                 continue
-
-            for idx, extra_recipe in enumerate(extra_recipes):
-                if not isinstance(extra_recipe, dict):
-                    continue
-                recipe = extra_recipe.get("recipe")
+            for idx, recipe in enumerate(recipes):
                 if not isinstance(recipe, dict):
                     continue
                 recipe_id = recipe.get("id")
                 if not isinstance(recipe_id, int):
                     continue
-                purpose = extra_recipe.get("purpose")
                 key = self._instance_key_for_recipe(
                     entry_id=entry_id,
-                    role="extra",
                     recipe_id=recipe_id,
                     slot_index=idx,
                 )
@@ -270,9 +242,9 @@ class MealPlanService:
                     "entry_id": entry_id,
                     "recipe_id": recipe_id,
                     "recipe_title": self._recipe_title(recipe),
-                    "role": "extra",
+                    "role": "recipe",
                     "slot_index": idx,
-                    "purpose": str(purpose) if purpose is not None else "extra",
+                    "purpose": str(recipe.get("purpose")),
                     "date": entry_date_text,
                     "servings": servings,
                     "meal_plan_row_id": None,
@@ -305,22 +277,7 @@ class MealPlanService:
                 "purpose": parts[3],
             }
 
-        if len(parts) == 5 and parts[2] == "primary" and parts[3] == "recipe":
-            try:
-                recipe_id = int(parts[4])
-            except ValueError:
-                return None
-            if recipe_id < 1:
-                return None
-            return {
-                "entry_id": entry_id,
-                "recipe_id": recipe_id,
-                "role": "primary",
-                "slot_index": None,
-                "purpose": "meal",
-            }
-
-        if len(parts) == 6 and parts[2] == "extra" and parts[4] == "recipe":
+        if len(parts) == 6 and parts[2] == "recipe" and parts[4] == "id":
             try:
                 slot_index = int(parts[3])
                 recipe_id = int(parts[5])
@@ -331,9 +288,9 @@ class MealPlanService:
             return {
                 "entry_id": entry_id,
                 "recipe_id": recipe_id,
-                "role": "extra",
+                "role": "recipe",
                 "slot_index": slot_index,
-                "purpose": "extra",
+                "purpose": "meal",
             }
 
         return None
@@ -359,9 +316,8 @@ class MealPlanService:
             if mode not in {"leftover", "takeout", "empty"}:
                 continue
 
-            primary_recipe = entry.get("recipe")
-            has_primary_recipe = isinstance(primary_recipe, dict) and isinstance(primary_recipe.get("id"), int)
-            if has_primary_recipe:
+            recipes = entry.get("recipes")
+            if isinstance(recipes, list) and len(recipes) > 0:
                 continue
 
             raw_servings = entry.get("servings")
@@ -718,8 +674,7 @@ class MealPlanService:
                     "date": entry_date.isoformat(),
                     "mode": mode,
                     "title": "",
-                    "recipe": recipe_obj,
-                    "extra_recipes": [],
+                    "recipes": [{**recipe_obj, "purpose": "meal"}] if recipe_obj is not None else [],
                     "servings": diners,
                     "reminder_enabled": False,
                     "reminder_text": "",
@@ -833,7 +788,7 @@ class MealPlanService:
                 entry_date = (start_day + timedelta(days=day_index)).isoformat()
 
             mode = str(payload.get("mode") or "planned")
-            recipe = payload.get("recipe") if isinstance(payload.get("recipe"), dict) else None
+            recipes = payload.get("recipes") if isinstance(payload.get("recipes"), list) else []
 
             entry = {
                 "entry_id": self._next_plan_entry_id(),
@@ -841,8 +796,7 @@ class MealPlanService:
                 "date": entry_date,
                 "title": str(payload.get("title") or ""),
                 "mode": mode,
-                "recipe": recipe,
-                "extra_recipes": payload.get("extra_recipes") if isinstance(payload.get("extra_recipes"), list) else [],
+                "recipes": recipes,
                 "servings": int(payload.get("servings") or plan.get("diners") or 2),
                 "reminder_enabled": bool(payload.get("reminder_enabled", False)),
                 "reminder_text": str(payload.get("reminder_text") or ""),
@@ -897,8 +851,7 @@ class MealPlanService:
                 "date",
                 "title",
                 "mode",
-                "recipe",
-                "extra_recipes",
+                "recipes",
                 "servings",
                 "reminder_enabled",
                 "reminder_text",
@@ -909,8 +862,7 @@ class MealPlanService:
 
             next_mode = str(entry.get("mode") or "planned")
             if next_mode in {"leftover", "takeout", "empty"}:
-                entry["recipe"] = None
-                entry["extra_recipes"] = []
+                entry["recipes"] = []
 
             target_day_index = payload.get("target_day_index")
             if target_day_index is not None:

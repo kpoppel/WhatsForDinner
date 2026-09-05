@@ -416,7 +416,8 @@ import { assertRequiredFields } from "./js/contracts.js";
 
   function entryRecipeTitle(entry) {
     if (entry && typeof entry === "object") {
-      const recipe = entry.recipe;
+      const recipes = Array.isArray(entry.recipes) ? entry.recipes : [];
+      const recipe = recipes.find((row) => row && typeof row === "object" && row.purpose === "meal");
       if (recipe && typeof recipe === "object") {
         if (typeof recipe.title === "string" && recipe.title.trim().length > 0) {
           return recipe.title.trim();
@@ -861,7 +862,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       date: nextDate,
       mode: "planned",
       servings: Number.isInteger(defaultServings) ? defaultServings : 2,
-      recipe: null,
+      recipes: [],
     }, reportApiReachable);
 
     const updatedPlan = payload && typeof payload === "object" ? payload.data : null;
@@ -1878,27 +1879,10 @@ import { assertRequiredFields } from "./js/contracts.js";
     mealEditorReminderText.value = reminder.text;
 
     const title = entryRecipeTitle(entry);
-    const baseRecipe = entry.recipe;
-    const extraRecipes = Array.isArray(entry.extra_recipes) ? entry.extra_recipes : [];
+    const recipes = Array.isArray(entry.recipes) ? entry.recipes : [];
     const recipeRows = [];
 
-    if (baseRecipe && typeof baseRecipe === "object") {
-      const baseTitle = String(baseRecipe.title || "").trim();
-      const baseId = Number(baseRecipe.id);
-      if (baseTitle.length > 0 || Number.isInteger(baseId)) {
-        recipeRows.push({
-          id: Number.isInteger(baseId) ? baseId : null,
-          title: baseTitle.length > 0 ? baseTitle : "Untitled recipe",
-          purpose: "meal",
-        });
-      }
-    }
-
-    for (const extraRecipe of extraRecipes) {
-      if (!extraRecipe || typeof extraRecipe !== "object") {
-        continue;
-      }
-      const recipe = extraRecipe.recipe;
+    for (const recipe of recipes) {
       if (!recipe || typeof recipe !== "object") {
         continue;
       }
@@ -1907,7 +1891,7 @@ import { assertRequiredFields } from "./js/contracts.js";
         continue;
       }
       const recipeId = Number(recipe.id);
-      const purpose = extraRecipe.purpose === "shopping_only" ? "shopping_only" : "meal";
+      const purpose = recipe.purpose === "shopping_only" ? "shopping_only" : "meal";
       recipeRows.push({
         id: Number.isInteger(recipeId) ? recipeId : null,
         title: recipeTitle,
@@ -1968,34 +1952,21 @@ import { assertRequiredFields } from "./js/contracts.js";
       const reminderEnabled = mealEditorReminderEnabled.checked;
       const reminderText = mealEditorReminderText.value.trim();
       const mealTitle = mealEditorNameInput.value.trim();
-      const primaryRecipe = editorRecipes.length > 0 ? toEditorRecipePayload(editorRecipes[0]) : null;
-      const extraRecipes = editorRecipes.slice(1)
+      const recipes = editorRecipes
         .map((recipe) => {
           const payloadRecipe = toEditorRecipePayload(recipe);
           if (payloadRecipe === null) {
             return null;
           }
-          return {
-            purpose: recipe.purpose === "shopping_only" ? "shopping_only" : "meal",
-            recipe: payloadRecipe,
-          };
+          return { ...payloadRecipe, purpose: recipe.purpose === "shopping_only" ? "shopping_only" : "meal" };
         })
         .filter((row) => row !== null);
-
-      let recipePayload = null;
-      if (editorMode === "planned") {
-        recipePayload = primaryRecipe;
-        if (recipePayload === null && mealTitle.length > 0) {
-          recipePayload = { title: mealTitle };
-        }
-      }
 
       const patch = {
         title: mealTitle,
         mode: editorMode,
         servings: editorServings,
-        recipe: recipePayload,
-        extra_recipes: editorMode === "planned" ? extraRecipes : [],
+        recipes: editorMode === "planned" ? recipes : [],
         reminder_enabled: reminderEnabled,
         reminder_text: reminderText,
         notes: buildLegacyNotes(reminderEnabled, reminderText),

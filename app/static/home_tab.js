@@ -198,7 +198,8 @@ import { assertRequiredFields } from "./js/contracts.js";
       return "No meal planned";
     }
 
-    const recipe = entry.recipe;
+    const recipes = Array.isArray(entry.recipes) ? entry.recipes : [];
+    const recipe = recipes.find((row) => row && typeof row === "object" && row.purpose === "meal");
     if (recipe && typeof recipe === "object") {
       if (typeof recipe.title === "string" && recipe.title.trim().length > 0) {
         return recipe.title.trim();
@@ -250,7 +251,8 @@ import { assertRequiredFields } from "./js/contracts.js";
     if (!entry || typeof entry !== "object") {
       return null;
     }
-    const recipe = entry.recipe;
+    const recipes = Array.isArray(entry.recipes) ? entry.recipes : [];
+    const recipe = recipes.find((row) => row && typeof row === "object" && row.purpose === "meal");
     if (!recipe || typeof recipe !== "object") {
       return null;
     }
@@ -271,7 +273,8 @@ import { assertRequiredFields } from "./js/contracts.js";
     if (!entry || typeof entry !== "object") {
       return "";
     }
-    const recipe = entry.recipe;
+    const recipes = Array.isArray(entry.recipes) ? entry.recipes : [];
+    const recipe = recipes.find((row) => row && typeof row === "object" && row.purpose === "meal");
     if (!recipe || typeof recipe !== "object") {
       return "";
     }

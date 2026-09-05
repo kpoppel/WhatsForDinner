@@ -253,7 +253,7 @@ def test_generate_plan_reuses_constraints_and_entries(tmp_path, monkeypatch) -> 
                     "day_index": 0,
                     "date": "2026-08-01",
                     "mode": "planned",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
+                    "recipes": [{"id": 11, "title": "Roast Veg", "purpose": "meal"}],
                     "servings": 2,
                     "reminder_enabled": False,
                     "reminder_text": "",
@@ -281,9 +281,9 @@ def test_generate_plan_reuses_constraints_and_entries(tmp_path, monkeypatch) -> 
 
     entries = result["data"]["entries"]
     assert len(entries) == 3
-    assert entries[0]["recipe"]["id"] == 12
+    assert entries[0]["recipes"][0]["id"] == 12
     assert entries[1]["mode"] == "leftover"
-    assert entries[1]["recipe"]["id"] == 12
+    assert entries[1]["recipes"][0]["id"] == 12
     assert entries[2]["mode"] == "takeout"
 
 
@@ -302,16 +302,14 @@ def test_patch_plan_rebases_dates_and_length(tmp_path) -> None:
                         "day_index": 0,
                         "date": "2026-08-10",
                         "mode": "planned",
-                        "recipe": None,
-                        "extra_recipes": [],
+                        "recipes": [],
                     },
                     {
                         "entry_id": 2,
                         "day_index": 1,
                         "date": "2026-08-11",
                         "mode": "planned",
-                        "recipe": None,
-                        "extra_recipes": [],
+                        "recipes": [],
                     },
             ],
             "keyword_ids": [],
@@ -343,8 +341,7 @@ def test_generate_shopping_from_plan_aggregates_success_and_failure(tmp_path) ->
                     "day_index": 0,
                     "date": "2026-08-10",
                     "mode": "planned",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
-                        "extra_recipes": [],
+                    "recipes": [{ "id": 11, "title": "Roast Veg", "purpose": "meal" }],
                     "servings": 3,
                 },
                 {
@@ -352,8 +349,7 @@ def test_generate_shopping_from_plan_aggregates_success_and_failure(tmp_path) ->
                     "day_index": 1,
                     "date": "2026-08-11",
                     "mode": "planned",
-                    "recipe": {"id": 12, "title": "Rice Bowl"},
-                        "extra_recipes": [],
+                    "recipes": [{ "id": 12, "title": "Rice Bowl", "purpose": "meal" }],
                     "servings": 3,
                 },
             ],
@@ -407,10 +403,10 @@ def test_generate_shopping_from_plan_includes_all_extra_recipes(tmp_path) -> Non
                     "day_index": 0,
                     "date": "2026-08-10",
                     "mode": "planned",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
-                    "extra_recipes": [
-                        {"purpose": "meal", "recipe": {"id": 12, "title": "Rice Bowl"}},
-                        {"purpose": "shopping_only", "recipe": {"id": 13, "title": "Pantry"}},
+                    "recipes": [
+                        {"id": 11, "title": "Roast Veg", "purpose": "meal"},
+                        {"id": 12, "title": "Rice Bowl", "purpose": "meal"},
+                        {"id": 13, "title": "Pantry", "purpose": "shopping_only"},
                     ],
                     "servings": 3,
                 }
@@ -453,8 +449,7 @@ def test_generate_shopping_from_plan_is_idempotent_and_syncs_add_remove(tmp_path
                     "day_index": 0,
                     "date": "2026-08-10",
                     "mode": "planned",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
-                    "extra_recipes": [],
+                    "recipes": [{ "id": 11, "title": "Roast Veg", "purpose": "meal" }],
                     "servings": 2,
                 }
             ],
@@ -490,9 +485,7 @@ def test_generate_shopping_from_plan_is_idempotent_and_syncs_add_remove(tmp_path
     updated_plan = state.get_meal_plan(plan["plan_id"])
     assert isinstance(updated_plan, dict)
     entries = updated_plan.get("entries") if isinstance(updated_plan.get("entries"), list) else []
-    entries[0]["extra_recipes"] = [
-        {"purpose": "shopping_only", "recipe": {"id": 13, "title": "Pantry"}}
-    ]
+    entries[0]["recipes"].append({"id": 13, "title": "Pantry", "purpose": "shopping_only"})
     asyncio.run(
         service.patch_plan(
             plan["plan_id"],
@@ -516,7 +509,7 @@ def test_generate_shopping_from_plan_is_idempotent_and_syncs_add_remove(tmp_path
     updated_plan = state.get_meal_plan(plan["plan_id"])
     assert isinstance(updated_plan, dict)
     entries = updated_plan.get("entries") if isinstance(updated_plan.get("entries"), list) else []
-    entries[0]["extra_recipes"] = []
+    entries[0]["recipes"] = [{"id": 11, "title": "Roast Veg", "purpose": "meal"}]
     asyncio.run(
         service.patch_plan(
             plan["plan_id"],
@@ -560,8 +553,7 @@ def test_generate_shopping_from_plan_same_recipe_on_second_day_increases_serving
                     "day_index": 0,
                     "date": "2026-08-10",
                     "mode": "planned",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
-                    "extra_recipes": [],
+                    "recipes": [{ "id": 11, "title": "Roast Veg", "purpose": "meal" }],
                     "servings": 2,
                 }
             ],
@@ -590,8 +582,7 @@ def test_generate_shopping_from_plan_same_recipe_on_second_day_increases_serving
             "day_index": 1,
             "date": "2026-08-11",
             "mode": "planned",
-            "recipe": {"id": 11, "title": "Roast Veg"},
-            "extra_recipes": [],
+            "recipes": [{ "id": 11, "title": "Roast Veg", "purpose": "meal" }],
             "servings": 2,
         }
     )
@@ -648,8 +639,7 @@ def test_generate_shopping_remove_then_readd_same_recipe_resyncs_when_tracked_en
                     "day_index": 0,
                     "date": "2026-08-10",
                     "mode": "planned",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
-                    "extra_recipes": [],
+                    "recipes": [{ "id": 11, "title": "Roast Veg", "purpose": "meal" }],
                     "servings": 2,
                 }
             ],
@@ -688,8 +678,7 @@ def test_generate_shopping_remove_then_readd_same_recipe_resyncs_when_tracked_en
                     "day_index": 0,
                     "date": "2026-08-10",
                     "mode": "planned",
-                    "recipe": None,
-                    "extra_recipes": [],
+                    "recipes": [],
                     "servings": 2,
                 }
             ]
@@ -714,8 +703,7 @@ def test_generate_shopping_remove_then_readd_same_recipe_resyncs_when_tracked_en
                     "day_index": 0,
                     "date": "2026-08-10",
                     "mode": "planned",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
-                    "extra_recipes": [],
+                    "recipes": [{ "id": 11, "title": "Roast Veg", "purpose": "meal" }],
                     "servings": 2,
                 }
             ]
@@ -762,8 +750,7 @@ def test_sync_tandoor_meal_plan_includes_mode_only_rows_without_recipe(tmp_path)
                     "day_index": 0,
                     "date": "2026-08-10",
                     "mode": "leftover",
-                    "recipe": None,
-                    "extra_recipes": [],
+                    "recipes": [],
                     "servings": 2,
                 },
                 {
@@ -772,8 +759,7 @@ def test_sync_tandoor_meal_plan_includes_mode_only_rows_without_recipe(tmp_path)
                     "date": "2026-08-11",
                         "title": "Pizza Palace",
                     "mode": "takeout",
-                    "recipe": None,
-                    "extra_recipes": [],
+                    "recipes": [],
                     "servings": 2,
                 },
                 {
@@ -782,8 +768,7 @@ def test_sync_tandoor_meal_plan_includes_mode_only_rows_without_recipe(tmp_path)
                     "date": "2026-08-12",
                         "title": "The Bistro",
                     "mode": "empty",
-                    "recipe": None,
-                    "extra_recipes": [],
+                    "recipes": [],
                     "servings": 2,
                 },
             ],
@@ -831,8 +816,10 @@ def test_patch_entry_switch_to_non_planned_clears_recipe_and_syncs_mode_row(tmp_
                     "day_index": 0,
                     "date": "2026-08-10",
                     "mode": "planned",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
-                    "extra_recipes": [{"purpose": "meal", "recipe": {"id": 12, "title": "Rice Bowl"}}],
+                    "recipes": [
+                        {"id": 11, "title": "Roast Veg", "purpose": "meal"},
+                        {"id": 12, "title": "Rice Bowl", "purpose": "meal"},
+                    ],
                     "servings": 2,
                 }
             ],
@@ -848,7 +835,7 @@ def test_patch_entry_switch_to_non_planned_clears_recipe_and_syncs_mode_row(tmp_
             1,
             {
                 "mode": "leftover",
-                "recipe": {"id": 11, "title": "Roast Veg"},
+                "recipes": [{"id": 11, "title": "Roast Veg", "purpose": "meal"}],
             },
             ensure_tandoor_writes_enabled=ensure_writes_enabled,
         )
@@ -856,8 +843,7 @@ def test_patch_entry_switch_to_non_planned_clears_recipe_and_syncs_mode_row(tmp_
 
     entry = updated["data"]["entries"][0]
     assert entry["mode"] == "leftover"
-    assert entry["recipe"] is None
-    assert entry["extra_recipes"] == []
+    assert entry["recipes"] == []
 
     rows = list(client.meal_plan_rows.values())
     assert len(rows) == 1
@@ -881,8 +867,7 @@ def test_patch_entry_recipe_removal_deletes_tracked_shopping_entries(tmp_path) -
                     "day_index": 0,
                     "date": "2026-08-10",
                     "mode": "planned",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
-                    "extra_recipes": [],
+                    "recipes": [{ "id": 11, "title": "Roast Veg", "purpose": "meal" }],
                     "servings": 2,
                 }
             ],
@@ -947,8 +932,7 @@ def test_patch_entry_updates_all_rows_when_remote_snapshot_is_sparse(tmp_path) -
                     "day_index": 0,
                     "date": "2026-08-10",
                     "mode": "planned",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
-                    "extra_recipes": [],
+                    "recipes": [{ "id": 11, "title": "Roast Veg", "purpose": "meal" }],
                     "servings": 2,
                 },
                 {
@@ -956,8 +940,7 @@ def test_patch_entry_updates_all_rows_when_remote_snapshot_is_sparse(tmp_path) -
                     "day_index": 1,
                     "date": "2026-08-11",
                     "mode": "leftover",
-                    "recipe": None,
-                    "extra_recipes": [],
+                    "recipes": [],
                     "servings": 2,
                 },
                 {
@@ -965,8 +948,7 @@ def test_patch_entry_updates_all_rows_when_remote_snapshot_is_sparse(tmp_path) -
                     "day_index": 2,
                     "date": "2026-08-12",
                     "mode": "takeout",
-                    "recipe": None,
-                    "extra_recipes": [],
+                    "recipes": [],
                     "servings": 2,
                 },
                 {
@@ -974,8 +956,7 @@ def test_patch_entry_updates_all_rows_when_remote_snapshot_is_sparse(tmp_path) -
                     "day_index": 3,
                     "date": "2026-08-13",
                     "mode": "empty",
-                    "recipe": None,
-                    "extra_recipes": [],
+                    "recipes": [],
                     "servings": 2,
                 },
             ],
@@ -1035,8 +1016,7 @@ def test_patch_entry_move_updates_tracked_tandoor_row_in_place(tmp_path) -> None
                     "day_index": 0,
                     "date": "2026-08-10",
                     "mode": "leftover",
-                    "recipe": None,
-                    "extra_recipes": [],
+                    "recipes": [],
                     "servings": 2,
                 },
                 {
@@ -1044,8 +1024,7 @@ def test_patch_entry_move_updates_tracked_tandoor_row_in_place(tmp_path) -> None
                     "day_index": 1,
                     "date": "2026-08-11",
                     "mode": "empty",
-                    "recipe": None,
-                    "extra_recipes": [],
+                    "recipes": [],
                     "servings": 2,
                 },
             ],
@@ -1097,8 +1076,7 @@ def test_patch_entry_removes_obsolete_tandoor_sync_record(tmp_path) -> None:
                     "day_index": 0,
                     "date": "2026-08-10",
                     "mode": "leftover",
-                    "recipe": None,
-                    "extra_recipes": [],
+                    "recipes": [],
                     "servings": 2,
                 }
             ],
@@ -1121,7 +1099,7 @@ def test_patch_entry_removes_obsolete_tandoor_sync_record(tmp_path) -> None:
         service.patch_entry(
             plan_id,
             1,
-            {"mode": "planned", "recipe": None},
+            {"mode": "planned", "recipes": []},
             ensure_tandoor_writes_enabled=ensure_writes_enabled,
         )
     )
@@ -1146,8 +1124,7 @@ def test_generate_shopping_sync_preserves_mode_only_rows(tmp_path) -> None:
                     "day_index": 0,
                     "date": "2026-08-10",
                     "mode": "planned",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
-                    "extra_recipes": [],
+                    "recipes": [{ "id": 11, "title": "Roast Veg", "purpose": "meal" }],
                     "servings": 2,
                 },
                 {
@@ -1155,8 +1132,7 @@ def test_generate_shopping_sync_preserves_mode_only_rows(tmp_path) -> None:
                     "day_index": 1,
                     "date": "2026-08-11",
                     "mode": "leftover",
-                    "recipe": None,
-                    "extra_recipes": [],
+                    "recipes": [],
                     "servings": 2,
                 },
             ],
@@ -1205,8 +1181,7 @@ def test_delete_plan_removes_tracked_shopping_before_meal_rows(tmp_path) -> None
                 {
                     "entry_id": 1,
                     "mode": "planned",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
-                    "extra_recipes": [],
+                    "recipes": [{ "id": 11, "title": "Roast Veg", "purpose": "meal" }],
                 }
             ],
             "keyword_ids": [],
@@ -1219,7 +1194,7 @@ def test_delete_plan_removes_tracked_shopping_before_meal_rows(tmp_path) -> None
     state.set_meal_plan_tandoor_sync(
         plan_id,
         {
-            "entry:1:primary:recipe:11": {
+            "entry:1:recipe:0:id:11": {
                 "meal_plan_row_id": 9,
             }
         },
@@ -1249,8 +1224,7 @@ def test_delete_plan_aborts_when_shopping_cleanup_fails(tmp_path) -> None:
                 {
                     "entry_id": 1,
                     "mode": "planned",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
-                    "extra_recipes": [],
+                    "recipes": [{ "id": 11, "title": "Roast Veg", "purpose": "meal" }],
                 }
             ],
             "keyword_ids": [],
@@ -1263,7 +1237,7 @@ def test_delete_plan_aborts_when_shopping_cleanup_fails(tmp_path) -> None:
     state.set_meal_plan_tandoor_sync(
         plan_id,
         {
-            "entry:1:primary:recipe:11": {
+            "entry:1:recipe:0:id:11": {
                 "meal_plan_row_id": 9,
             }
         },
@@ -1294,8 +1268,7 @@ def test_delete_plan_treats_missing_shopping_entries_as_already_removed(tmp_path
                 {
                     "entry_id": 1,
                     "mode": "planned",
-                    "recipe": {"id": 11, "title": "Roast Veg"},
-                    "extra_recipes": [],
+                    "recipes": [{ "id": 11, "title": "Roast Veg", "purpose": "meal" }],
                 }
             ],
             "keyword_ids": [],
@@ -1308,7 +1281,7 @@ def test_delete_plan_treats_missing_shopping_entries_as_already_removed(tmp_path
     state.set_meal_plan_tandoor_sync(
         plan_id,
         {
-            "entry:1:primary:recipe:11": {
+            "entry:1:recipe:0:id:11": {
                 "meal_plan_row_id": 9,
             }
         },
