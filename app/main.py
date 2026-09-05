@@ -1,5 +1,7 @@
 import logging
+import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI
@@ -8,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.api import router as api_router, server_state
@@ -19,6 +21,8 @@ from app.user_app import render_user_app
 
 configure_logging()
 logger = logging.getLogger("wfd.api")
+_CLIENT_MANIFEST_PATH = Path("app/static/dist/manifest.json")
+_SERVICE_WORKER_PATH = Path("app/static/shopping-sw.js")
 
 
 @asynccontextmanager
@@ -43,6 +47,8 @@ async def correlation_id_middleware(request: Request, call_next):
     request.state.correlation_id = correlation_id
     response = await call_next(request)
     response.headers["X-Correlation-ID"] = correlation_id
+    if request.url.path.startswith("/static/dist/") and response.status_code == 200:
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return response
 
 
@@ -91,11 +97,18 @@ async def inspect() -> object:
 
 
 @app.get("/shopping-sw.js", include_in_schema=False)
-async def shopping_service_worker() -> FileResponse:
-    return FileResponse(
-        "app/static/shopping-sw.js",
+async def shopping_service_worker() -> Response:
+    manifest = json.loads(_CLIENT_MANIFEST_PATH.read_text(encoding="utf-8"))
+    worker = _SERVICE_WORKER_PATH.read_text(encoding="utf-8")
+    worker = worker.replace("__WFD_BUILD_ID__", manifest["build_id"])
+    worker = worker.replace("__WFD_CLIENT_ASSETS__", json.dumps(manifest["assets"]))
+    return Response(
+        content=worker,
         media_type="application/javascript",
-        headers={"Service-Worker-Allowed": "/"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Service-Worker-Allowed": "/",
+        },
     )
 
 

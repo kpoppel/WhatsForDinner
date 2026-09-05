@@ -1,0 +1,10 @@
+{
+  "name": "whats-for-dinner-client",
+  "private": true,
+  "scripts": {
+    "build:client": "node scripts/build-client.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.10"
+  }
+}

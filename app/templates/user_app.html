@@ -6,8 +6,7 @@
   <meta name="theme-color" content="#1d5c4f" />
   <link rel="manifest" href="/shopping.webmanifest" />
   <title>WhatsForDinner</title>
-  <link rel="stylesheet" href="/static/shopping_app.css?v=20260817m" />
-  <link rel="stylesheet" href="/static/user_app.css?v=20260821a" />
+  <link rel="stylesheet" href="{{ app_css }}" />
 </head>
 <body>
   <main class="wf-shell">
@@ -373,11 +372,6 @@
 
   <script>window.WFD_API_PREFIX = {{ api_prefix_js }};</script>
   <script>window.WFD_TANDOOR_BASE_URL = {{ tandoor_base_url_js }};</script>
-  <script type="module" src="/static/js/shopping.js?v=20260817m"></script>
-  <script type="module" src="/static/shop_editor.js?v=20260817m"></script>
-  <script type="module" src="/static/meal_plans.js?v=20260821a"></script>
-  <script type="module" src="/static/home_tab.js?v=20260820a"></script>
-  <script type="module" src="/static/settings_tab.js?v=20260817m"></script>
-  <script type="module" src="/static/user_shell.js?v=20260817m"></script>
+  <script type="module" src="{{ app_js }}"></script>
 </body>
 </html>

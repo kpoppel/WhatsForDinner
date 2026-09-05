@@ -1,0 +1,10 @@
+.git
+.venv
+node_modules
+app/static/dist
+__pycache__
+*.pyc
+.pytest_cache
+.coverage
+htmlcov
+data

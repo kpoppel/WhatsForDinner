@@ -156,6 +156,26 @@ def test_rudimentary_user_app_route() -> None:
     assert response.status_code == 200
     assert "WhatsForDinner" in response.text
     assert "Shopping Mode" in response.text
+    assert "/static/dist/client-" in response.text
+    assert "?v=" not in response.text
+
+
+def test_hashed_client_asset_is_immutable() -> None:
+    response = client.get("/app")
+    asset_path = response.text.split('src="')[1].split('"')[0]
+
+    asset_response = client.get(asset_path)
+    assert asset_response.status_code == 200
+    assert asset_response.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+
+def test_service_worker_uses_the_current_client_build() -> None:
+    response = client.get("/shopping-sw.js")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"
+    assert "__WFD_BUILD_ID__" not in response.text
+    assert "__WFD_CLIENT_ASSETS__" not in response.text
+    assert "/static/dist/client-" in response.text
 
 
 def test_standalone_shopping_app_route_removed() -> None:
