@@ -33,6 +33,8 @@ router = APIRouter(tags=["mobile-api"])
 logger = logging.getLogger(__name__)
 meal_plan_sync_locks: dict[int, asyncio.Lock] = {}
 shopping_sync_lock = asyncio.Lock()
+SYNC_RETRY_DELAY_SECONDS = 5
+SYNC_MAX_RETRIES = 10
 client = TandoorClient()
 server_state = ServerState(
     settings.stage2_data_dir,
@@ -48,40 +50,76 @@ def _meal_plan_service() -> MealPlanService:
 
 
 async def _sync_pending_meal_plan_entry(plan_id: int, entry_id: int) -> None:
-    try:
-        await _meal_plan_service().sync_pending_entry(
-            plan_id,
-            entry_id,
-            _ensure_tandoor_writes_enabled,
-        )
-    except (HTTPException, TandoorError) as exc:
-        logger.warning("meal_plan_entry_sync_deferred plan_id=%s entry_id=%s error=%s", plan_id, entry_id, exc)
+    if plan_id not in meal_plan_sync_locks:
+        meal_plan_sync_locks[plan_id] = asyncio.Lock()
+    async with meal_plan_sync_locks[plan_id]:
+        for retry_count in range(SYNC_MAX_RETRIES + 1):
+            try:
+                await _meal_plan_service().sync_pending_entry(
+                    plan_id,
+                    entry_id,
+                    _ensure_tandoor_writes_enabled,
+                )
+                return
+            except HTTPException as exc:
+                logger.warning("meal_plan_entry_sync_deferred plan_id=%s entry_id=%s error=%s", plan_id, entry_id, exc)
+                return
+            except TandoorError as exc:
+                if retry_count == SYNC_MAX_RETRIES:
+                    logger.warning("meal_plan_entry_sync_deferred plan_id=%s entry_id=%s retries=%s error=%s", plan_id, entry_id, retry_count, exc)
+                    return
+                logger.warning("meal_plan_entry_sync_retry plan_id=%s entry_id=%s retry=%s error=%s", plan_id, entry_id, retry_count + 1, exc)
+                await asyncio.sleep(SYNC_RETRY_DELAY_SECONDS)
 
 
 async def _sync_pending_meal_plan(plan_id: int) -> None:
     if plan_id not in meal_plan_sync_locks:
         meal_plan_sync_locks[plan_id] = asyncio.Lock()
     async with meal_plan_sync_locks[plan_id]:
-        try:
-            await _meal_plan_service().sync_pending_plan(plan_id, _ensure_tandoor_writes_enabled)
-        except (HTTPException, TandoorError) as exc:
-            logger.warning("meal_plan_sync_deferred plan_id=%s error=%s", plan_id, exc)
+        for retry_count in range(SYNC_MAX_RETRIES + 1):
+            try:
+                await _meal_plan_service().sync_pending_plan(plan_id, _ensure_tandoor_writes_enabled)
+                return
+            except HTTPException as exc:
+                logger.warning("meal_plan_sync_deferred plan_id=%s error=%s", plan_id, exc)
+                return
+            except TandoorError as exc:
+                if retry_count == SYNC_MAX_RETRIES:
+                    logger.warning("meal_plan_sync_deferred plan_id=%s retries=%s error=%s", plan_id, retry_count, exc)
+                    return
+                logger.warning("meal_plan_sync_retry plan_id=%s retry=%s error=%s", plan_id, retry_count + 1, exc)
+                await asyncio.sleep(SYNC_RETRY_DELAY_SECONDS)
 
 
 async def _sync_pending_shopping_changes() -> None:
     async with shopping_sync_lock:
-        try:
-            await _shopping_service().apply_sync_changes(
-                changes=[],
-                ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
-                extract_reminder_patch=_extract_reminder_patch,
-                build_local_entry_payload=_build_local_entry_payload,
-                local_store_group_payload=_local_store_group_payload,
-                status_to_tandoor_fields=_status_to_tandoor_fields,
-                effective_status=_effective_status,
-            )
-        except (HTTPException, TandoorError) as exc:
-            logger.warning("shopping_sync_deferred error=%s", exc)
+        for retry_count in range(SYNC_MAX_RETRIES + 1):
+            try:
+                response = await _shopping_service().apply_sync_changes(
+                    changes=[],
+                    ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
+                    extract_reminder_patch=_extract_reminder_patch,
+                    build_local_entry_payload=_build_local_entry_payload,
+                    local_store_group_payload=_local_store_group_payload,
+                    status_to_tandoor_fields=_status_to_tandoor_fields,
+                    effective_status=_effective_status,
+                )
+            except HTTPException as exc:
+                logger.warning("shopping_sync_deferred error=%s", exc)
+                return
+            except TandoorError as exc:
+                response = {"deferred": True}
+                error = exc
+            else:
+                error = None
+
+            if not response["deferred"]:
+                return
+            if retry_count == SYNC_MAX_RETRIES:
+                logger.warning("shopping_sync_deferred retries=%s error=%s", retry_count, error)
+                return
+            logger.warning("shopping_sync_retry retry=%s error=%s", retry_count + 1, error)
+            await asyncio.sleep(SYNC_RETRY_DELAY_SECONDS)
 
 
 def _ocr_client() -> GeminiOcrClient:
@@ -777,7 +815,17 @@ async def generate_meal_plan(payload: GenerateMealPlanRequest = Body(...)) -> di
 
 
 @router.get("/meal-plans/stored")
-async def list_stored_meal_plans() -> dict:
+async def list_stored_meal_plans(background_tasks: BackgroundTasks) -> dict:
+    for pending_sync in server_state.pending_meal_plan_syncs():
+        background_tasks.add_task(_sync_pending_meal_plan, pending_sync["plan_id"])
+    for plan in server_state.list_meal_plans():
+        for pending_change in server_state.pending_meal_plan_changes(int(plan["plan_id"])):
+            background_tasks.add_task(
+                _sync_pending_meal_plan_entry,
+                pending_change["plan_id"],
+                pending_change["entry_id"],
+            )
+
     plans = server_state.list_meal_plans()
     summary: list[dict[str, Any]] = []
     for plan in plans:
@@ -803,10 +851,14 @@ async def list_stored_meal_plans() -> dict:
 
 
 @router.get("/meal-plans/{plan_id}")
-async def get_meal_plan_stage2(plan_id: int) -> dict:
+async def get_meal_plan_stage2(plan_id: int, background_tasks: BackgroundTasks) -> dict:
     plan = server_state.get_meal_plan(plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="Meal plan not found.")
+    if server_state.pending_meal_plan_sync(plan_id) is not None:
+        background_tasks.add_task(_sync_pending_meal_plan, plan_id)
+    for pending_change in server_state.pending_meal_plan_changes(plan_id):
+        background_tasks.add_task(_sync_pending_meal_plan_entry, plan_id, pending_change["entry_id"])
     return {"source": "local-state", "data": _enrich_plan_recipe_urls(plan)}
 
 

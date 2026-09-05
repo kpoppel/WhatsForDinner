@@ -519,7 +519,7 @@ def test_stage2_meal_plan_uses_default_diners_when_missing(monkeypatch, tmp_path
 
 
 def test_stage2_meal_plan_generate_and_entry_ops(monkeypatch, tmp_path) -> None:
-    use_temp_state(monkeypatch, tmp_path)
+    state = use_temp_state(monkeypatch, tmp_path)
 
     class FakeClient(MealPlanRowStatefulClient):
         def __init__(self) -> None:
@@ -651,6 +651,11 @@ def test_stage2_meal_plan_generate_and_entry_ops(monkeypatch, tmp_path) -> None:
 
     plan_id = plan["plan_id"]
     entry_id = plan["entries"][0]["entry_id"]
+
+    state.queue_meal_plan_sync(plan_id, state.get_meal_plan_tandoor_sync(plan_id))
+    refresh_res = client.get("/api/v1/meal-plans/stored")
+    assert refresh_res.status_code == 200
+    assert state.pending_meal_plan_sync(plan_id) is None
 
     move_res = client.patch(
         f"/api/v1/meal-plans/{plan_id}/entries/{entry_id}",

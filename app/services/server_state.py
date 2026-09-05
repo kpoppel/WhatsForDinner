@@ -354,6 +354,15 @@ class ServerState:
             change = data["pending_meal_plan_changes"].get(f"{plan_id}:{entry_id}")
             return deepcopy(change) if isinstance(change, dict) else None
 
+    def pending_meal_plan_changes(self, plan_id: int) -> list[dict[str, Any]]:
+        with self._lock:
+            data = self._load()
+            return [
+                deepcopy(change)
+                for change in data["pending_meal_plan_changes"].values()
+                if isinstance(change, dict) and change.get("plan_id") == plan_id
+            ]
+
     def clear_pending_meal_plan_change(self, plan_id: int, entry_id: int) -> None:
         with self._lock:
             data = self._load()
@@ -379,6 +388,15 @@ class ServerState:
             data = self._load()
             sync = data["pending_meal_plan_syncs"].get(str(plan_id))
             return deepcopy(sync) if isinstance(sync, dict) else None
+
+    def pending_meal_plan_syncs(self) -> list[dict[str, Any]]:
+        with self._lock:
+            data = self._load()
+            return [
+                deepcopy(sync)
+                for sync in data["pending_meal_plan_syncs"].values()
+                if isinstance(sync, dict)
+            ]
 
     def clear_pending_meal_plan_sync(self, plan_id: int, revision: int) -> None:
         with self._lock:
