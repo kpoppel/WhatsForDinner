@@ -406,7 +406,8 @@ def test_stage2_sync_accepts_queued_at_metadata(monkeypatch, tmp_path) -> None:
 
     assert res.status_code == 200
     payload = res.json()
-    assert len(payload["applied"]) == 1
+    assert payload["deferred"] is True
+    assert payload["applied"] == []
     assert payload["rejected"] == []
 
 
@@ -417,7 +418,8 @@ def test_stage2_meal_plan_mutations_reject_unknown_fields(monkeypatch, tmp_path)
         async def list_recipes(self, search=None, limit=20, keyword_ids=None):
             return {"results": [{"id": 9, "name": "Default Pantry Pick"}]}
 
-    monkeypatch.setattr("app.api.client", FakeClient())
+    fake_client = FakeClient()
+    monkeypatch.setattr("app.api.client", fake_client)
 
     gen_res = client.post(
         "/api/v1/meal-plans/generate",
@@ -625,7 +627,8 @@ def test_stage2_meal_plan_generate_and_entry_ops(monkeypatch, tmp_path) -> None:
                     self.shopping_entries.pop(entry_id, None)
             return {"deleted": int(meal_id)}
 
-    monkeypatch.setattr("app.api.client", FakeClient())
+    fake_client = FakeClient()
+    monkeypatch.setattr("app.api.client", fake_client)
 
     client.put("/api/v1/config/keywords/selected", json={"keyword_ids": [2]})
 
@@ -654,6 +657,16 @@ def test_stage2_meal_plan_generate_and_entry_ops(monkeypatch, tmp_path) -> None:
         json={"target_day_index": 2},
     )
     assert move_res.status_code == 200
+    moved_dates = {
+        row["from_date"]
+        for row in fake_client.meal_plan_rows.values()
+    }
+    assert moved_dates == {
+        "2026-08-17T18:00:00Z",
+        "2026-08-18T18:00:00Z",
+        "2026-08-19T18:00:00Z",
+        "2026-08-20T18:00:00Z",
+    }
 
     add_res = client.post(
         f"/api/v1/meal-plans/{plan_id}/entries",
@@ -1358,8 +1371,11 @@ def test_stage2_shopping_mutation_parity_direct_vs_sync(monkeypatch, tmp_path) -
             )
             assert create_res.status_code == 200
             create_payload_json = create_res.json()
-            assert len(create_payload_json["applied"]) == 1, create_payload_json
-            created_id = create_payload_json["applied"][0]["data"]["id"]
+            assert create_payload_json["deferred"] is True, create_payload_json
+            after_create = client.get("/api/v1/shopping-list/view")
+            assert after_create.status_code == 200
+            created_rows = after_create.json()["data"]["sections"]["skipped"]
+            created_id = next(row["id"] for row in created_rows if row["name"] == "Milk")
         else:
             create_res = client.post("/api/v1/shopping-list/entries", json=create_payload)
             assert create_res.status_code == 200

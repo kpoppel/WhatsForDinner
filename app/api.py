@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, Query, UploadFile
@@ -30,6 +31,8 @@ from app.services.tandoor_client import TandoorClient, TandoorError
 
 router = APIRouter(tags=["mobile-api"])
 logger = logging.getLogger(__name__)
+meal_plan_sync_locks: dict[int, asyncio.Lock] = {}
+shopping_sync_lock = asyncio.Lock()
 client = TandoorClient()
 server_state = ServerState(
     settings.stage2_data_dir,
@@ -53,6 +56,32 @@ async def _sync_pending_meal_plan_entry(plan_id: int, entry_id: int) -> None:
         )
     except (HTTPException, TandoorError) as exc:
         logger.warning("meal_plan_entry_sync_deferred plan_id=%s entry_id=%s error=%s", plan_id, entry_id, exc)
+
+
+async def _sync_pending_meal_plan(plan_id: int) -> None:
+    if plan_id not in meal_plan_sync_locks:
+        meal_plan_sync_locks[plan_id] = asyncio.Lock()
+    async with meal_plan_sync_locks[plan_id]:
+        try:
+            await _meal_plan_service().sync_pending_plan(plan_id, _ensure_tandoor_writes_enabled)
+        except (HTTPException, TandoorError) as exc:
+            logger.warning("meal_plan_sync_deferred plan_id=%s error=%s", plan_id, exc)
+
+
+async def _sync_pending_shopping_changes() -> None:
+    async with shopping_sync_lock:
+        try:
+            await _shopping_service().apply_sync_changes(
+                changes=[],
+                ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
+                extract_reminder_patch=_extract_reminder_patch,
+                build_local_entry_payload=_build_local_entry_payload,
+                local_store_group_payload=_local_store_group_payload,
+                status_to_tandoor_fields=_status_to_tandoor_fields,
+                effective_status=_effective_status,
+            )
+        except (HTTPException, TandoorError) as exc:
+            logger.warning("shopping_sync_deferred error=%s", exc)
 
 
 def _ocr_client() -> GeminiOcrClient:
@@ -814,13 +843,17 @@ async def patch_meal_plan_entry(
     background_tasks: BackgroundTasks,
     payload: MealPlanEntryPatchRequest = Body(...),
 ) -> dict:
+    request_payload = payload.model_dump(mode="python", exclude_unset=True)
     result = await _meal_plan_service().patch_entry(
         plan_id,
         entry_id,
-        payload.model_dump(mode="python", exclude_unset=True),
+        request_payload,
         defer_tandoor_sync=True,
     )
-    background_tasks.add_task(_sync_pending_meal_plan_entry, plan_id, entry_id)
+    if "target_day_index" in request_payload:
+        background_tasks.add_task(_sync_pending_meal_plan, plan_id)
+    else:
+        background_tasks.add_task(_sync_pending_meal_plan_entry, plan_id, entry_id)
     return result
 
 
@@ -850,19 +883,14 @@ async def meal_plan_to_shopping_list(
 
 
 @router.get("/shopping-list/view")
-async def shopping_list_view(limit: int = Query(default=300, ge=1, le=1000)) -> dict:
+async def shopping_list_view(
+    background_tasks: BackgroundTasks,
+    limit: int = Query(default=300, ge=1, le=1000),
+) -> dict:
     shopping_service = _shopping_service()
     pending_changes = list(server_state.pending_shopping_changes().values())
     if pending_changes:
-        await shopping_service.apply_sync_changes(
-            changes=pending_changes,
-            ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
-            extract_reminder_patch=_extract_reminder_patch,
-            build_local_entry_payload=_build_local_entry_payload,
-            local_store_group_payload=_local_store_group_payload,
-            status_to_tandoor_fields=_status_to_tandoor_fields,
-            effective_status=_effective_status,
-        )
+        background_tasks.add_task(_sync_pending_shopping_changes)
     return await shopping_service.get_view(
         limit=limit,
         extract_results=_extract_results,
@@ -937,19 +965,15 @@ async def shopping_list_ocr(image: UploadFile = File(...)) -> ShoppingListOcrRes
 
 
 @router.post("/shopping-list/sync")
-async def shopping_sync_post(payload: ShoppingSyncRequest = Body(...)) -> dict:
-    response = await _shopping_service().apply_sync_changes(
-        changes=[change.model_dump(mode="python") for change in payload.changes],
-        ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
-        extract_reminder_patch=_extract_reminder_patch,
-        build_local_entry_payload=_build_local_entry_payload,
-        local_store_group_payload=_local_store_group_payload,
-        status_to_tandoor_fields=_status_to_tandoor_fields,
-        effective_status=_effective_status,
-    )
+async def shopping_sync_post(
+    background_tasks: BackgroundTasks,
+    payload: ShoppingSyncRequest = Body(...),
+) -> dict:
+    server_state.set_pending_shopping_changes([change.model_dump(mode="python") for change in payload.changes])
+    background_tasks.add_task(_sync_pending_shopping_changes)
     return {
-        "source": "tandoor+local-state",
-        "deferred": response["deferred"],
-        "applied": response["applied"],
-        "rejected": response["rejected"],
+        "source": "local-state",
+        "deferred": True,
+        "applied": [],
+        "rejected": [],
     }

@@ -1050,9 +1050,13 @@ def test_patch_entry_move_updates_tracked_tandoor_row_in_place(tmp_path) -> None
             plan_id,
             1,
             {"target_day_index": 1},
-            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            defer_tandoor_sync=True,
         )
     )
+
+    assert client.updated_meal_plan_calls == []
+    assert state.pending_meal_plan_sync(plan_id) is not None
+    asyncio.run(service.sync_pending_plan(plan_id, ensure_writes_enabled))
 
     assert [meal_id for meal_id, _ in client.updated_meal_plan_calls] == [original_row_id, 2]
     assert client.updated_meal_plan_calls[0][1]["from_date"] == "2026-08-11T18:00:00Z"

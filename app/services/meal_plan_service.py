@@ -628,6 +628,27 @@ class MealPlanService:
             self._state.set_meal_plan_tandoor_sync(plan_id, self._serialize_instance_sync(retained_sync))
             self._state.clear_pending_meal_plan_change(plan_id, entry_id)
 
+    async def sync_pending_plan(self, plan_id: int, ensure_tandoor_writes_enabled) -> None:
+        """Apply the latest queued full-plan synchronization after reordering."""
+        pending_sync = self._state.pending_meal_plan_sync(plan_id)
+        if pending_sync is None:
+            return
+
+        lock = self._get_plan_mutation_lock(plan_id)
+        async with lock:
+            plan = self._state.get_meal_plan(plan_id)
+            if plan is None:
+                self._state.clear_pending_meal_plan_sync(plan_id, pending_sync["revision"])
+                return
+            await self._sync_tandoor_meal_plan_rows(
+                plan_id=plan_id,
+                plan_payload=plan,
+                ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
+                operation_name="meal_plan_reorder_sync",
+                previous_sync=pending_sync["previous_sync"],
+            )
+            self._state.clear_pending_meal_plan_sync(plan_id, pending_sync["revision"])
+
     async def _delete_all_tandoor_meal_plan_rows(
         self,
         *,
@@ -970,8 +991,11 @@ class MealPlanService:
 
             updated = self._state.update_meal_plan(plan_id, {"entries": entries})
 
-            if defer_tandoor_sync and target_day_index is None and isinstance(updated, dict):
-                self._state.queue_meal_plan_entry_sync(plan_id, entry_id, previous_sync)
+            if defer_tandoor_sync and isinstance(updated, dict):
+                if target_day_index is None:
+                    self._state.queue_meal_plan_entry_sync(plan_id, entry_id, previous_sync)
+                else:
+                    self._state.queue_meal_plan_sync(plan_id, previous_sync)
             elif ensure_tandoor_writes_enabled is not None and isinstance(updated, dict):
                 try:
                     await self._sync_tandoor_meal_plan_rows(

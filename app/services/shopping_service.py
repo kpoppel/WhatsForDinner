@@ -237,7 +237,8 @@ class ShoppingService:
                 valid_changes.append(change)
 
             self._state.set_pending_shopping_changes(valid_changes)
-            changes_to_apply = list(self._state.pending_shopping_changes().values())
+            pending_changes = self._state.pending_shopping_changes()
+            changes_to_apply = list(pending_changes.values())
             bulk_completed = [
                 (idx, change)
                 for idx, change in enumerate(changes_to_apply)
@@ -349,7 +350,7 @@ class ShoppingService:
                 except (TandoorError, ValueError) as exc:
                     rejected.append({"index": idx, "reason": str(exc)})
 
-            self._state.clear_pending_shopping_changes()
+            self._state.clear_pending_shopping_changes(pending_changes)
             return {
                 "deferred": False,
                 "applied": applied,

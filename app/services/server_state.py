@@ -360,6 +360,34 @@ class ServerState:
             data["pending_meal_plan_changes"].pop(f"{plan_id}:{entry_id}", None)
             self._save(data)
 
+    def queue_meal_plan_sync(self, plan_id: int, previous_sync: dict[str, dict[str, Any]]) -> None:
+        """Persist a full-plan sync request, coalescing rapid reorders per plan."""
+        with self._lock:
+            data = self._load()
+            key = str(plan_id)
+            existing = data["pending_meal_plan_syncs"].get(key)
+            revision = existing["revision"] + 1 if isinstance(existing, dict) else 1
+            data["pending_meal_plan_syncs"][key] = {
+                "plan_id": plan_id,
+                "previous_sync": existing["previous_sync"] if isinstance(existing, dict) else previous_sync,
+                "revision": revision,
+            }
+            self._save(data)
+
+    def pending_meal_plan_sync(self, plan_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            data = self._load()
+            sync = data["pending_meal_plan_syncs"].get(str(plan_id))
+            return deepcopy(sync) if isinstance(sync, dict) else None
+
+    def clear_pending_meal_plan_sync(self, plan_id: int, revision: int) -> None:
+        with self._lock:
+            data = self._load()
+            pending_sync = data["pending_meal_plan_syncs"].get(str(plan_id))
+            if isinstance(pending_sync, dict) and pending_sync.get("revision") == revision:
+                data["pending_meal_plan_syncs"].pop(str(plan_id), None)
+                self._save(data)
+
     def allocate_entry_id(self) -> int:
         with self._lock:
             data = self._load()
@@ -498,8 +526,13 @@ class ServerState:
             pending = data.get("pending_shopping_changes", {})
             return deepcopy(pending) if isinstance(pending, dict) else {}
 
-    def clear_pending_shopping_changes(self) -> None:
+    def clear_pending_shopping_changes(self, expected_changes: dict[str, dict[str, Any]] | None = None) -> None:
         with self._lock:
             data = self._load()
-            data["pending_shopping_changes"] = {}
+            if expected_changes is None:
+                data["pending_shopping_changes"] = {}
+            else:
+                for key, expected_change in expected_changes.items():
+                    if data["pending_shopping_changes"].get(key) == expected_change:
+                        data["pending_shopping_changes"].pop(key)
             self._save(data)
