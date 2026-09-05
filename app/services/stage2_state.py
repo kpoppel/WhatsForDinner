@@ -237,6 +237,32 @@ class Stage2State:
             "default_notification_time": default_notification_time,
         }
 
+    def set_settings(
+        self,
+        default_diners: int,
+        default_notification_time: str,
+        no_repeat_days: int,
+        keyword_ids: list[int],
+    ) -> dict[str, Any]:
+        with self._lock:
+            data = self._load()
+            data["user_settings"] = {
+                "default_diners": default_diners,
+                "default_notification_time": default_notification_time,
+            }
+            data["meal_plan_rules"] = {"no_repeat_days": no_repeat_days}
+            data["selected_keyword_ids"] = keyword_ids
+            self._save(data)
+
+        return {
+            "user_settings": {
+                "default_diners": default_diners,
+                "default_notification_time": default_notification_time,
+            },
+            "meal_plan_rules": {"no_repeat_days": no_repeat_days},
+            "selected_keyword_ids": keyword_ids,
+        }
+
     def create_meal_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             data = self._load()

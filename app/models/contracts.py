@@ -35,6 +35,11 @@ class UserSettingsRequest(BaseModel):
         return self
 
 
+class SettingsRequest(UserSettingsRequest):
+    no_repeat_days: int = Field(ge=0)
+    keyword_ids: list[int]
+
+
 class MealPlanConstraints(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

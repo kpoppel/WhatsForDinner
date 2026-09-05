@@ -305,6 +305,30 @@ def test_stage2_user_settings_roundtrip(monkeypatch, tmp_path) -> None:
     assert get_updated.json()["data"]["default_notification_time"] == "07:30"
 
 
+def test_stage2_settings_update_persists_all_fields(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    put_res = client.put(
+        "/api/v1/config/settings",
+        json={
+            "default_diners": 4,
+            "default_notification_time": "07:30",
+            "no_repeat_days": 14,
+            "keyword_ids": [4, 2, 2],
+        },
+    )
+
+    assert put_res.status_code == 200
+    assert put_res.json()["data"] == {
+        "user_settings": {"default_diners": 4, "default_notification_time": "07:30"},
+        "meal_plan_rules": {"no_repeat_days": 14},
+        "selected_keyword_ids": [2, 4],
+    }
+    assert client.get("/api/v1/config/user-settings").json()["data"]["default_diners"] == 4
+    assert client.get("/api/v1/config/meal-plan-rules").json()["data"]["no_repeat_days"] == 14
+    assert client.get("/api/v1/config/keywords/selected").json()["selected_keyword_ids"] == [2, 4]
+
+
 def test_stage2_user_settings_rejects_unknown_field(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 

@@ -13,6 +13,7 @@ from app.models.contracts import (
     MealPlanPatchRequest,
     MealPlanRulesRequest,
     SetSelectedKeywordsRequest,
+    SettingsRequest,
     ShoppingEntryCreateRequest,
     ShoppingEntryPatchRequest,
     ShoppingListOcrResponse,
@@ -643,6 +644,24 @@ async def set_meal_plan_rules(payload: MealPlanRulesRequest = Body(...)) -> dict
     return {
         "source": "local-state",
         "data": rules,
+    }
+
+
+@router.put("/config/settings")
+async def set_settings(payload: SettingsRequest = Body(...)) -> dict:
+    default_diners = int(payload.default_diners)
+    default_notification_time = payload.default_notification_time.strip()
+    no_repeat_days = int(payload.no_repeat_days)
+    keyword_ids = sorted({int(value) for value in payload.keyword_ids})
+
+    return {
+        "source": "local-state",
+        "data": stage2_state.set_settings(
+            default_diners,
+            default_notification_time,
+            no_repeat_days,
+            keyword_ids,
+        ),
     }
 
 

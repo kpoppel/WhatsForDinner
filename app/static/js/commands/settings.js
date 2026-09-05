@@ -26,19 +26,13 @@ export async function saveSettingsData({
   noRepeatDays,
   keywordIds,
 }) {
-  await executeSettingsRequest(() => api("/config/user-settings", {
+  await executeSettingsRequest(() => api("/config/settings", {
     method: "PUT",
     body: JSON.stringify({
       default_diners: defaultDiners,
       default_notification_time: defaultReminderTime,
+      no_repeat_days: noRepeatDays,
+      keyword_ids: keywordIds,
     }),
-  }));
-  await executeSettingsRequest(() => api("/config/meal-plan-rules", {
-    method: "PUT",
-    body: JSON.stringify({ no_repeat_days: noRepeatDays }),
-  }));
-  await executeSettingsRequest(() => api("/config/keywords/selected", {
-    method: "PUT",
-    body: JSON.stringify({ keyword_ids: keywordIds }),
   }));
 }
