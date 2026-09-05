@@ -12,13 +12,13 @@ import {
   writeMealPlanCache,
 } from "./js/store/commands.js";
 import {
-  readActiveMealPlanId,
   readHomeActivePlanCache,
   readMealPlanCache,
 } from "./js/store/selectors.js";
 import { assertRequiredFields } from "./js/contracts.js";
 import { selectSyncState } from "./js/store/selectors.js";
 import { createRenderScheduler } from "./js/render_scheduler.js";
+import { selectActiveMealPlan } from "./js/meal_plan_dates.js";
 
 (() => {
   const tandoorBaseUrl = typeof window.WFD_TANDOOR_BASE_URL === "string"
@@ -549,11 +549,8 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
       updatedAt: new Date().toISOString(),
     });
 
-    const preferredId = readActiveMealPlanId();
-    const preferredRow = Number.isInteger(preferredId)
-      ? rows.find((row) => Number(row?.plan_id) === preferredId)
-      : null;
-    const planId = Number((preferredRow || rows[0]).plan_id);
+    const activeRow = selectActiveMealPlan(rows);
+    const planId = Number(activeRow && activeRow.plan_id);
     if (!Number.isInteger(planId)) {
       return { plan: null, entries: [] };
     }
@@ -590,11 +587,8 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
       return { plan: null, entries: [] };
     }
 
-    const preferredId = readActiveMealPlanId();
-    const preferredRow = Number.isInteger(preferredId)
-      ? rows.find((row) => Number(row?.plan_id) === preferredId)
-      : null;
-    const planId = Number((preferredRow || rows[0]).plan_id);
+    const activeRow = selectActiveMealPlan(rows);
+    const planId = Number(activeRow && activeRow.plan_id);
     if (!Number.isInteger(planId)) {
       return { plan: null, entries: [] };
     }

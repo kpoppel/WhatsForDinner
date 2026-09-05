@@ -19,6 +19,7 @@ import {
 } from "./js/store/commands.js";
 import { readMealPlanCache, selectMealPlans, selectPendingProjections, selectSyncState } from "./js/store/selectors.js";
 import { assertRequiredFields } from "./js/contracts.js";
+import { isMealPlanActive, selectActiveMealPlan } from "./js/meal_plan_dates.js";
 import { createRenderScheduler } from "./js/render_scheduler.js";
 
 (() => {
@@ -508,7 +509,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
       const planId = Number(plan.plan_id);
       const card = document.createElement("article");
       card.className = "wf-plan-card";
-      if (planId === mealPlanState.activePlanId) {
+      if (isMealPlanActive(plan)) {
         card.classList.add("is-active");
       }
 
@@ -520,7 +521,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
       heading.textContent = planListDateRangeLabel(plan);
       header.appendChild(heading);
 
-      if (planId === mealPlanState.activePlanId) {
+      if (isMealPlanActive(plan)) {
         const badge = document.createElement("span");
         badge.className = "wf-plan-active-badge";
         badge.textContent = "Active";
@@ -1239,8 +1240,9 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
       return;
     }
 
-    const firstPlanId = Number(plans[0].plan_id);
-    writeActiveMealPlanId(firstPlanId);
+    const activePlan = selectActiveMealPlan(plans);
+    const activePlanId = Number(activePlan && activePlan.plan_id);
+    writeActiveMealPlanId(Number.isInteger(activePlanId) ? activePlanId : null);
 
     const planIds = new Set(plans.map((row) => Number(row.plan_id)).filter((id) => Number.isInteger(id)));
     for (const cachedPlanId of Array.from(planPreviewTitlesById.keys())) {
@@ -1249,14 +1251,14 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
       }
     }
 
-    if (Number.isInteger(firstPlanId) && !planPreviewTitlesById.has(firstPlanId)) {
+    if (Number.isInteger(activePlanId) && !planPreviewTitlesById.has(activePlanId)) {
       try {
-        const activePayload = await mealPlanCommands.get(firstPlanId);
+        const activePayload = await mealPlanCommands.get(activePlanId);
         assertRequiredFields(activePayload, ["data"], "Meal plan detail response");
         cachePlanPreview(activePayload.data);
         cachePlanDetail(activePayload.data);
       } catch {
-        const cached = cachedPlanDetail(firstPlanId);
+        const cached = cachedPlanDetail(activePlanId);
         if (cached) {
           cachePlanPreview(cached);
         }
@@ -1269,12 +1271,6 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
         setMealPlanSelection(null);
         setMealPlanDetail(null);
       }
-    }
-
-    if (Number.isInteger(mealPlanState.selectedPlanId)) {
-      writeActiveMealPlanId(mealPlanState.selectedPlanId);
-    } else if (Number.isInteger(firstPlanId)) {
-      writeActiveMealPlanId(firstPlanId);
     }
 
     renderPlanList(plans);
