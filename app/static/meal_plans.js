@@ -1991,6 +1991,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       }
 
       const patch = {
+        title: mealTitle,
         mode: editorMode,
         servings: editorServings,
         recipe: recipePayload,

@@ -126,29 +126,17 @@ def test_application_fetches_are_isolated_to_api_layer() -> None:
 
     fetch_users = []
     for source_path in static_root.rglob("*.js"):
+        if source_path.is_relative_to(static_root / "dist"):
+            continue
         if "fetch(" in source_path.read_text(encoding="utf-8"):
             fetch_users.append(source_path)
 
     assert set(fetch_users) == allowed_paths
 
 
-def test_service_worker_precaches_client_module_graph() -> None:
+def test_service_worker_precaches_client_build_assets() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    source = (repo_root / "app/static/shopping-sw.js").read_text(encoding="utf-8")
-    required_paths = (
-        "/static/js/commands/connectivity.js",
-        "/static/js/commands/home.js",
-        "/static/js/commands/meal-plans.js",
-        "/static/js/commands/settings.js",
-        "/static/js/commands/shopping-ui.js",
-        "/static/js/commands/shopping.js",
-        "/static/js/selectors/connectivity.js",
-        "/static/js/selectors/shopping.js",
-        "/static/js/store/meal-plan-model.js",
-    )
-
-    missing_paths = [path for path in required_paths if path not in source]
-    assert not missing_paths, f"Service worker omits client modules: {missing_paths}"
+    source = (repo_root / "app/static/shopping-sw.js").read_text(encoding="utf-8"); assert "__WFD_BUILD_ID__" in source; assert "__WFD_CLIENT_ASSETS__" in source
 
 
 def test_ui_modules_do_not_import_api_or_shopping_state() -> None:

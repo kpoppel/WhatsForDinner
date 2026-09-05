@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CURRENT_STATE_SCHEMA_VERSION = 11
+CURRENT_STATE_SCHEMA_VERSION = 12
 
 
 class MealPlanRulesModel(BaseModel):
@@ -23,18 +23,11 @@ class UserSettingsModel(BaseModel):
 class ShoppingInstanceSyncRowModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    instance_key: str
-    entry_id: int
-    recipe_id: int | None = None
     recipe_title: str | None = None
-    role: Literal["primary", "extra"]
-    slot_index: int | None = None
-    purpose: str | None = None
     date: str
     servings: int
     meal_plan_row_id: int | None = None
     shopping_recipe_id: int | None = None
-    shopping_activated: bool = False
 
 
 class MealPlanInstanceSyncModel(BaseModel):
@@ -63,7 +56,7 @@ class PendingShoppingChangeModel(BaseModel):
 class ServerStateDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[11]
+    schema_version: Literal[12]
     selected_keyword_ids: list[int]
     meal_plan_rules: MealPlanRulesModel
     user_settings: UserSettingsModel

@@ -285,6 +285,59 @@ class MealPlanService:
     def _instance_key_for_mode(self, *, entry_id: int, mode: str) -> str:
         return f"entry:{entry_id}:mode:{mode}"
 
+    def _identity_from_instance_key(self, instance_key: str) -> dict[str, Any] | None:
+        parts = instance_key.split(":")
+        if len(parts) < 4 or parts[0] != "entry":
+            return None
+        try:
+            entry_id = int(parts[1])
+        except ValueError:
+            return None
+        if entry_id < 1:
+            return None
+
+        if len(parts) == 4 and parts[2] == "mode" and parts[3] in {"leftover", "takeout", "empty"}:
+            return {
+                "entry_id": entry_id,
+                "recipe_id": None,
+                "role": "primary",
+                "slot_index": None,
+                "purpose": parts[3],
+            }
+
+        if len(parts) == 5 and parts[2] == "primary" and parts[3] == "recipe":
+            try:
+                recipe_id = int(parts[4])
+            except ValueError:
+                return None
+            if recipe_id < 1:
+                return None
+            return {
+                "entry_id": entry_id,
+                "recipe_id": recipe_id,
+                "role": "primary",
+                "slot_index": None,
+                "purpose": "meal",
+            }
+
+        if len(parts) == 6 and parts[2] == "extra" and parts[4] == "recipe":
+            try:
+                slot_index = int(parts[3])
+                recipe_id = int(parts[5])
+            except ValueError:
+                return None
+            if slot_index < 0 or recipe_id < 1:
+                return None
+            return {
+                "entry_id": entry_id,
+                "recipe_id": recipe_id,
+                "role": "extra",
+                "slot_index": slot_index,
+                "purpose": "extra",
+            }
+
+        return None
+
     def _desired_meal_plan_row_sync(
         self,
         plan_payload: dict[str, Any],
@@ -316,11 +369,18 @@ class MealPlanService:
             entry_date = entry.get("date")
             entry_date_text = str(entry_date) if isinstance(entry_date, str) else ""
             instance_key = self._instance_key_for_mode(entry_id=entry_id, mode=mode)
+            entry_title = entry.get("title")
+            custom_title = entry_title.strip() if isinstance(entry_title, str) else ""
+            default_title = {
+                "leftover": "Leftovers",
+                "takeout": "Takeout",
+                "empty": "Eating out",
+            }[mode]
             desired[instance_key] = {
                 "instance_key": instance_key,
                 "entry_id": entry_id,
                 "recipe_id": None,
-                "recipe_title": None,
+                "recipe_title": custom_title if custom_title else default_title,
                 "role": "primary",
                 "slot_index": None,
                 "purpose": mode,
@@ -334,8 +394,8 @@ class MealPlanService:
         return desired
 
     def _normalize_instance_row(self, *, instance_key: str, row: dict[str, Any]) -> dict[str, Any] | None:
-        recipe_id = row.get("recipe_id")
-        if recipe_id is not None and (not isinstance(recipe_id, int) or recipe_id < 1):
+        identity = self._identity_from_instance_key(instance_key)
+        if identity is None:
             return None
 
         servings = row.get("servings")
@@ -350,41 +410,19 @@ class MealPlanService:
         if not isinstance(shopping_recipe_id, int) or shopping_recipe_id < 1:
             shopping_recipe_id = None
 
-        shopping_activated = bool(row.get("shopping_activated", False))
-
-        entry_id = row.get("entry_id")
-        if not isinstance(entry_id, int):
-            entry_id = 0
-
-        role = row.get("role")
-        if role not in {"primary", "extra"}:
-            role = "primary"
-
-        slot_index = row.get("slot_index")
-        if not isinstance(slot_index, int):
-            slot_index = None
-
-        purpose = row.get("purpose")
-        if purpose is not None:
-            purpose = str(purpose)
-
         date_value = row.get("date")
         if not isinstance(date_value, str):
             date_value = ""
 
         return {
             "instance_key": instance_key,
-            "entry_id": entry_id,
-            "recipe_id": recipe_id,
+            **identity,
             "recipe_title": str(row.get("recipe_title")) if isinstance(row.get("recipe_title"), str) else None,
-            "role": role,
-            "slot_index": slot_index,
-            "purpose": purpose,
             "date": date_value,
             "servings": servings,
             "meal_plan_row_id": meal_plan_row_id,
             "shopping_recipe_id": shopping_recipe_id,
-            "shopping_activated": shopping_activated,
+            "shopping_activated": isinstance(shopping_recipe_id, int),
         }
 
     def _is_not_found_error(self, exc: TandoorError) -> bool:
@@ -463,8 +501,11 @@ class MealPlanService:
             elif purpose == "empty":
                 mode_label = "Eating Out"
 
-        if isinstance(recipe_id, int):
-            title = str(instance.get("recipe_title") or f"Recipe {recipe_id}")
+        recipe_title = instance.get("recipe_title")
+        if isinstance(recipe_title, str) and recipe_title.strip():
+            title = recipe_title.strip()
+        elif isinstance(recipe_id, int):
+            title = f"Recipe {recipe_id}"
         elif isinstance(mode_label, str):
             title = mode_label
         else:
@@ -499,13 +540,7 @@ class MealPlanService:
         serialized: dict[str, dict[str, Any]] = {}
         for instance_key, row in instance_sync.items():
             serialized[instance_key] = {
-                "instance_key": str(row.get("instance_key") or instance_key),
-                "entry_id": int(row.get("entry_id") or 0),
-                "recipe_id": int(row.get("recipe_id")) if isinstance(row.get("recipe_id"), int) else None,
                 "recipe_title": str(row.get("recipe_title")) if isinstance(row.get("recipe_title"), str) else None,
-                "role": str(row.get("role") or "primary"),
-                "slot_index": row.get("slot_index") if isinstance(row.get("slot_index"), int) else None,
-                "purpose": str(row.get("purpose")) if row.get("purpose") is not None else None,
                 "date": str(row.get("date") or ""),
                 "servings": int(row.get("servings")),
                 "meal_plan_row_id": row.get("meal_plan_row_id")
@@ -514,7 +549,6 @@ class MealPlanService:
                 "shopping_recipe_id": row.get("shopping_recipe_id")
                 if isinstance(row.get("shopping_recipe_id"), int) and int(row.get("shopping_recipe_id")) > 0
                 else None,
-                "shopping_activated": bool(row.get("shopping_activated", False)),
             }
         return serialized
 
@@ -697,6 +731,7 @@ class MealPlanService:
                     "day_index": day_index,
                     "date": entry_date.isoformat(),
                     "mode": mode,
+                    "title": "",
                     "recipe": recipe_obj,
                     "extra_recipes": [],
                     "servings": diners,
@@ -815,6 +850,7 @@ class MealPlanService:
                 "entry_id": self._next_plan_entry_id(),
                 "day_index": day_index,
                 "date": entry_date,
+                "title": str(payload.get("title") or ""),
                 "mode": mode,
                 "recipe": recipe,
                 "extra_recipes": payload.get("extra_recipes") if isinstance(payload.get("extra_recipes"), list) else [],
@@ -868,6 +904,7 @@ class MealPlanService:
             for key in (
                 "day_index",
                 "date",
+                "title",
                 "mode",
                 "recipe",
                 "extra_recipes",

@@ -75,6 +75,7 @@ class MealPlanEntryCreateRequest(BaseModel):
 
     day_index: int | None = None
     date: str | None = None
+    title: str | None = None
     mode: str | None = None
     recipe: dict[str, Any] | None = None
     extra_recipes: list[dict[str, Any]] | None = None
@@ -89,6 +90,7 @@ class MealPlanEntryPatchRequest(BaseModel):
 
     day_index: int | None = None
     date: str | None = None
+    title: str | None = None
     mode: str | None = None
     recipe: dict[str, Any] | None = None
     extra_recipes: list[dict[str, Any]] | None = None

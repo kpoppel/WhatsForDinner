@@ -742,6 +742,7 @@ def test_sync_tandoor_meal_plan_includes_mode_only_rows_without_recipe(tmp_path)
                     "entry_id": 2,
                     "day_index": 1,
                     "date": "2026-08-11",
+                        "title": "Pizza Palace",
                     "mode": "takeout",
                     "recipe": None,
                     "extra_recipes": [],
@@ -751,6 +752,7 @@ def test_sync_tandoor_meal_plan_includes_mode_only_rows_without_recipe(tmp_path)
                     "entry_id": 3,
                     "day_index": 2,
                     "date": "2026-08-12",
+                        "title": "The Bistro",
                     "mode": "empty",
                     "recipe": None,
                     "extra_recipes": [],
@@ -774,7 +776,12 @@ def test_sync_tandoor_meal_plan_includes_mode_only_rows_without_recipe(tmp_path)
     rows = list(client.meal_plan_rows.values())
     assert len(rows) == 3
     titles = [str(row.get("title") or "") for row in rows]
-    assert set(titles) == {"Leftovers", "Takeout", "Eating Out"}
+    assert set(titles) == {"Leftovers", "Pizza Palace", "The Bistro"}
+
+    tracked_sync = state.get_meal_plan_instance_sync(plan["plan_id"])
+    assert tracked_sync["entry:1:mode:leftover"]["recipe_title"] == "Leftovers"
+    assert tracked_sync["entry:2:mode:takeout"]["recipe_title"] == "Pizza Palace"
+    assert tracked_sync["entry:3:mode:empty"]["recipe_title"] == "The Bistro"
     assert all("recipe" not in row for row in rows)
 
 
@@ -979,7 +986,7 @@ def test_patch_entry_keeps_unchanged_mode_rows_when_remote_snapshot_is_sparse(tm
     rows = list(client.meal_plan_rows.values())
     assert len(rows) == 4
     titles = [str(row.get("title") or "") for row in rows]
-    assert set(titles) == {"Roast Veg", "Leftovers", "Takeout", "Eating Out"}
+    assert set(titles) == {"Roast Veg", "Leftovers", "Takeout", "Eating out"}
 
 
 def test_patch_entry_move_updates_tracked_tandoor_row_in_place(tmp_path) -> None:
@@ -1127,12 +1134,6 @@ def test_delete_plan_removes_tracked_shopping_before_meal_rows(tmp_path) -> None
         plan_id,
         {
             "entry:1:primary:recipe:11": {
-                "instance_key": "entry:1:primary:recipe:11",
-                "entry_id": 1,
-                "recipe_id": 11,
-                "role": "primary",
-                "slot_index": None,
-                "purpose": "meal",
                 "date": "2026-08-10",
                 "servings": 2,
                 "meal_plan_row_id": 9,
@@ -1172,12 +1173,6 @@ def test_delete_plan_aborts_when_shopping_cleanup_fails(tmp_path) -> None:
         plan_id,
         {
             "entry:1:primary:recipe:11": {
-                "instance_key": "entry:1:primary:recipe:11",
-                "entry_id": 1,
-                "recipe_id": 11,
-                "role": "primary",
-                "slot_index": None,
-                "purpose": "meal",
                 "date": "2026-08-10",
                 "servings": 2,
                 "meal_plan_row_id": 9,
@@ -1218,12 +1213,6 @@ def test_delete_plan_treats_missing_shopping_entries_as_already_removed(tmp_path
         plan_id,
         {
             "entry:1:primary:recipe:11": {
-                "instance_key": "entry:1:primary:recipe:11",
-                "entry_id": 1,
-                "recipe_id": 11,
-                "role": "primary",
-                "slot_index": None,
-                "purpose": "meal",
                 "date": "2026-08-10",
                 "servings": 2,
                 "meal_plan_row_id": 9,

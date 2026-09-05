@@ -168,6 +168,33 @@ def _migrate_v10_to_v11(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v11_to_v12(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    plan_sync = next_payload.get("meal_plan_instance_sync")
+    if isinstance(plan_sync, dict):
+        for plan_value in plan_sync.values():
+            if not isinstance(plan_value, dict):
+                continue
+            instances = plan_value.get("instances")
+            if not isinstance(instances, dict):
+                continue
+            for instance_row in instances.values():
+                if not isinstance(instance_row, dict):
+                    continue
+                for field in (
+                    "instance_key",
+                    "entry_id",
+                    "recipe_id",
+                    "role",
+                    "slot_index",
+                    "purpose",
+                    "shopping_activated",
+                ):
+                    instance_row.pop(field, None)
+    next_payload["schema_version"] = 12
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(raw)
 
@@ -214,6 +241,10 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     if schema_version == 10:
         payload = _migrate_v10_to_v11(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 11:
+        payload = _migrate_v11_to_v12(payload)
         schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:
