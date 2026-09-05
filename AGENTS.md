@@ -28,6 +28,8 @@ If any rule conflicts with your default behavior, follow this file.
 - Do not introduce aliases, shims, duplicate keys, or hidden data reshaping to make broken inputs appear valid.
 - Correct the authoritative source of truth instead: API contract, schema, config key, or core logic.
 
+4. Never remove code comments and leave functions undocumented. If an update renders a comment invalid, update the code comment to be correct.  This is important for later understanding the intent, ownership, invariants, and non-obvious behavior.  If code comments are entirely missing make appropriate updates to ensure the function is documented.
+
 ## Decision Protocol
 
 When blocked or when scope would expand:
