@@ -2,10 +2,11 @@
  * PWA service worker for complete shell precaching, network-first navigation,
  * and network-with-cache-fallback static assets. API requests are never cached.
  */
-const CACHE_NAME = "wfd-shopping-pwa-v11";
+const CACHE_NAME = "wfd-shopping-pwa-v12";
 const APP_FALLBACK_PATH = "/app";
 const APP_SHELL = [
   "/app",
+  "/app/",
   "/static/js/shopping.js",
   "/static/shop_editor.js",
   "/static/meal_plans.js",
@@ -71,13 +72,17 @@ self.addEventListener("fetch", (event) => {
       (async () => {
         try {
           const response = await fetch(request);
-        if (response && response.ok) {
+          if (!response || !response.ok) {
+            throw new Error(`Navigation failed with status ${response ? response.status : "unknown"}.`);
+          }
           const cache = await caches.open(CACHE_NAME);
+          await cache.put(request, response.clone());
           await cache.put(APP_FALLBACK_PATH, response.clone());
-        }
-        return response;
+          return response;
         } catch {
-        const cachedShell = await caches.match(APP_FALLBACK_PATH);
+          const cachedShell = await caches.match(request)
+            || await caches.match(APP_FALLBACK_PATH)
+            || await caches.match("/app/");
           return cachedShell || Response.error();
         }
       })()

@@ -625,6 +625,12 @@ import { selectActiveMealPlan } from "./js/meal_plan_dates.js";
   }
 
   async function refreshHomeNow() {
+    const cachedPlanResult = fetchActivePlanFromCache();
+    if (cachedPlanResult.plan || cachedPlanResult.entries.length > 0) {
+      renderToday(resolveTodayEntry(cachedPlanResult.entries), []);
+      renderUpcoming(cachedPlanResult.entries);
+    }
+
     try {
       const planResult = await fetchPlanWithCacheFallback();
       const entries = planResult.entries;
