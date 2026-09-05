@@ -779,9 +779,11 @@ def test_sync_tandoor_meal_plan_includes_mode_only_rows_without_recipe(tmp_path)
     assert set(titles) == {"Leftovers", "Pizza Palace", "The Bistro"}
 
     tracked_sync = state.get_meal_plan_tandoor_sync(plan["plan_id"])
-    assert tracked_sync["entry:1:mode:leftover"]["recipe_title"] == "Leftovers"
-    assert tracked_sync["entry:2:mode:takeout"]["recipe_title"] == "Pizza Palace"
-    assert tracked_sync["entry:3:mode:empty"]["recipe_title"] == "The Bistro"
+    assert tracked_sync == {
+        "entry:1:mode:leftover": {"meal_plan_row_id": 1, "shopping_recipe_id": None},
+        "entry:2:mode:takeout": {"meal_plan_row_id": 2, "shopping_recipe_id": None},
+        "entry:3:mode:empty": {"meal_plan_row_id": 3, "shopping_recipe_id": None},
+    }
     assert all("recipe" not in row for row in rows)
 
 
@@ -901,7 +903,7 @@ def test_patch_entry_recipe_removal_deletes_tracked_shopping_entries(tmp_path) -
     assert remaining_recipe_entries == []
 
 
-def test_patch_entry_keeps_unchanged_mode_rows_when_remote_snapshot_is_sparse(tmp_path) -> None:
+def test_patch_entry_updates_all_rows_when_remote_snapshot_is_sparse(tmp_path) -> None:
     state = ServerState(str(tmp_path))
     client = SparseRemoteMealPlanClient()
     service = MealPlanService(state, client)
@@ -968,7 +970,7 @@ def test_patch_entry_keeps_unchanged_mode_rows_when_remote_snapshot_is_sparse(tm
     initial_create_calls = client.create_calls
     initial_delete_calls = client.delete_calls
 
-    # Editing only servings on the planned row should not delete/recreate unchanged mode rows.
+    # A sparse remote response cannot confirm whether mode rows are current.
     asyncio.run(
         service.patch_entry(
             plan_id,
@@ -978,10 +980,10 @@ def test_patch_entry_keeps_unchanged_mode_rows_when_remote_snapshot_is_sparse(tm
         )
     )
 
-    # Only the changed planned row should be updated in place.
+    # All tracked rows are updated in place without creating or deleting them.
     assert client.create_calls == initial_create_calls
     assert client.delete_calls == initial_delete_calls
-    assert len(client.updated_meal_plan_calls) == 1
+    assert len(client.updated_meal_plan_calls) == 4
 
     rows = list(client.meal_plan_rows.values())
     assert len(rows) == 4
@@ -1134,8 +1136,6 @@ def test_delete_plan_removes_tracked_shopping_before_meal_rows(tmp_path) -> None
         plan_id,
         {
             "entry:1:primary:recipe:11": {
-                "date": "2026-08-10",
-                "servings": 2,
                 "meal_plan_row_id": 9,
             }
         },
@@ -1173,8 +1173,6 @@ def test_delete_plan_aborts_when_shopping_cleanup_fails(tmp_path) -> None:
         plan_id,
         {
             "entry:1:primary:recipe:11": {
-                "date": "2026-08-10",
-                "servings": 2,
                 "meal_plan_row_id": 9,
             }
         },
@@ -1213,8 +1211,6 @@ def test_delete_plan_treats_missing_shopping_entries_as_already_removed(tmp_path
         plan_id,
         {
             "entry:1:primary:recipe:11": {
-                "date": "2026-08-10",
-                "servings": 2,
                 "meal_plan_row_id": 9,
             }
         },

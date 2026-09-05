@@ -393,15 +393,7 @@ class MealPlanService:
 
         return desired
 
-    def _normalize_instance_row(self, *, instance_key: str, row: dict[str, Any]) -> dict[str, Any] | None:
-        identity = self._identity_from_instance_key(instance_key)
-        if identity is None:
-            return None
-
-        servings = row.get("servings")
-        if not isinstance(servings, int) or servings < 1:
-            return None
-
+    def _normalize_instance_sync_ids(self, row: dict[str, Any]) -> dict[str, int | None]:
         meal_plan_row_id = row.get("meal_plan_row_id")
         if not isinstance(meal_plan_row_id, int) or meal_plan_row_id < 1:
             meal_plan_row_id = None
@@ -410,19 +402,9 @@ class MealPlanService:
         if not isinstance(shopping_recipe_id, int) or shopping_recipe_id < 1:
             shopping_recipe_id = None
 
-        date_value = row.get("date")
-        if not isinstance(date_value, str):
-            date_value = ""
-
         return {
-            "instance_key": instance_key,
-            **identity,
-            "recipe_title": str(row.get("recipe_title")) if isinstance(row.get("recipe_title"), str) else None,
-            "date": date_value,
-            "servings": servings,
             "meal_plan_row_id": meal_plan_row_id,
             "shopping_recipe_id": shopping_recipe_id,
-            "shopping_activated": isinstance(shopping_recipe_id, int),
         }
 
     def _is_not_found_error(self, exc: TandoorError) -> bool:
@@ -470,6 +452,15 @@ class MealPlanService:
             if isinstance(row_id, int) and row_id > 0:
                 ids.add(row_id)
         return ids
+
+    async def _list_remote_meal_plan_rows(self) -> dict[int, dict[str, Any]]:
+        payload = await self._client.list_meal_plans(limit=500)
+        rows = self._extract_results(payload)
+        return {
+            row_id: row
+            for row in rows
+            if isinstance((row_id := row.get("id")), int) and row_id > 0
+        }
 
     async def _delete_meal_plan_row_if_present(self, row_id: int | None) -> None:
         if not isinstance(row_id, int) or row_id < 1:
@@ -536,13 +527,18 @@ class MealPlanService:
         payload = await self._meal_plan_row_payload_for_instance(instance)
         await self._client.update_meal_plan(row_id, payload)
 
+    async def _remote_meal_plan_row_matches_instance(
+        self,
+        remote_row: dict[str, Any],
+        instance: dict[str, Any],
+    ) -> bool:
+        payload = await self._meal_plan_row_payload_for_instance(instance)
+        return all(remote_row.get(field) == value for field, value in payload.items())
+
     def _serialize_instance_sync(self, instance_sync: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
         serialized: dict[str, dict[str, Any]] = {}
         for instance_key, row in instance_sync.items():
             serialized[instance_key] = {
-                "recipe_title": str(row.get("recipe_title")) if isinstance(row.get("recipe_title"), str) else None,
-                "date": str(row.get("date") or ""),
-                "servings": int(row.get("servings")),
                 "meal_plan_row_id": row.get("meal_plan_row_id")
                 if isinstance(row.get("meal_plan_row_id"), int) and int(row.get("meal_plan_row_id")) > 0
                 else None,
@@ -567,15 +563,14 @@ class MealPlanService:
             entries = []
 
         desired_sync = self._desired_meal_plan_row_sync(plan_payload, entries)
+        remote_rows = await self._list_remote_meal_plan_rows()
 
         previous_sync: dict[str, dict[str, Any]] = {}
         raw_previous_sync = self._state.get_meal_plan_tandoor_sync(plan_id)
         for key, value in raw_previous_sync.items():
             if not isinstance(value, dict):
                 continue
-            normalized = self._normalize_instance_row(instance_key=str(key), row=value)
-            if isinstance(normalized, dict):
-                previous_sync[str(key)] = normalized
+            previous_sync[str(key)] = self._normalize_instance_sync_ids(value)
 
         retained_removed_sync: dict[str, dict[str, Any]] = {}
         for instance_key in sorted(previous_sync.keys()):
@@ -584,11 +579,10 @@ class MealPlanService:
             previous_row = previous_sync[instance_key]
 
             await self._delete_meal_plan_row_if_present(previous_row.get("meal_plan_row_id"))
-            retained_row = dict(previous_row)
-            retained_row["meal_plan_row_id"] = None
-            retained_row["shopping_recipe_id"] = None
-            retained_row["shopping_activated"] = False
-            retained_removed_sync[instance_key] = retained_row
+            retained_removed_sync[instance_key] = {
+                "meal_plan_row_id": None,
+                "shopping_recipe_id": None,
+            }
 
         next_sync: dict[str, dict[str, Any]] = dict(retained_removed_sync)
 
@@ -597,32 +591,26 @@ class MealPlanService:
             previous_row = previous_sync.get(instance_key)
 
             if isinstance(previous_row, dict):
-                unchanged = (
-                    previous_row.get("recipe_id") == desired_row.get("recipe_id")
-                    and previous_row.get("recipe_title") == desired_row.get("recipe_title")
-                    and int(previous_row.get("servings")) == int(desired_row.get("servings"))
-                    and str(previous_row.get("date") or "") == str(desired_row.get("date") or "")
-                )
                 previous_row_id = previous_row.get("meal_plan_row_id")
-                if unchanged and isinstance(previous_row_id, int):
-                    desired_row["meal_plan_row_id"] = previous_row_id
-                    desired_row["shopping_recipe_id"] = previous_row.get("shopping_recipe_id")
-                    desired_row["shopping_activated"] = bool(previous_row.get("shopping_activated", False))
-                    next_sync[instance_key] = desired_row
-                    continue
-
                 if isinstance(previous_row_id, int):
+                    remote_row = remote_rows.get(previous_row_id)
+                    if isinstance(remote_row, dict) and await self._remote_meal_plan_row_matches_instance(
+                        remote_row,
+                        desired_row,
+                    ):
+                        desired_row["meal_plan_row_id"] = previous_row_id
+                        desired_row["shopping_recipe_id"] = previous_row.get("shopping_recipe_id")
+                        next_sync[instance_key] = desired_row
+                        continue
                     await self._update_meal_plan_row_for_instance(previous_row_id, desired_row)
                     desired_row["meal_plan_row_id"] = previous_row_id
-                    desired_row["shopping_recipe_id"] = previous_row.get("shopping_recipe_id")
-                    desired_row["shopping_activated"] = bool(previous_row.get("shopping_activated", False))
+                    desired_row["shopping_recipe_id"] = None
                     next_sync[instance_key] = desired_row
                     continue
 
             created_row_id = await self._create_meal_plan_row_for_instance(desired_row)
             desired_row["meal_plan_row_id"] = created_row_id
             desired_row["shopping_recipe_id"] = None
-            desired_row["shopping_activated"] = False
             next_sync[instance_key] = desired_row
 
         serializable_sync = self._serialize_instance_sync(next_sync)
@@ -1143,15 +1131,19 @@ class MealPlanService:
         ensure_tandoor_writes_enabled,
         build_shopping_view,
     ) -> dict:
-        def normalize_previous_instance_sync() -> dict[str, dict[str, Any]]:
+        def normalize_previous_instance_sync(
+            desired_sync: dict[str, dict[str, Any]],
+        ) -> dict[str, dict[str, Any]]:
             normalized: dict[str, dict[str, Any]] = {}
             raw_instance_sync = self._state.get_meal_plan_tandoor_sync(plan_id)
-            for key, value in raw_instance_sync.items():
+            for key, desired_row in desired_sync.items():
+                value = raw_instance_sync.get(key)
                 if not isinstance(value, dict):
                     continue
-                instance = self._normalize_instance_row(instance_key=str(key), row=value)
-                if isinstance(instance, dict):
-                    normalized[str(key)] = instance
+                instance = dict(desired_row)
+                instance.update(self._normalize_instance_sync_ids(value))
+                instance["shopping_activated"] = isinstance(instance.get("shopping_recipe_id"), int)
+                normalized[key] = instance
             return normalized
 
         async def list_shopping_entries() -> list[dict[str, Any]]:
@@ -1224,8 +1216,8 @@ class MealPlanService:
                 created: list[dict[str, Any]] = []
                 failed: list[dict[str, Any]] = []
 
-                previous_sync = normalize_previous_instance_sync()
                 desired_sync = self._desired_instance_sync(plan, entries)
+                previous_sync = normalize_previous_instance_sync(desired_sync)
                 next_sync: dict[str, dict[str, Any]] = dict(previous_sync)
                 recipe_source = "regenerate_missing" if mode == "regenerate_missing" else "sync"
 
