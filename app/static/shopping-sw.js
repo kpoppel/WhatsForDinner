@@ -1,4 +1,4 @@
-const CACHE_NAME = "wfd-shopping-pwa-v8";
+const CACHE_NAME = "wfd-shopping-pwa-v9";
 const APP_FALLBACK_PATH = "/app";
 const APP_SHELL = [
   "/app",
