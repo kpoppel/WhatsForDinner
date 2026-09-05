@@ -1,4 +1,4 @@
-const CACHE_NAME = "wfd-shopping-pwa-v9";
+const CACHE_NAME = "wfd-shopping-pwa-v10";
 const APP_FALLBACK_PATH = "/app";
 const APP_SHELL = [
   "/app",
@@ -30,18 +30,7 @@ const APP_SHELL = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      await Promise.all(APP_SHELL.map(async (path) => {
-        try {
-          const response = await fetch(path, { cache: "no-store" });
-          if (response && response.ok) {
-            await cache.put(path, response.clone());
-          }
-        } catch {
-          // Ignore individual precache failures.
-        }
-      }));
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
   );
   self.skipWaiting();
 });
