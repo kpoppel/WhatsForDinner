@@ -1,28 +1,16 @@
 import {
-  ACTIVE_MEAL_PLAN_ID_KEY,
-  HOME_ACTIVE_PLAN_CACHE_KEY,
-  MEAL_PLAN_CACHE_KEY,
-} from "./schema.js";
+  setActiveMealPlanId,
+  setHomeActivePlan,
+  setMealPlanCache,
+} from "./meal-plan-model.js";
 import { readMealPlanCache } from "./selectors.js";
 
 export function writeActiveMealPlanId(planId) {
-  try {
-    if (!Number.isInteger(planId)) {
-      localStorage.removeItem(ACTIVE_MEAL_PLAN_ID_KEY);
-      return;
-    }
-    localStorage.setItem(ACTIVE_MEAL_PLAN_ID_KEY, String(planId));
-  } catch {
-    // Ignore localStorage failures.
-  }
+  setActiveMealPlanId(planId);
 }
 
 export function writeMealPlanCache(nextCache) {
-  try {
-    localStorage.setItem(MEAL_PLAN_CACHE_KEY, JSON.stringify(nextCache));
-  } catch {
-    // Ignore localStorage failures.
-  }
+  setMealPlanCache(nextCache);
 }
 
 export function cachePlanListRows(plans) {
@@ -57,12 +45,5 @@ export function writeHomeActivePlanCache(plan) {
   if (!plan || typeof plan !== "object") {
     return;
   }
-  try {
-    localStorage.setItem(HOME_ACTIVE_PLAN_CACHE_KEY, JSON.stringify({
-      plan,
-      updatedAt: new Date().toISOString(),
-    }));
-  } catch {
-    // Ignore localStorage failures.
-  }
+  setHomeActivePlan(plan);
 }

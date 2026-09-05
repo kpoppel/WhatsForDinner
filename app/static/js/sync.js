@@ -1,7 +1,16 @@
 import { api } from "./api.js";
 import { setApiReachable } from "./commands/connectivity.js";
 import { browserOnline, isOnline } from "./selectors/connectivity.js";
-import { state, persistCache, applyPendingChanges, queueStatusChange, queueDeleteChange, compactPendingChanges, SHOPPING_STATUSES } from "./state.js";
+import {
+  compactPendingChanges,
+  hydrateShoppingFromServer,
+  persistCache,
+  queueDeleteChange,
+  queueStatusChange,
+  reconcileShoppingSync,
+  SHOPPING_STATUSES,
+  state,
+} from "./state.js";
 import { render, updateStatusBadges } from "./render.js";
 
 const DEBUG_MODE = false;
@@ -56,23 +65,9 @@ export async function refreshAndSyncIfNeeded() {
   }
 }
 
-function hydrateFromServer(payload) {
-  const sections = payload.data.sections;
-  const merged = {};
-  for (const status of ["remaining", "skipped", "completed"]) {
-    for (const item of sections[status]) {
-      merged[item.id] = item;
-    }
-  }
-  state.itemsById = merged;
-  state.serverCursor = payload.cursor;
-  applyPendingChanges();
-  persistCache();
-}
-
 export async function refresh() {
   const payload = await api("/shopping-list/view");
-  hydrateFromServer(payload);
+  hydrateShoppingFromServer(payload);
   render();
   show(payload);
   return payload;
@@ -111,21 +106,10 @@ async function syncPendingNow(showPayload) {
     method: "POST",
     body: JSON.stringify({ changes: outgoing }),
   });
-  const rejectedIndexes = new Set(
-    (Array.isArray(payload.rejected) ? payload.rejected : [])
-      .map((row) => row.index)
-      .filter((value) => Number.isInteger(value) && value >= 0),
-  );
-  const rejectedChanges = outgoing.filter((_, idx) => rejectedIndexes.has(idx));
-  state.pendingChanges = state.pendingChanges.filter((change) => !outgoing.includes(change));
-  state.pendingChanges.push(...rejectedChanges);
+  const rejectedChanges = reconcileShoppingSync(payload, outgoing);
   if (rejectedChanges.length > 0) {
     notifySyncFailure();
   }
-  if (Number.isInteger(payload.server_cursor)) {
-    state.serverCursor = payload.server_cursor;
-  }
-  persistCache();
   if (rejectedChanges.length > 0) {
     try {
       await refresh();

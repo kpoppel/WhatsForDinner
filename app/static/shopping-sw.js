@@ -1,4 +1,4 @@
-const CACHE_NAME = "wfd-shopping-pwa-v10";
+const CACHE_NAME = "wfd-shopping-pwa-v11";
 const APP_FALLBACK_PATH = "/app";
 const APP_SHELL = [
   "/app",
@@ -14,8 +14,15 @@ const APP_SHELL = [
   "/static/js/render.js",
   "/static/js/gestures.js",
   "/static/js/sync.js",
-  "/static/js/store/index.js",
-  "/static/js/store/schema.js",
+  "/static/js/commands/connectivity.js",
+  "/static/js/commands/home.js",
+  "/static/js/commands/meal-plans.js",
+  "/static/js/commands/settings.js",
+  "/static/js/commands/shopping-ui.js",
+  "/static/js/commands/shopping.js",
+  "/static/js/selectors/connectivity.js",
+  "/static/js/selectors/shopping.js",
+  "/static/js/store/meal-plan-model.js",
   "/static/js/store/commands.js",
   "/static/js/store/selectors.js",
   "/static/js/ptr.js",

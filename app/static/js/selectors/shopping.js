@@ -1,12 +1,14 @@
 import { state } from "../state.js";
 
 export function shoppingItems() {
-  return Object.values(state.itemsById)
+  const items = Object.values(state.itemsById)
     .filter((item) => item && item.id !== undefined && item.id !== null);
+  return structuredClone(items);
 }
 
 export function shoppingItem(entryId) {
-  return state.itemsById[String(entryId)] || null;
+  const item = state.itemsById[String(entryId)] || null;
+  return structuredClone(item);
 }
 
 export function shoppingItemIds() {

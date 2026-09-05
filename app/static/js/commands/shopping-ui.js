@@ -1,5 +1,5 @@
-import { state } from "../state.js";
+import { toggleShoppingSectionCollapsed as toggleInModel } from "../state.js";
 
 export function toggleShoppingSectionCollapsed(key) {
-  state.collapsedSections[key] = !state.collapsedSections[key];
+  toggleInModel(key);
 }

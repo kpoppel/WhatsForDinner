@@ -1,5 +1,6 @@
 import { shoppingItemId } from "./utils.js";
 
+// Authoritative shopping-domain model and its browser persistence schema.
 export const CACHE_KEY = "wfd.shopping-mode.v1";
 export const SHOPPING_STATUSES = new Set(["remaining", "skipped", "completed"]);
 
@@ -13,6 +14,14 @@ export const state = {
     completed: true,
   },
 };
+
+export function setShoppingApiReachable(value) {
+  state.apiReachable = Boolean(value);
+}
+
+export function toggleShoppingSectionCollapsed(key) {
+  state.collapsedSections[key] = !state.collapsedSections[key];
+}
 
 export function queuedEntryId(change) {
   if (!change || typeof change !== "object") {
@@ -260,6 +269,36 @@ export function loadCache() {
 }
 
 loadCache();
+
+export function hydrateShoppingFromServer(payload) {
+  const sections = payload.data.sections;
+  const merged = {};
+  for (const status of ["remaining", "skipped", "completed"]) {
+    for (const item of sections[status]) {
+      merged[item.id] = item;
+    }
+  }
+  state.itemsById = merged;
+  state.serverCursor = payload.cursor;
+  applyPendingChanges();
+  persistCache();
+}
+
+export function reconcileShoppingSync(payload, outgoing) {
+  const rejectedIndexes = new Set(
+    (Array.isArray(payload.rejected) ? payload.rejected : [])
+      .map((row) => row.index)
+      .filter((value) => Number.isInteger(value) && value >= 0),
+  );
+  const rejectedChanges = outgoing.filter((_, index) => rejectedIndexes.has(index));
+  state.pendingChanges = state.pendingChanges.filter((change) => !outgoing.includes(change));
+  state.pendingChanges.push(...rejectedChanges);
+  if (Number.isInteger(payload.server_cursor)) {
+    state.serverCursor = payload.server_cursor;
+  }
+  persistCache();
+  return rejectedChanges;
+}
 
 export function queueStatusChange(entryId, status) {
   const id = shoppingItemId(entryId);
