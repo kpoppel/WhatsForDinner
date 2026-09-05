@@ -152,6 +152,7 @@ def test_create_update_delete_remote_roundtrip(tmp_path) -> None:
     entry_id = created_result["data"]["id"]
     assert created_result["source"] == "tandoor+local-state"
     assert created_result["data"]["checked"] is True
+    assert state.get_shopping_statuses() == {}
 
     updated_result = asyncio.run(
         service.update_entry(
@@ -167,6 +168,7 @@ def test_create_update_delete_remote_roundtrip(tmp_path) -> None:
     )
     assert updated_result["source"] == "tandoor+local-state"
     assert updated_result["effective_status"] == "skipped"
+    assert state.get_shopping_statuses() == {}
 
     deleted_result = asyncio.run(
         service.delete_entry(

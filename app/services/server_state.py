@@ -288,7 +288,11 @@ class ServerState:
     def set_shopping_status(self, entry_id: int, status: str) -> None:
         with self._lock:
             data = self._load()
-            data["shopping_status_overrides"][str(entry_id)] = status
+            key = str(entry_id)
+            if entry_id < 0:
+                data["shopping_status_overrides"][key] = status
+            else:
+                data["shopping_status_overrides"].pop(key, None)
             self._save(data)
 
     def get_shopping_statuses(self) -> dict[str, str]:

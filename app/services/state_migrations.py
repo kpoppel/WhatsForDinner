@@ -98,6 +98,19 @@ def _migrate_v8_to_v9(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v9_to_v10(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    overrides = next_payload.get("shopping_status_overrides")
+    if isinstance(overrides, dict):
+        next_payload["shopping_status_overrides"] = {
+            key: value
+            for key, value in overrides.items()
+            if isinstance(key, str) and key.startswith("-")
+        }
+    next_payload["schema_version"] = 10
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(raw)
 
@@ -136,6 +149,10 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     if schema_version == 8:
         payload = _migrate_v8_to_v9(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 9:
+        payload = _migrate_v9_to_v10(payload)
         schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:
