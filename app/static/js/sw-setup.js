@@ -1,3 +1,4 @@
+/** Register the PWA worker and reload once when a new worker takes control. */
 export function setupServiceWorker() {
   if (!("serviceWorker" in navigator)) {
     return;

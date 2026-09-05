@@ -1,3 +1,4 @@
+/** Translate Shopping Mode pointer gestures into injected domain actions. */
 import { escapeAttr } from "./utils.js";
 import { suppressNextCardClick, consumeSuppressedCardClick } from "./render.js";
 

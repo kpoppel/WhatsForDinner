@@ -1,3 +1,4 @@
+/** Small normalization and escaping helpers shared by frontend boundaries. */
 export function escapeAttr(value) {
   return String(value)
     .replaceAll("&", "&amp;")

@@ -1,3 +1,10 @@
+"""Sequential migrations and strict validation for persisted application state.
+
+Migrations operate on deep copies and only move one known schema version at a
+time. The final Pydantic validation is the persistence contract; unsupported or
+invalid documents fail rather than being silently reshaped.
+"""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -84,7 +91,21 @@ def _migrate_v3_to_v4(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v4_to_v5(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    if not isinstance(next_payload.get("derived_state_revision"), int):
+        next_payload["derived_state_revision"] = 0
+    if not isinstance(next_payload.get("recipe_use_history"), list):
+        next_payload["recipe_use_history"] = []
+    if not isinstance(next_payload.get("pending_projections"), dict):
+        next_payload["pending_projections"] = {}
+    next_payload["schema_version"] = 5
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
+    """Migrate a state document to the current version and return validated data."""
+
     payload = deepcopy(raw)
 
     schema_version = payload.get("schema_version")
@@ -102,6 +123,10 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     if schema_version == 3:
         payload = _migrate_v3_to_v4(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 4:
+        payload = _migrate_v4_to_v5(payload)
         schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:

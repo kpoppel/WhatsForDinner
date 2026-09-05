@@ -1,7 +1,11 @@
+"""Render the lightweight API inspection page used during development."""
+
 from fastapi.responses import HTMLResponse
 
 
 def render_inspector(api_prefix: str) -> HTMLResponse:
+    """Return a standalone HTML response configured for the API prefix."""
+
     html = f"""<!doctype html>
 <html lang=\"en\">
 <head>

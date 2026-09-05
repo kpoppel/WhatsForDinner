@@ -1,3 +1,10 @@
+"""Shopping-list domain operations across Tandoor and local overlays.
+
+The service translates app statuses and metadata to Tandoor operations, applies
+offline batches serially, and returns canonical views plus revision and pending
+projection state for browser reconciliation.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -12,10 +19,30 @@ SHOPPING_STATUSES = {"remaining", "skipped", "completed"}
 
 
 class ShoppingService:
+    """Coordinate shopping mutations, offline batches, and canonical reads."""
+
     def __init__(self, state: Stage2State, tandoor_client: TandoorClient) -> None:
         self._state = state
         self._client = tandoor_client
         self._sync_lock = asyncio.Lock()
+
+    def _response(
+        self,
+        source: str,
+        data: Any,
+        cursor: int | None = None,
+        projection: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        response = {
+            "source": source,
+            "revision": self._state.current_revision(),
+            "projection": projection or {"status": "synchronized"},
+            "pending_projections": self._state.pending_projections(),
+            "data": data,
+        }
+        if cursor is not None:
+            response["cursor"] = cursor
+        return response
 
     async def get_view(
         self,
@@ -32,11 +59,11 @@ class ShoppingService:
         entries = extract_results(data)
         view = build_shopping_view(entries)
 
-        return {
-            "source": "tandoor+local-state",
-            "cursor": self._state.current_sync_cursor(),
-            "data": view,
-        }
+        return self._response(
+            "tandoor+local-state",
+            view,
+            cursor=self._state.current_sync_cursor(),
+        )
 
     async def create_entry(
         self,
@@ -69,11 +96,7 @@ class ShoppingService:
                 self._state.set_shopping_item_metadata(local_id, reminder_patch)
             self._state.set_shopping_status(local_id, status_value)
             cursor = self._state.append_sync_event("shopping_entry_created", stored)
-            return {
-                "source": "local-state",
-                "cursor": cursor,
-                "data": stored,
-            }
+            return self._response("local-state", stored, cursor=cursor)
 
         ensure_tandoor_writes_enabled(operation_name)
         mapped = status_to_tandoor_fields(status_value)
@@ -92,11 +115,7 @@ class ShoppingService:
             self._state.set_shopping_status(created_id, status_value)
 
         cursor = self._state.append_sync_event("shopping_entry_created", created)
-        return {
-            "source": "tandoor+local-state",
-            "cursor": cursor,
-            "data": created,
-        }
+        return self._response("tandoor+local-state", created, cursor=cursor)
 
     async def update_entry(
         self,
@@ -172,12 +191,9 @@ class ShoppingService:
                     "status": status,
                 },
             )
-            return {
-                "source": "local-state",
-                "cursor": cursor,
-                "effective_status": str(updated_local.get("status") or "remaining"),
-                "data": updated_local,
-            }
+            response = self._response("local-state", updated_local, cursor=cursor)
+            response["effective_status"] = str(updated_local.get("status") or "remaining")
+            return response
 
         ensure_tandoor_writes_enabled(operation_name)
         if request_payload:
@@ -207,12 +223,9 @@ class ShoppingService:
             updated if isinstance(updated, dict) else {}, self._state.get_shopping_statuses()
         )
 
-        return {
-            "source": "tandoor+local-state",
-            "cursor": cursor,
-            "effective_status": effective,
-            "data": updated,
-        }
+        response = self._response("tandoor+local-state", updated, cursor=cursor)
+        response["effective_status"] = effective
+        return response
 
     async def delete_entry(
         self,
@@ -222,13 +235,10 @@ class ShoppingService:
     ) -> dict[str, Any]:
         deleted_local = self._state.delete_local_shopping_entry(entry_id)
         if deleted_local is not None:
+            self._state.delete_shopping_status(entry_id)
             self._state.delete_shopping_item_metadata(entry_id)
             cursor = self._state.append_sync_event("shopping_entry_deleted", {"entry_id": entry_id})
-            return {
-                "source": "local-state",
-                "cursor": cursor,
-                "data": {"deleted": entry_id},
-            }
+            return self._response("local-state", {"deleted": entry_id}, cursor=cursor)
 
         ensure_tandoor_writes_enabled(operation_name)
         try:
@@ -236,13 +246,10 @@ class ShoppingService:
         except TandoorError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+        self._state.delete_shopping_status(entry_id)
         self._state.delete_shopping_item_metadata(entry_id)
         cursor = self._state.append_sync_event("shopping_entry_deleted", {"entry_id": entry_id})
-        return {
-            "source": "tandoor+local-state",
-            "cursor": cursor,
-            "data": deleted,
-        }
+        return self._response("tandoor+local-state", deleted, cursor=cursor)
 
     async def apply_sync_changes(
         self,
@@ -253,6 +260,8 @@ class ShoppingService:
         local_store_group_payload: Callable[[Any], dict[str, Any]],
         status_to_tandoor_fields: Callable[[str], dict[str, Any]],
         effective_status: Callable[[dict[str, Any], dict[str, str]], str],
+        extract_results: Callable[[Any], list[dict[str, Any]]],
+        build_shopping_view: Callable[[list[dict[str, Any]]], dict[str, Any]],
     ) -> dict[str, Any]:
         async with self._sync_lock:
             applied: list[dict[str, Any]] = []
@@ -331,8 +340,58 @@ class ShoppingService:
                 except (TandoorError, ValueError, HTTPException) as exc:
                     rejected.append({"index": idx, "reason": str(exc)})
 
+            try:
+                shopping_payload = await self._client.list_shopping_entries(limit=500)
+            except TandoorError as exc:
+                pending = self._state.create_pending_projection(
+                    "shopping",
+                    "reconcile_sync",
+                    {"changes": changes},
+                    str(exc),
+                )
+                return {
+                    "server_cursor": self._state.current_sync_cursor(),
+                    "revision": self._state.current_revision(),
+                    "cursor": self._state.current_sync_cursor(),
+                    "data": None,
+                    "projection": pending,
+                    "pending_projections": self._state.pending_projections(),
+                    "applied": applied,
+                    "rejected": rejected,
+                }
+
+            view = build_shopping_view(extract_results(shopping_payload))
             return {
                 "server_cursor": self._state.current_sync_cursor(),
+                "revision": self._state.current_revision(),
+                "cursor": self._state.current_sync_cursor(),
+                "data": view,
+                "pending_projections": self._state.pending_projections(),
                 "applied": applied,
                 "rejected": rejected,
             }
+
+    async def retry_pending_reconciliation(
+        self,
+        operation_id: str,
+        extract_results: Callable[[Any], list[dict[str, Any]]],
+        build_shopping_view: Callable[[list[dict[str, Any]]], dict[str, Any]],
+    ) -> dict[str, Any]:
+        pending = self._state.pending_projection(operation_id)
+        if (
+            pending is None
+            or pending.get("domain") != "shopping"
+            or pending.get("operation") != "reconcile_sync"
+        ):
+            raise HTTPException(status_code=404, detail="Pending shopping reconciliation not found.")
+        try:
+            shopping_payload = await self._client.list_shopping_entries(limit=500)
+        except TandoorError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        self._state.delete_pending_projections({operation_id})
+        return self._response(
+            "tandoor+local-state",
+            build_shopping_view(extract_results(shopping_payload)),
+            cursor=self._state.current_sync_cursor(),
+        )

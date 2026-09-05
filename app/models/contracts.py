@@ -1,3 +1,9 @@
+"""Strict browser-facing request and response contracts.
+
+Mutation models forbid unknown fields so contract drift fails at the API
+boundary instead of being silently ignored by services or Tandoor adapters.
+"""
+
 from __future__ import annotations
 
 import re

@@ -1,3 +1,5 @@
+"""Reduce shopping sync events to the fields needed for incremental clients."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -9,6 +11,8 @@ def _updated_fields(payload: Any, key: str) -> list[str]:
 
 
 def compact_sync_event_payload(operation: str, payload: Any) -> dict[str, Any]:
+    """Return the minimal stable payload for a persisted sync event."""
+
     source = payload if isinstance(payload, dict) else {}
 
     if operation == "meal_plan_entry_deleted":

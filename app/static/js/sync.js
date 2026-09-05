@@ -1,8 +1,33 @@
-import { api, isOnline, setApiReachable, browserOnline } from "./api.js";
-import { state, persistCache, applyPendingChanges, queueStatusChange, queueDeleteChange, compactPendingChanges, SHOPPING_STATUSES } from "./state.js";
-import { render, updateStatusBadges } from "./render.js";
+/**
+ * Shopping synchronization workflow between optimistic store commands and the
+ * backend gateway. All pushes and canonical refreshes pass through the shared
+ * coordinator so pending changes survive failures and stale reads are ignored.
+ */
+import { gateway, isOnline, setApiReachable, browserOnline } from "./api.js";
+import {
+  applyShoppingSyncResult,
+  acceptsRevision,
+  compactShoppingPendingChanges,
+  deleteShoppingChange,
+  hydrateShoppingModel,
+  restoreShoppingPendingChanges,
+  setShoppingStatus,
+  setPendingProjections,
+  setRevision,
+  setSyncState,
+  takeShoppingPendingChanges,
+} from "./store/commands.js";
+import { SHOPPING_STATUSES } from "./store/index.js";
+import { selectPendingProjections, selectShoppingPendingChanges } from "./store/selectors.js";
+import { requestRender, updateStatusBadges } from "./render.js";
+import { createSyncCoordinator } from "./sync_coordinator.js";
 
 const DEBUG_MODE = false;
+const coordinator = createSyncCoordinator({
+  onStatus({ status, error }) {
+    setSyncState({ status, lastError: error ? String(error) : null, source: "coordinator" });
+  },
+});
 
 export function show(data) {
   if (!DEBUG_MODE) {
@@ -44,80 +69,123 @@ export async function refreshAndSyncIfNeeded() {
     return;
   }
   await refresh();
-  if (state.pendingChanges.length > 0) {
+  if (selectShoppingPendingChanges().length > 0) {
     await syncPending(false);
   }
 }
 
 function hydrateFromServer(payload) {
-  const sections = payload.data.sections;
-  const merged = {};
-  for (const status of ["remaining", "skipped", "completed"]) {
-    for (const item of sections[status]) {
-      merged[item.id] = item;
-    }
-  }
-  state.itemsById = merged;
-  state.serverCursor = payload.cursor;
-  applyPendingChanges();
-  persistCache();
+  hydrateShoppingModel(payload.data.sections, payload.cursor);
 }
 
 export async function refresh() {
-  const payload = await api("/shopping-list/view");
-  hydrateFromServer(payload);
-  render();
-  show(payload);
-  return payload;
+  return coordinator.refresh(
+    () => gateway.shopping.view(),
+    (payload, context) => {
+      if (!acceptsRevision(payload.revision)) {
+        return;
+      }
+      if (Number.isInteger(payload.revision)) {
+        setRevision(payload.revision, "refresh");
+      }
+      if (Array.isArray(payload.pending_projections)) {
+        setPendingProjections(payload.pending_projections, "refresh");
+      }
+      hydrateFromServer(payload);
+      requestRender({
+        source: "server",
+        status: "server",
+        generation: context.generation,
+        revision: payload.revision,
+      });
+      show(payload);
+    },
+  );
 }
 
 export async function syncPending(showPayload = true) {
-  compactPendingChanges();
-  persistCache();
+  compactShoppingPendingChanges();
   updateStatusBadges();
-  if (state.pendingChanges.length === 0) {
+  if (selectShoppingPendingChanges().length === 0) {
     return { source: "local-cache", applied: [], rejected: [] };
   }
   if (!isOnline()) {
     return {
       source: "local-cache",
       message: "Offline. Pending changes are kept locally.",
-      pending_count: state.pendingChanges.length,
+      pending_count: selectShoppingPendingChanges().length,
     };
   }
-  const outgoing = [...state.pendingChanges];
-  const payload = await api("/shopping-list/sync", {
-    method: "POST",
-    body: JSON.stringify({ changes: outgoing }),
-  });
-  const rejectedIndexes = new Set(
-    (Array.isArray(payload.rejected) ? payload.rejected : [])
-      .map((row) => row.index)
-      .filter((value) => Number.isInteger(value) && value >= 0),
-  );
-  state.pendingChanges = outgoing.filter((_, idx) => rejectedIndexes.has(idx));
-  if (Number.isInteger(payload.server_cursor)) {
-    state.serverCursor = payload.server_cursor;
-  }
-  persistCache();
+  const outgoing = takeShoppingPendingChanges();
   try {
-    await refresh();
-  } catch {
-    render();
+    return await coordinator.push(
+      JSON.stringify(outgoing),
+      () => gateway.shopping.sync(outgoing),
+      async (payload, context) => {
+      if (Number.isInteger(payload.revision)) {
+        setRevision(payload.revision, "sync");
+      }
+      if (Array.isArray(payload.pending_projections)) {
+        setPendingProjections(payload.pending_projections, "sync");
+      }
+      if (payload.projection && payload.projection.status === "pending") {
+        setPendingProjections([payload.projection], "sync");
+      }
+      const rejectedIndexes = new Set(
+        (Array.isArray(payload.rejected) ? payload.rejected : [])
+          .map((row) => row.index)
+          .filter((value) => Number.isInteger(value) && value >= 0),
+      );
+      applyShoppingSyncResult(outgoing, payload.rejected);
+      if (payload.data && payload.data.sections) {
+        hydrateFromServer(payload);
+      }
+      requestRender({
+        source: "reconciliation",
+        status: rejectedIndexes.size > 0 ? "rejected" : "server",
+        generation: context.generation,
+        revision: payload.revision,
+      });
+      if (showPayload) {
+        show(payload);
+      }
+      publishDataChanged();
+      },
+    );
+  } catch (error) {
+    restoreShoppingPendingChanges(outgoing);
+    throw error;
   }
-  if (showPayload) {
-    show(payload);
+}
+
+export async function retryPendingProjections() {
+  const pending = [...selectPendingProjections()];
+  for (const projection of pending) {
+    const payload = await gateway.synchronization.retry(projection.operation_id);
+    if (Number.isInteger(payload.revision)) {
+      setRevision(payload.revision, "projection-retry");
+    }
+    setPendingProjections(payload.pending_projections, "projection-retry");
+    if (payload.data && payload.data.sections) {
+      hydrateFromServer(payload);
+      requestRender({
+        source: "reconciliation",
+        status: "server",
+        revision: payload.revision,
+        generation: coordinator.getGeneration(),
+      });
+    }
   }
   publishDataChanged();
-  return payload;
 }
 
 export async function setStatus(entryId, status) {
   if (!SHOPPING_STATUSES.has(status)) {
     throw new Error("Invalid status for shopping mode.");
   }
-  queueStatusChange(entryId, status);
-  render();
+  setShoppingStatus(entryId, status);
+  coordinator.invalidate();
+  requestRender({ source: "optimistic", status: "optimistic", generation: coordinator.getGeneration(), force: true });
   publishDataChanged();
   if (!isOnline()) {
     show({
@@ -134,7 +202,7 @@ export async function setStatus(entryId, status) {
     message: "Status updated and synced to server.",
     entry_id: entryId,
     status,
-    pending_count: state.pendingChanges.length,
+    pending_count: selectShoppingPendingChanges().length,
   });
 }
 
@@ -148,10 +216,11 @@ export async function setStatusMany(entryIds, status) {
   }
 
   for (const entryId of ids) {
-    queueStatusChange(entryId, status);
+    setShoppingStatus(entryId, status);
   }
 
-  render();
+  coordinator.invalidate();
+  requestRender({ source: "optimistic", status: "optimistic", generation: coordinator.getGeneration(), force: true });
   publishDataChanged();
 
   if (!isOnline()) {
@@ -160,7 +229,7 @@ export async function setStatusMany(entryIds, status) {
       message: "Offline mode: changes saved locally and queued for sync.",
       entry_ids: ids,
       status,
-      pending_count: state.pendingChanges.length,
+      pending_count: selectShoppingPendingChanges().length,
     });
     return;
   }
@@ -171,20 +240,21 @@ export async function setStatusMany(entryIds, status) {
     message: "Batch status update synced to server.",
     entry_ids: ids,
     status,
-    pending_count: state.pendingChanges.length,
+    pending_count: selectShoppingPendingChanges().length,
   });
 }
 
 export async function deleteEntry(entryId) {
-  queueDeleteChange(entryId);
-  render();
+  deleteShoppingChange(entryId);
+  coordinator.invalidate();
+  requestRender({ source: "optimistic", status: "optimistic", generation: coordinator.getGeneration(), force: true });
   publishDataChanged();
   if (!isOnline()) {
     show({
       source: "local-cache",
       message: "Offline mode: delete saved locally and queued for sync.",
       entry_id: entryId,
-      pending_count: state.pendingChanges.length,
+      pending_count: selectShoppingPendingChanges().length,
     });
     return;
   }
@@ -193,7 +263,7 @@ export async function deleteEntry(entryId) {
     source: "shopping-mode",
     message: "Delete synced to server.",
     entry_id: entryId,
-    pending_count: state.pendingChanges.length,
+    pending_count: selectShoppingPendingChanges().length,
   });
 }
 
@@ -204,10 +274,11 @@ export async function deleteEntries(entryIds) {
   }
 
   for (const entryId of ids) {
-    queueDeleteChange(entryId);
+    deleteShoppingChange(entryId);
   }
 
-  render();
+  coordinator.invalidate();
+  requestRender({ source: "optimistic", status: "optimistic", generation: coordinator.getGeneration(), force: true });
   publishDataChanged();
 
   if (!isOnline()) {
@@ -215,7 +286,7 @@ export async function deleteEntries(entryIds) {
       source: "local-cache",
       message: "Offline mode: deletes saved locally and queued for sync.",
       entry_ids: ids,
-      pending_count: state.pendingChanges.length,
+      pending_count: selectShoppingPendingChanges().length,
     });
     return;
   }
@@ -225,6 +296,6 @@ export async function deleteEntries(entryIds) {
     source: "shopping-mode",
     message: "Batch delete synced to server.",
     entry_ids: ids,
-    pending_count: state.pendingChanges.length,
+    pending_count: selectShoppingPendingChanges().length,
   });
 }

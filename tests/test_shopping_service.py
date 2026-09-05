@@ -1,3 +1,5 @@
+"""Shopping service mutation, offline-batch, and reconciliation tests."""
+
 import asyncio
 from datetime import date, timedelta
 
@@ -16,6 +18,9 @@ class FakeShoppingClient:
         self.deleted_entry_ids = []
         self.next_id = 1
 
+    async def list_shopping_entries(self, limit):
+        return {"results": []}
+
     async def create_shopping_entry(self, payload):
         self.created_payloads.append(dict(payload))
         created = {"id": self.next_id, **dict(payload)}
@@ -32,6 +37,9 @@ class FakeShoppingClient:
 
 
 class BrokenShoppingClient:
+    async def list_shopping_entries(self, limit):
+        raise TandoorError("view failed")
+
     async def create_shopping_entry(self, payload):
         raise TandoorError("create failed")
 
@@ -40,6 +48,23 @@ class BrokenShoppingClient:
 
     async def delete_shopping_entry(self, entry_id):
         raise TandoorError("delete failed")
+
+
+class WriteBrokenShoppingClient(FakeShoppingClient):
+    async def update_shopping_entry(self, entry_id, payload):
+        raise TandoorError("update failed")
+
+
+class ReconciliationFailureOnceClient(FakeShoppingClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.list_calls = 0
+
+    async def list_shopping_entries(self, limit):
+        self.list_calls += 1
+        if self.list_calls == 1:
+            raise TandoorError("view failed")
+        return await super().list_shopping_entries(limit)
 
 
 def ensure_writes_enabled(_operation: str) -> None:
@@ -192,10 +217,13 @@ def test_apply_sync_changes_reports_rejected_and_applied(tmp_path) -> None:
             local_store_group_payload=local_store_group_payload,
             status_to_tandoor_fields=status_to_tandoor_fields,
             effective_status=effective_status,
+            extract_results=lambda payload: payload["results"],
+            build_shopping_view=lambda entries: {"sections": {"remaining": entries}},
         )
     )
 
     assert result["server_cursor"] >= 1
+    assert result["data"] == {"sections": {"remaining": []}}
     assert any(row["operation"] == "create" for row in result["applied"])
     assert any(row["operation"] == "delete" for row in result["applied"])
     reasons = [row["reason"] for row in result["rejected"]]
@@ -203,11 +231,29 @@ def test_apply_sync_changes_reports_rejected_and_applied(tmp_path) -> None:
     assert any("entry_id is required for update" in reason for reason in reasons)
 
 
-def test_service_wraps_tandoor_errors(tmp_path) -> None:
+def test_delete_local_entry_removes_status_override(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+    service = ShoppingService(state, FakeShoppingClient())
+    entry_id = state.allocate_local_shopping_entry_id()
+    state.set_local_shopping_entry(entry_id, {"id": entry_id, "name": "Bread"})
+    state.set_shopping_status(entry_id, "completed")
+
+    asyncio.run(
+        service.delete_entry(
+            entry_id,
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            operation_name="test_delete_local",
+        )
+    )
+
+    assert str(entry_id) not in state.get_shopping_statuses()
+
+
+def test_service_rejects_tandoor_write_errors(tmp_path) -> None:
     state = Stage2State(str(tmp_path))
     service = ShoppingService(state, BrokenShoppingClient())
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(HTTPException, match="create failed"):
         asyncio.run(
             service.create_entry(
                 payload={"food": {"name": "Milk"}, "amount": 1},
@@ -219,4 +265,84 @@ def test_service_wraps_tandoor_errors(tmp_path) -> None:
             )
         )
 
-    assert exc_info.value.status_code == 502
+    assert state.pending_projections() == []
+
+
+def test_sync_acknowledges_applied_changes_when_canonical_view_fails(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+    service = ShoppingService(state, BrokenShoppingClient())
+
+    result = asyncio.run(
+        service.apply_sync_changes(
+            changes=[{"operation": "create", "payload": {"ad_hoc": True, "name": "Bread"}}],
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            extract_reminder_patch=extract_reminder_patch,
+            build_local_entry_payload=build_local_entry_payload,
+            local_store_group_payload=local_store_group_payload,
+            status_to_tandoor_fields=status_to_tandoor_fields,
+            effective_status=effective_status,
+            extract_results=lambda payload: payload["results"],
+            build_shopping_view=lambda entries: {"sections": {"remaining": entries}},
+        )
+    )
+
+    assert result["data"] is None
+    assert result["projection"]["status"] == "pending"
+    assert len(result["applied"]) == 1
+    assert len(state.pending_projections()) == 1
+
+
+def test_sync_rejects_failed_tandoor_write_without_pending_projection(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+    service = ShoppingService(state, WriteBrokenShoppingClient())
+
+    result = asyncio.run(
+        service.apply_sync_changes(
+            changes=[{"operation": "update", "entry_id": 7, "payload": {"status": "completed"}}],
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            extract_reminder_patch=extract_reminder_patch,
+            build_local_entry_payload=build_local_entry_payload,
+            local_store_group_payload=local_store_group_payload,
+            status_to_tandoor_fields=status_to_tandoor_fields,
+            effective_status=effective_status,
+            extract_results=lambda payload: payload["results"],
+            build_shopping_view=lambda entries: {"sections": {"remaining": entries}},
+        )
+    )
+
+    assert result["applied"] == []
+    assert result["rejected"] == [{"index": 0, "reason": "502: update failed"}]
+    assert state.pending_projections() == []
+
+
+def test_retry_pending_shopping_reconciliation_only_reloads_view(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+    client = ReconciliationFailureOnceClient()
+    service = ShoppingService(state, client)
+
+    initial = asyncio.run(
+        service.apply_sync_changes(
+            changes=[{"operation": "create", "payload": {"ad_hoc": True, "name": "Bread"}}],
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            extract_reminder_patch=extract_reminder_patch,
+            build_local_entry_payload=build_local_entry_payload,
+            local_store_group_payload=local_store_group_payload,
+            status_to_tandoor_fields=status_to_tandoor_fields,
+            effective_status=effective_status,
+            extract_results=lambda payload: payload["results"],
+            build_shopping_view=lambda entries: {"sections": {"remaining": entries}},
+        )
+    )
+    operation_id = initial["projection"]["operation_id"]
+
+    retried = asyncio.run(
+        service.retry_pending_reconciliation(
+            operation_id,
+            extract_results=lambda payload: payload["results"],
+            build_shopping_view=lambda entries: {"sections": {"remaining": entries}},
+        )
+    )
+
+    assert client.list_calls == 2
+    assert retried["projection"]["status"] == "synchronized"
+    assert state.pending_projections() == []

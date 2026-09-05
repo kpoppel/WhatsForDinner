@@ -1,5 +1,22 @@
-import { api } from "./js/store/commands.js";
+/**
+ * Settings-screen adapter for user defaults, planning rules, and Tandoor tags.
+ * Form state is presentational; persisted values are loaded and saved through
+ * the store command boundary and rendered from selectors.
+ */
+import {
+  assertOnlineMutation,
+  loadSettingsResources,
+  saveSettingsResources,
+  setKeywordCatalog,
+  setSelectedKeywordIds,
+  setSettingsRuleValue,
+  setSettingsSlice,
+  setSettingsUserValue,
+} from "./js/store/commands.js";
+import { selectSettings } from "./js/store/selectors.js";
 import { assertRequiredFields } from "./js/contracts.js";
+import { selectSyncState } from "./js/store/selectors.js";
+import { createRenderScheduler } from "./js/render_scheduler.js";
 
 (() => {
   const panel = document.getElementById("wf-tab-settings");
@@ -16,8 +33,7 @@ import { assertRequiredFields } from "./js/contracts.js";
   const refreshButton = document.getElementById("wf-settings-refresh");
   const saveButton = document.getElementById("wf-settings-save");
   const TIME_24H_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
-  const keywordCatalog = [];
-  const selectedKeywordSet = new Set();
+  let loadedRevision = null;
 
   if (!(panel instanceof HTMLElement)) {
     return;
@@ -61,9 +77,6 @@ import { assertRequiredFields } from "./js/contracts.js";
   const NO_REPEAT_MIN = 0;
   const NO_REPEAT_MAX = 365;
 
-  let defaultDinersValue = 2;
-  let noRepeatDaysValue = 14;
-
   function setStatus(message) {
     statusNode.textContent = message;
   }
@@ -88,10 +101,11 @@ import { assertRequiredFields } from "./js/contracts.js";
     return parsed;
   }
 
-  function renderStepperValues() {
-    dinersValueNode.textContent = String(defaultDinersValue);
-    const dayText = noRepeatDaysValue === 1 ? "day" : "days";
-    noRepeatValueNode.textContent = `${noRepeatDaysValue} ${dayText}`;
+  function renderStepperValuesNow() {
+    const settings = selectSettings();
+    dinersValueNode.textContent = String(settings.user.default_diners);
+    const dayText = settings.rules.no_repeat_days === 1 ? "day" : "days";
+    noRepeatValueNode.textContent = `${settings.rules.no_repeat_days} ${dayText}`;
   }
 
   function normalize24hTime(rawValue) {
@@ -124,15 +138,16 @@ import { assertRequiredFields } from "./js/contracts.js";
   }
 
   function selectedKeywordIds() {
-    const values = Array.from(selectedKeywordSet);
+    const values = Array.from(selectSettings().selectedKeywordIds);
     values.sort((left, right) => left - right);
     return values;
   }
 
-  function renderSelectedKeywords() {
+  function renderSelectedKeywordsNow() {
+    const settings = selectSettings();
     const labels = [];
-    for (const row of keywordCatalog) {
-      if (selectedKeywordSet.has(row.id)) {
+    for (const row of settings.keywordCatalog) {
+      if (settings.selectedKeywordIds.has(row.id)) {
         labels.push(row.label);
       }
     }
@@ -176,7 +191,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     button.className = "wf-keyword-option";
     button.dataset.keywordId = String(keywordId);
 
-    const selected = selectedKeywordSet.has(keywordId);
+    const selected = selectSettings().selectedKeywordIds.has(keywordId);
     if (selected) {
       button.classList.add("is-selected");
     }
@@ -188,11 +203,13 @@ import { assertRequiredFields } from "./js/contracts.js";
     `;
 
     button.addEventListener("click", () => {
-      if (selectedKeywordSet.has(keywordId)) {
-        selectedKeywordSet.delete(keywordId);
+      const nextSelectedIds = new Set(selectSettings().selectedKeywordIds);
+      if (nextSelectedIds.has(keywordId)) {
+        nextSelectedIds.delete(keywordId);
       } else {
-        selectedKeywordSet.add(keywordId);
+        nextSelectedIds.add(keywordId);
       }
+      setSelectedKeywordIds(Array.from(nextSelectedIds));
       renderKeywordChecklist();
       renderSelectedKeywords();
     });
@@ -200,8 +217,9 @@ import { assertRequiredFields } from "./js/contracts.js";
     return button;
   }
 
-  function renderKeywordChecklist() {
+  function renderKeywordChecklistNow() {
     keywordsContainer.innerHTML = "";
+    const keywordCatalog = selectSettings().keywordCatalog;
 
     if (keywordCatalog.length === 0) {
       const emptyNode = document.createElement("p");
@@ -216,8 +234,29 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
   }
 
+  const settingsRenderScheduler = createRenderScheduler({
+    getRevision: () => selectSyncState().revision,
+    render: () => {
+      renderStepperValuesNow();
+      renderKeywordChecklistNow();
+      renderSelectedKeywordsNow();
+    },
+  });
+
+  function renderStepperValues(options = {}) {
+    return settingsRenderScheduler.request({ source: "settings", force: true, ...options });
+  }
+
+  function renderSelectedKeywords(options = {}) {
+    return settingsRenderScheduler.request({ source: "settings", force: true, ...options });
+  }
+
+  function renderKeywordChecklist(options = {}) {
+    return settingsRenderScheduler.request({ source: "settings", force: true, ...options });
+  }
+
   function assignKeywordOptions(payload) {
-    keywordCatalog.length = 0;
+    const nextCatalog = [];
 
     const data = payload.data;
     let rows = [];
@@ -246,34 +285,38 @@ import { assertRequiredFields } from "./js/contracts.js";
         label = `keyword-${id}`;
       }
 
-      keywordCatalog.push({ id, label });
+      nextCatalog.push({ id, label });
     }
 
-    keywordCatalog.sort((left, right) => left.label.localeCompare(right.label));
+    nextCatalog.sort((left, right) => left.label.localeCompare(right.label));
+    setKeywordCatalog(nextCatalog);
     renderKeywordChecklist();
   }
 
   function applySelectedKeywords(payload) {
-    const selectedIds = payload.selected_keyword_ids;
-    selectedKeywordSet.clear();
-    if (Array.isArray(selectedIds)) {
-      for (const id of selectedIds) {
+    const selectedIds = [];
+    const payloadIds = payload.selected_keyword_ids;
+    if (Array.isArray(payloadIds)) {
+      for (const id of payloadIds) {
         const parsed = Number(id);
         if (Number.isInteger(parsed)) {
-          selectedKeywordSet.add(parsed);
+          selectedIds.push(parsed);
         }
       }
     }
 
+    setSelectedKeywordIds(selectedIds);
     renderKeywordChecklist();
     renderSelectedKeywords();
   }
 
   async function loadSettings() {
-    const userSettingsPayload = await api("/config/user-settings");
-    const rulesPayload = await api("/config/meal-plan-rules");
-    const keywordsPayload = await api("/config/keywords");
-    const selectedPayload = await api("/config/keywords/selected");
+    const {
+      user: userSettingsPayload,
+      rules: rulesPayload,
+      keywords: keywordsPayload,
+      selectedKeywords: selectedPayload,
+    } = await loadSettingsResources();
 
     assertRequiredFields(userSettingsPayload, ["data"], "User settings response");
     assertRequiredFields(rulesPayload, ["data"], "Meal plan rules response");
@@ -284,7 +327,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     if (settingsData && typeof settingsData === "object") {
       const defaultDiners = Number(settingsData.default_diners);
       if (Number.isInteger(defaultDiners)) {
-        defaultDinersValue = clampInteger(defaultDiners, DINERS_MIN, DINERS_MAX);
+        setSettingsUserValue("default_diners", clampInteger(defaultDiners, DINERS_MIN, DINERS_MAX));
       }
 
       const defaultReminderTime = settingsData.default_notification_time;
@@ -293,6 +336,7 @@ import { assertRequiredFields } from "./js/contracts.js";
         if (normalized === null) {
           throw new Error("Stored default reminder time is invalid.");
         }
+        setSettingsUserValue("default_notification_time", normalized);
         reminderTimeInput.value = normalized;
       }
     }
@@ -301,7 +345,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     if (rulesData && typeof rulesData === "object") {
       const noRepeat = Number(rulesData.no_repeat_days);
       if (Number.isInteger(noRepeat)) {
-        noRepeatDaysValue = clampInteger(noRepeat, NO_REPEAT_MIN, NO_REPEAT_MAX);
+        setSettingsRuleValue("no_repeat_days", clampInteger(noRepeat, NO_REPEAT_MIN, NO_REPEAT_MAX));
       }
     }
 
@@ -309,10 +353,13 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     assignKeywordOptions(keywordsPayload);
     applySelectedKeywords(selectedPayload);
+    loadedRevision = selectSyncState().revision;
   }
 
   async function saveSettings() {
-    const defaultDiners = clampInteger(defaultDinersValue, DINERS_MIN, DINERS_MAX);
+    assertOnlineMutation("settings");
+    const settings = selectSettings();
+    const defaultDiners = clampInteger(settings.user.default_diners, DINERS_MIN, DINERS_MAX);
     if (!Number.isInteger(defaultDiners) || defaultDiners < DINERS_MIN || defaultDiners > DINERS_MAX) {
       throw new Error("Default diners must be an integer from 1 to 20.");
     }
@@ -324,29 +371,28 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     reminderTimeInput.value = reminderTime;
 
-    const noRepeatDays = clampInteger(noRepeatDaysValue, NO_REPEAT_MIN, NO_REPEAT_MAX);
+    const noRepeatDays = clampInteger(settings.rules.no_repeat_days, NO_REPEAT_MIN, NO_REPEAT_MAX);
     if (!Number.isInteger(noRepeatDays) || noRepeatDays < NO_REPEAT_MIN || noRepeatDays > NO_REPEAT_MAX) {
       throw new Error("No-repeat days must be an integer from 0 to 365.");
     }
 
     setSavingState(true);
     try {
-      await api("/config/user-settings", {
-        method: "PUT",
-        body: JSON.stringify({
+      await saveSettingsResources(
+        {
           default_diners: defaultDiners,
           default_notification_time: reminderTime,
-        }),
-      });
+        },
+        { no_repeat_days: noRepeatDays },
+        selectedKeywordIds(),
+      );
 
-      await api("/config/meal-plan-rules", {
-        method: "PUT",
-        body: JSON.stringify({ no_repeat_days: noRepeatDays }),
-      });
-
-      await api("/config/keywords/selected", {
-        method: "PUT",
-        body: JSON.stringify({ keyword_ids: selectedKeywordIds() }),
+      setSettingsSlice({
+        user: {
+          default_diners: defaultDiners,
+          default_notification_time: reminderTime,
+        },
+        rules: { no_repeat_days: noRepeatDays },
       });
 
       renderSelectedKeywords();
@@ -377,22 +423,26 @@ import { assertRequiredFields } from "./js/contracts.js";
   }
 
   dinersDownButton.addEventListener("click", () => {
-    defaultDinersValue = clampInteger(defaultDinersValue - 1, DINERS_MIN, DINERS_MAX);
+    const settings = selectSettings();
+    setSettingsUserValue("default_diners", clampInteger(settings.user.default_diners - 1, DINERS_MIN, DINERS_MAX));
     renderStepperValues();
   });
 
   dinersUpButton.addEventListener("click", () => {
-    defaultDinersValue = clampInteger(defaultDinersValue + 1, DINERS_MIN, DINERS_MAX);
+    const settings = selectSettings();
+    setSettingsUserValue("default_diners", clampInteger(settings.user.default_diners + 1, DINERS_MIN, DINERS_MAX));
     renderStepperValues();
   });
 
   repeatDownButton.addEventListener("click", () => {
-    noRepeatDaysValue = clampInteger(noRepeatDaysValue - 1, NO_REPEAT_MIN, NO_REPEAT_MAX);
+    const settings = selectSettings();
+    setSettingsRuleValue("no_repeat_days", clampInteger(settings.rules.no_repeat_days - 1, NO_REPEAT_MIN, NO_REPEAT_MAX));
     renderStepperValues();
   });
 
   repeatUpButton.addEventListener("click", () => {
-    noRepeatDaysValue = clampInteger(noRepeatDaysValue + 1, NO_REPEAT_MIN, NO_REPEAT_MAX);
+    const settings = selectSettings();
+    setSettingsRuleValue("no_repeat_days", clampInteger(settings.rules.no_repeat_days + 1, NO_REPEAT_MIN, NO_REPEAT_MAX));
     renderStepperValues();
   });
 
@@ -403,9 +453,10 @@ import { assertRequiredFields } from "./js/contracts.js";
   const settingsOpenButton = document.getElementById("wf-settings-btn");
   if (settingsOpenButton) {
     settingsOpenButton.addEventListener("click", () => {
+      if (loadedRevision === selectSyncState().revision) {
+        return;
+      }
       void runAction(loadSettings);
     });
   }
-
-  void runAction(loadSettings);
 })();

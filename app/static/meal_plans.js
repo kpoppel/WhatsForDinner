@@ -1,11 +1,25 @@
+/**
+ * Meal-plan screen controller and renderer.
+ * It keeps modal, drag, and search state locally while all server-backed model
+ * reads and writes pass through store selectors and named commands.
+ */
 import {
-  api as storeApi,
+  acceptsRevision,
+  assertOnlineMutation,
   cachePlanDetail,
   cachePlanListRows,
+  mealPlanCommands,
+  recipeCommands,
+  settingsCommands,
+  setMealPlanDetail,
+  setMealPlanSelection,
+  setPendingProjections,
+  setRevision,
   writeActiveMealPlanId,
 } from "./js/store/commands.js";
-import { readMealPlanCache } from "./js/store/selectors.js";
+import { readMealPlanCache, selectMealPlans, selectPendingProjections, selectSyncState } from "./js/store/selectors.js";
 import { assertRequiredFields } from "./js/contracts.js";
+import { createRenderScheduler } from "./js/render_scheduler.js";
 
 (() => {
   const changeStartDateButton = document.getElementById("wf-plan-change-start-btn");
@@ -110,9 +124,7 @@ import { assertRequiredFields } from "./js/contracts.js";
   });
 
   const generateSheetClass = "wf-plan-sheet-open";
-  let activePlanId = null;
-  let selectedPlanId = null;
-  let selectedPlan = null;
+  const mealPlanState = selectMealPlans();
   const planPreviewTitlesById = new Map();
   let generateModalClosing = false;
 
@@ -128,11 +140,31 @@ import { assertRequiredFields } from "./js/contracts.js";
   let touchDraggedEntryId = null;
   let touchDropEntryId = null;
   let touchDropPlacement = "before";
-  let mealPlanApiReachable = true;
   let generateShoppingInFlight = false;
   let generateShoppingLongPressTimer = 0;
   let generateShoppingLongPressTriggered = false;
   let generateShoppingSuppressClick = false;
+  let pendingPlanList = null;
+  let pendingPlanDetail = null;
+  let hasPendingPlanList = false;
+  let hasPendingPlanDetail = false;
+  let latestPlanOpenRequest = 0;
+
+  const mealPlanRenderScheduler = createRenderScheduler({
+    getRevision: () => selectSyncState().revision,
+    render: () => {
+      if (hasPendingPlanList) {
+        renderPlanListNow(pendingPlanList);
+      }
+      if (hasPendingPlanDetail) {
+        renderPlanDetailNow(pendingPlanDetail);
+      }
+      pendingPlanList = null;
+      pendingPlanDetail = null;
+      hasPendingPlanList = false;
+      hasPendingPlanDetail = false;
+    },
+  });
 
   const GENERATE_SHOPPING_LONG_PRESS_MS = 700;
 
@@ -149,20 +181,14 @@ import { assertRequiredFields } from "./js/contracts.js";
     if (typeof window.WFD_isOnline === "function") {
       return !window.WFD_isOnline();
     }
-    return navigator.onLine === false || mealPlanApiReachable === false;
-  }
-
-  function reportApiReachable(value) {
-    mealPlanApiReachable = Boolean(value);
-    if (typeof window.WFD_reportApiReachable === "function") {
-      window.WFD_reportApiReachable(mealPlanApiReachable);
-    }
+    return navigator.onLine === false;
   }
 
   function assertMealPlanWriteAllowed(action) {
     if (isMealPlanOfflineReadOnly()) {
       throw new Error(`Cannot ${action} while offline. Meal plan editing is disabled.`);
     }
+    assertOnlineMutation("meal plans");
   }
 
   function updateMealPlanActionAvailability() {
@@ -215,10 +241,6 @@ import { assertRequiredFields } from "./js/contracts.js";
     const month = String(nowDate.getMonth() + 1).padStart(2, "0");
     const day = String(nowDate.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
-  }
-
-  async function api(path, options) {
-    return await storeApi(path, options, reportApiReachable);
   }
 
   function parseIsoDate(text) {
@@ -450,7 +472,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     return { enabled, text };
   }
 
-  function renderPlanList(plans) {
+  function renderPlanListNow(plans) {
     listNode.innerHTML = "";
 
     if (!Array.isArray(plans) || plans.length === 0) {
@@ -462,7 +484,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       const planId = Number(plan.plan_id);
       const card = document.createElement("article");
       card.className = "wf-plan-card";
-      if (planId === activePlanId) {
+      if (planId === mealPlanState.activePlanId) {
         card.classList.add("is-active");
       }
 
@@ -474,7 +496,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       heading.textContent = planListDateRangeLabel(plan);
       header.appendChild(heading);
 
-      if (planId === activePlanId) {
+      if (planId === mealPlanState.activePlanId) {
         const badge = document.createElement("span");
         badge.className = "wf-plan-active-badge";
         badge.textContent = "Active";
@@ -617,10 +639,10 @@ import { assertRequiredFields } from "./js/contracts.js";
   }
 
   function findEntryById(entryId) {
-    if (!selectedPlan || typeof selectedPlan !== "object") {
+    if (!mealPlanState.selectedPlan || typeof mealPlanState.selectedPlan !== "object") {
       return null;
     }
-    const entries = selectedPlan.entries;
+    const entries = mealPlanState.selectedPlan.entries;
     if (!Array.isArray(entries)) {
       return null;
     }
@@ -639,13 +661,13 @@ import { assertRequiredFields } from "./js/contracts.js";
 
   async function reorderEntry(dragEntryId, dropEntryId, dropPlacement = "before") {
     assertMealPlanWriteAllowed("reorder meal days");
-    if (!Number.isInteger(selectedPlanId)) {
+    if (!Number.isInteger(mealPlanState.selectedPlanId)) {
       return;
     }
-    if (!selectedPlan || typeof selectedPlan !== "object") {
+    if (!mealPlanState.selectedPlan || typeof mealPlanState.selectedPlan !== "object") {
       return;
     }
-    if (!Array.isArray(selectedPlan.entries)) {
+    if (!Array.isArray(mealPlanState.selectedPlan.entries)) {
       return;
     }
     if (!Number.isInteger(dragEntryId) || !Number.isInteger(dropEntryId)) {
@@ -655,7 +677,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       return;
     }
 
-    const ordered = [...selectedPlan.entries].sort((a, b) => Number(a.day_index) - Number(b.day_index));
+    const ordered = [...mealPlanState.selectedPlan.entries].sort((a, b) => Number(a.day_index) - Number(b.day_index));
 
     let fromIndex = -1;
     let toIndex = -1;
@@ -684,12 +706,12 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
     targetDayIndex = Math.max(0, Math.min(targetDayIndex, ordered.length - 1));
 
-    await api(`/meal-plans/${selectedPlanId}/entries/${dragEntryId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ target_day_index: targetDayIndex }),
-    });
-
-    await reloadSelectedPlan();
+    const payload = await mealPlanCommands.patchEntry(
+      mealPlanState.selectedPlanId,
+      dragEntryId,
+      { target_day_index: targetDayIndex },
+    );
+    applyCanonicalPlanResponse(payload);
     setStatus("Meal day order updated.");
     publishDataChanged();
   }
@@ -776,13 +798,11 @@ import { assertRequiredFields } from "./js/contracts.js";
 
   async function deleteMealDay(entryId) {
     assertMealPlanWriteAllowed("delete a meal day");
-    if (!Number.isInteger(selectedPlanId)) {
+    if (!Number.isInteger(mealPlanState.selectedPlanId)) {
       throw new Error("No meal plan selected.");
     }
-    await api(`/meal-plans/${selectedPlanId}/entries/${entryId}`, {
-      method: "DELETE",
-    });
-    await reloadSelectedPlan();
+    const payload = await mealPlanCommands.deleteEntry(mealPlanState.selectedPlanId, entryId);
+    applyCanonicalPlanResponse(payload);
     setStatus("Meal day deleted.");
     publishDataChanged();
   }
@@ -790,20 +810,18 @@ import { assertRequiredFields } from "./js/contracts.js";
   async function deleteStoredPlan(planId) {
     assertMealPlanWriteAllowed("delete a meal plan");
 
-    await api(`/meal-plans/stored/${planId}`, {
-      method: "DELETE",
-    });
+    await mealPlanCommands.remove(planId);
 
-    if (selectedPlanId === planId) {
-      selectedPlanId = null;
-      selectedPlan = null;
+    if (mealPlanState.selectedPlanId === planId) {
+      setMealPlanSelection(null);
+      setMealPlanDetail(null);
       writeActiveMealPlanId(null);
       renderPlanDetail(null);
       setAppTab("meal-plans");
     }
 
-    if (activePlanId === planId) {
-      activePlanId = null;
+    if (mealPlanState.activePlanId === planId) {
+      writeActiveMealPlanId(null);
     }
 
     await refreshPlans();
@@ -813,11 +831,11 @@ import { assertRequiredFields } from "./js/contracts.js";
 
   async function addMealDay() {
     assertMealPlanWriteAllowed("add a meal day");
-    if (!Number.isInteger(selectedPlanId)) {
+    if (!Number.isInteger(mealPlanState.selectedPlanId)) {
       throw new Error("No meal plan selected.");
     }
 
-    const plan = selectedPlan;
+    const plan = mealPlanState.selectedPlan;
     if (!plan || typeof plan !== "object") {
       throw new Error("Open a meal plan first.");
     }
@@ -828,23 +846,23 @@ import { assertRequiredFields } from "./js/contracts.js";
     const nextDate = startDate ? toIsoDate(addDays(startDate, nextDayIndex)) : "";
     const defaultServings = Number(plan.diners);
 
-    const payload = await api(`/meal-plans/${selectedPlanId}/entries`, {
-      method: "POST",
-      body: JSON.stringify({
+    const payload = await mealPlanCommands.addEntry(
+      mealPlanState.selectedPlanId,
+      {
         day_index: nextDayIndex,
         date: nextDate,
         mode: "planned",
         servings: Number.isInteger(defaultServings) ? defaultServings : 2,
         recipe: null,
-      }),
-    });
+      },
+    );
 
     const updatedPlan = payload && typeof payload === "object" ? payload.data : null;
     const updatedEntries = Array.isArray(updatedPlan?.entries) ? updatedPlan.entries : [];
     const createdEntry = updatedEntries.find((row) => Number(row?.day_index) === nextDayIndex) || null;
     const createdEntryId = Number(createdEntry?.entry_id);
 
-    await reloadSelectedPlan();
+    applyCanonicalPlanResponse(payload);
     if (Number.isInteger(createdEntryId)) {
       await openMealEditor(createdEntryId);
       setStatus(`Added Day ${nextDayIndex + 1}. Edit details and save when ready.`);
@@ -854,7 +872,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     publishDataChanged();
   }
 
-  function renderPlanDetail(plan) {
+  function renderPlanDetailNow(plan) {
     detailNode.innerHTML = "";
 
     if (!plan || typeof plan !== "object") {
@@ -1077,12 +1095,57 @@ import { assertRequiredFields } from "./js/contracts.js";
     detailNode.appendChild(stack);
   }
 
+  function renderPlanList(plans, options = {}) {
+    pendingPlanList = plans;
+    hasPendingPlanList = true;
+    return mealPlanRenderScheduler.request({ source: "meal-plans", force: true, ...options });
+  }
+
+  function renderPlanDetail(plan, options = {}) {
+    pendingPlanDetail = plan;
+    hasPendingPlanDetail = true;
+    return mealPlanRenderScheduler.request({ source: "meal-plan-detail", force: true, ...options });
+  }
+
+  function applyCanonicalPlanResponse(payload) {
+    assertRequiredFields(payload, ["data"], "Meal plan mutation response");
+    if (!acceptsRevision(payload.revision)) {
+      return null;
+    }
+    const plan = payload.data;
+    const planId = Number(plan.plan_id);
+    if (!Number.isInteger(planId)) {
+      throw new Error("Meal plan mutation response has an invalid plan_id.");
+    }
+    if (Number.isInteger(payload.revision)) {
+      setRevision(payload.revision, "meal-plan-mutation");
+    }
+    if (Array.isArray(payload.pending_projections)) {
+      setPendingProjections(payload.pending_projections, "meal-plan-mutation");
+    }
+    setMealPlanSelection(planId);
+    setMealPlanDetail(plan);
+    writeActiveMealPlanId(planId);
+    cachePlanPreview(plan);
+    cachePlanDetail(plan);
+
+    const cachedRows = readMealPlanCache().list;
+    const nextRows = sortPlansMostRecentFirst([
+      plan,
+      ...cachedRows.filter((row) => Number(row.plan_id) !== planId),
+    ]);
+    cachePlanListRows(nextRows);
+    renderPlanList(nextRows);
+    renderPlanDetail(plan);
+    return plan;
+  }
+
   async function refreshPlans() {
     let plans = [];
     let listFromApi = false;
 
     try {
-      const listPayload = await api("/meal-plans/stored");
+      const listPayload = await mealPlanCommands.list();
       assertRequiredFields(listPayload, ["data"], "Meal plan list response");
       const rawPlans = Array.isArray(listPayload.data) ? listPayload.data : [];
       plans = sortPlansMostRecentFirst(rawPlans);
@@ -1099,9 +1162,9 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
 
     if (plans.length === 0) {
-      activePlanId = null;
-      selectedPlanId = null;
-      selectedPlan = null;
+      writeActiveMealPlanId(null);
+      setMealPlanSelection(null);
+      setMealPlanDetail(null);
       writeActiveMealPlanId(null);
       renderPlanList(plans);
       renderPlanDetail(null);
@@ -1110,7 +1173,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
 
     const firstPlanId = Number(plans[0].plan_id);
-    activePlanId = firstPlanId;
+    writeActiveMealPlanId(firstPlanId);
 
     const planIds = new Set(plans.map((row) => Number(row.plan_id)).filter((id) => Number.isInteger(id)));
     for (const cachedPlanId of Array.from(planPreviewTitlesById.keys())) {
@@ -1121,7 +1184,7 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     if (Number.isInteger(firstPlanId) && !planPreviewTitlesById.has(firstPlanId)) {
       try {
-        const activePayload = await api(`/meal-plans/${firstPlanId}`);
+        const activePayload = await mealPlanCommands.get(firstPlanId);
         assertRequiredFields(activePayload, ["data"], "Meal plan detail response");
         cachePlanPreview(activePayload.data);
         cachePlanDetail(activePayload.data);
@@ -1133,16 +1196,16 @@ import { assertRequiredFields } from "./js/contracts.js";
       }
     }
 
-    if (Number.isInteger(selectedPlanId)) {
-      const selectedStillExists = plans.some((row) => Number(row.plan_id) === selectedPlanId);
+    if (Number.isInteger(mealPlanState.selectedPlanId)) {
+      const selectedStillExists = plans.some((row) => Number(row.plan_id) === mealPlanState.selectedPlanId);
       if (!selectedStillExists) {
-        selectedPlanId = null;
-        selectedPlan = null;
+        setMealPlanSelection(null);
+        setMealPlanDetail(null);
       }
     }
 
-    if (Number.isInteger(selectedPlanId)) {
-      writeActiveMealPlanId(selectedPlanId);
+    if (Number.isInteger(mealPlanState.selectedPlanId)) {
+      writeActiveMealPlanId(mealPlanState.selectedPlanId);
     } else if (Number.isInteger(firstPlanId)) {
       writeActiveMealPlanId(firstPlanId);
     }
@@ -1153,50 +1216,14 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
   }
 
-  async function reloadSelectedPlan() {
-    if (!Number.isInteger(selectedPlanId)) {
-      return;
-    }
-
-    writeActiveMealPlanId(selectedPlanId);
-
-    let planData = null;
-    try {
-      const payload = await api(`/meal-plans/${selectedPlanId}`);
-      assertRequiredFields(payload, ["data"], "Meal plan detail response");
-      planData = payload.data;
-    } catch {
-      planData = cachedPlanDetail(selectedPlanId);
-      if (!planData) {
-        throw new Error("Unable to load selected meal plan while offline.");
-      }
-      setStatus("Offline: showing cached meal plan.");
-    }
-
-    selectedPlan = planData;
-    cachePlanPreview(selectedPlan);
-    cachePlanDetail(selectedPlan);
-    renderPlanDetail(selectedPlan);
-
-    let plans = [];
-    try {
-      const listPayload = await api("/meal-plans/stored");
-      const rawPlans = Array.isArray(listPayload.data) ? listPayload.data : [];
-      plans = sortPlansMostRecentFirst(rawPlans);
-      cachePlanListRows(plans);
-    } catch {
-      plans = sortPlansMostRecentFirst(readMealPlanCache().list);
-    }
-    renderPlanList(plans);
-  }
-
   async function openPlanEditor(planId) {
-    selectedPlanId = planId;
+    const requestId = ++latestPlanOpenRequest;
+    setMealPlanSelection(planId);
     writeActiveMealPlanId(planId);
 
     let planData = null;
     try {
-      const payload = await api(`/meal-plans/${planId}`);
+      const payload = await mealPlanCommands.get(planId);
       assertRequiredFields(payload, ["data"], "Meal plan detail response");
       planData = payload.data;
     } catch {
@@ -1207,29 +1234,19 @@ import { assertRequiredFields } from "./js/contracts.js";
       setStatus("Offline: opened cached meal plan.");
     }
 
-    selectedPlan = planData;
-    cachePlanPreview(selectedPlan);
-    cachePlanDetail(selectedPlan);
-    renderPlanDetail(selectedPlan);
+    if (requestId !== latestPlanOpenRequest) {
+      return;
+    }
+
+    applyCanonicalPlanResponse({ data: planData });
     setAppTab("meal-plan-detail");
 
-    let plans = [];
-    try {
-      const listPayload = await api("/meal-plans/stored");
-      const rawPlans = Array.isArray(listPayload.data) ? listPayload.data : [];
-      plans = sortPlansMostRecentFirst(rawPlans);
-      cachePlanListRows(plans);
-    } catch {
-      plans = sortPlansMostRecentFirst(readMealPlanCache().list);
-    }
-    renderPlanList(plans);
-
-    setStatus(`Loaded meal plan ${planDateRangeLabel(selectedPlan)}.`);
+    setStatus(`Loaded meal plan ${planDateRangeLabel(mealPlanState.selectedPlan)}.`);
   }
 
   async function generateShoppingList(mode = "sync") {
     assertMealPlanWriteAllowed("generate a shopping list from meal plans");
-    if (!Number.isInteger(selectedPlanId)) {
+    if (!Number.isInteger(mealPlanState.selectedPlanId)) {
       throw new Error("Select a meal plan first.");
     }
     if (generateShoppingInFlight) {
@@ -1243,9 +1260,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     generateShoppingButton.textContent = mode === "regenerate_missing" ? "Re-generating..." : "Generating...";
 
     try {
-      const payload = await api(`/meal-plans/${selectedPlanId}/shopping-list?mode=${encodeURIComponent(mode)}`, {
-        method: "POST",
-      });
+      const payload = await mealPlanCommands.generateShoppingList(mealPlanState.selectedPlanId, mode);
       assertRequiredFields(payload, ["data"], "Meal plan shopping response");
 
       const data = payload.data;
@@ -1301,7 +1316,7 @@ import { assertRequiredFields } from "./js/contracts.js";
   }
 
   async function loadDefaultDinersForGenerateModal() {
-    const payload = await api("/config/user-settings");
+    const payload = await settingsCommands.user();
     const data = payload.data;
     if (!data || typeof data !== "object") {
       throw new Error("User settings response is invalid.");
@@ -1369,12 +1384,12 @@ import { assertRequiredFields } from "./js/contracts.js";
       setStatus("Offline: updating plan date is unavailable.");
       return;
     }
-    if (!selectedPlan || typeof selectedPlan !== "object") {
+    if (!mealPlanState.selectedPlan || typeof mealPlanState.selectedPlan !== "object") {
       setStatus("Open a meal plan first.");
       return;
     }
 
-    const current = String(selectedPlan.start_date || "").trim();
+    const current = String(mealPlanState.selectedPlan.start_date || "").trim();
     startDateEditInput.value = current;
     startDateSaveButton.disabled = false;
     startDateCancelButton.disabled = false;
@@ -1398,7 +1413,7 @@ import { assertRequiredFields } from "./js/contracts.js";
 
   async function saveStartDate() {
     assertMealPlanWriteAllowed("update meal plan start date");
-    if (!Number.isInteger(selectedPlanId)) {
+    if (!Number.isInteger(mealPlanState.selectedPlanId)) {
       throw new Error("No meal plan selected.");
     }
 
@@ -1412,13 +1427,10 @@ import { assertRequiredFields } from "./js/contracts.js";
     startDateSaveButton.textContent = "Saving...";
 
     try {
-      await api(`/meal-plans/${selectedPlanId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ start_date: startDate }),
-      });
+      const payload = await mealPlanCommands.patch(mealPlanState.selectedPlanId, { start_date: startDate });
+      applyCanonicalPlanResponse(payload);
 
       closeStartDateModal();
-      await reloadSelectedPlan();
       setStatus(`Meal plan start date updated to ${startDate}.`);
       publishDataChanged();
     } finally {
@@ -1469,10 +1481,7 @@ import { assertRequiredFields } from "./js/contracts.js";
         },
       };
 
-      const result = await api("/meal-plans/generate", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      const result = await mealPlanCommands.generate(payload);
 
       const planData = result.data;
       const planId = Number(planData.plan_id);
@@ -1480,11 +1489,9 @@ import { assertRequiredFields } from "./js/contracts.js";
         throw new Error("Server did not return a valid plan_id.");
       }
 
-      selectedPlanId = planId;
+      applyCanonicalPlanResponse(result);
       closeGenerateModal();
-
-      await refreshPlans();
-      await openPlanEditor(planId);
+      setAppTab("meal-plan-detail");
       setStatus(`Generated and opened meal plan ${planDateRangeLabel(planData)}.`);
       publishDataChanged();
     } finally {
@@ -1750,7 +1757,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       return;
     }
 
-    const payload = await api(`/recipes?search=${encodeURIComponent(query)}&limit=8`);
+    const payload = await recipeCommands.search(query, 8);
     const results = extractRecipeResults(payload);
     renderMealEditorSearchResults(results);
   }
@@ -1931,7 +1938,7 @@ import { assertRequiredFields } from "./js/contracts.js";
 
   async function saveMealEditor() {
     assertMealPlanWriteAllowed("edit this meal day");
-    if (!Number.isInteger(selectedPlanId)) {
+    if (!Number.isInteger(mealPlanState.selectedPlanId)) {
       throw new Error("No meal plan selected.");
     }
 
@@ -1980,13 +1987,10 @@ import { assertRequiredFields } from "./js/contracts.js";
         notes: buildLegacyNotes(reminderEnabled, reminderText),
       };
 
-      await api(`/meal-plans/${selectedPlanId}/entries/${entryId}`, {
-        method: "PATCH",
-        body: JSON.stringify(patch),
-      });
+      const payload = await mealPlanCommands.patchEntry(mealPlanState.selectedPlanId, entryId, patch);
+      applyCanonicalPlanResponse(payload);
 
       closeMealEditorModal();
-      await reloadSelectedPlan();
       setStatus("Meal day updated.");
       publishDataChanged();
     } finally {
@@ -2087,8 +2091,8 @@ import { assertRequiredFields } from "./js/contracts.js";
 
   window.addEventListener("wfd:online-state", () => {
     updateMealPlanActionAvailability();
-    if (selectedPlan) {
-      renderPlanDetail(selectedPlan);
+    if (mealPlanState.selectedPlan) {
+      renderPlanDetail(mealPlanState.selectedPlan);
     }
   });
 
@@ -2110,6 +2114,13 @@ import { assertRequiredFields } from "./js/contracts.js";
     });
   });
 
+  const mealPlansNavButton = document.querySelector('.wf-nav-btn[data-tab="meal-plans"]');
+  if (mealPlansNavButton) {
+    mealPlansNavButton.addEventListener("click", () => {
+      void runAction(refreshPlans);
+    });
+  }
+
   async function runAction(action) {
     try {
       await action();
@@ -2122,5 +2133,4 @@ import { assertRequiredFields } from "./js/contracts.js";
   setAppTab("meal-plans");
   updateMealPlanActionAvailability();
   //setStatus("Choose a meal plan to edit.");
-  void runAction(refreshPlans);
 })();

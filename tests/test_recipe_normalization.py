@@ -1,3 +1,5 @@
+"""Tandoor recipe normalization contract tests."""
+
 from app.services.tandoor_client import TandoorClient
 
 

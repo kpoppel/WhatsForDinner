@@ -1,3 +1,10 @@
+"""Schema-versioned JSON repository for application-owned derived state.
+
+Each public mutation performs a locked read-modify-write and atomically replaces
+the state file. The lock is process-local; deployments must use one process per
+data directory. Tandoor side effects are coordinated by the domain services.
+"""
+
 from __future__ import annotations
 
 import json
@@ -9,6 +16,7 @@ from pathlib import Path
 from threading import Lock
 import tempfile
 from typing import Any
+from uuid import uuid4
 
 from app.models.state_schema import default_state_payload
 from app.services.state_migrations import StateSchemaError, migrate_and_validate_state
@@ -19,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 
 class Stage2State:
+    """Persist meal-plan metadata, shopping overlays, revisions, and sync work."""
+
     def __init__(
         self,
         data_dir: str,
@@ -28,6 +38,7 @@ class Stage2State:
         archive_meal_plan_max_count: int = 100,
     ) -> None:
         self.state_file = Path(data_dir) / DEFAULT_STATE_FILENAME
+        self.backup_file = self.state_file.with_suffix(f"{self.state_file.suffix}.bak")
         self._sync_event_max_count = sync_event_max_count
         self._sync_event_max_age_days = sync_event_max_age_days
         self._archive_sync_event_max_count = archive_sync_event_max_count
@@ -35,13 +46,13 @@ class Stage2State:
         self._lock = Lock()
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         if not self.state_file.exists():
-            self._save(default_state_payload())
+            self._save(default_state_payload(), advance_revision=False)
         else:
             with self._lock:
                 data = self._load()
                 self._prune_sync_events(data)
                 self._prune_archive(data)
-                self._save(data)
+                self._save(data, advance_revision=False)
 
     def _ensure_archive(self, data: dict[str, Any]) -> dict[str, Any]:
         raw_archive = data.get("archive")
@@ -100,7 +111,10 @@ class Stage2State:
         self._prune_archive(data)
 
     def _load(self) -> dict[str, Any]:
-        with self.state_file.open("r", encoding="utf-8") as fp:
+        return self._load_path(self.state_file)
+
+    def _load_path(self, path: Path) -> dict[str, Any]:
+        with path.open("r", encoding="utf-8") as fp:
             data = json.load(fp)
 
         if not isinstance(data, dict):
@@ -109,18 +123,17 @@ class Stage2State:
         try:
             return migrate_and_validate_state(data)
         except StateSchemaError:
-            logger.exception("stage2_state_validation_failed state_file=%s", self.state_file)
+            logger.exception("stage2_state_validation_failed state_file=%s", path)
             raise
 
-    def _save(self, data: dict[str, Any]) -> None:
-        payload = migrate_and_validate_state(deepcopy(data))
+    def _write_payload(self, path: Path, payload: dict[str, Any]) -> None:
         tmp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
                 mode="w",
                 encoding="utf-8",
-                dir=self.state_file.parent,
-                prefix=f"{self.state_file.name}.",
+                dir=path.parent,
+                prefix=f"{path.name}.",
                 suffix=".tmp",
                 delete=False,
             ) as fp:
@@ -129,10 +142,29 @@ class Stage2State:
                 fp.flush()
                 os.fsync(fp.fileno())
 
-            os.replace(tmp_path, self.state_file)
+            os.replace(tmp_path, path)
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
         finally:
             if tmp_path is not None and tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
+
+    def _save(self, data: dict[str, Any], advance_revision: bool = True) -> None:
+        if advance_revision:
+            current_revision = data.get("derived_state_revision", 0)
+            data["derived_state_revision"] = int(current_revision) + 1
+        payload = migrate_and_validate_state(deepcopy(data))
+        if self.state_file.exists():
+            self._write_payload(self.backup_file, self._load())
+        self._write_payload(self.state_file, payload)
+
+    def restore_backup(self) -> None:
+        with self._lock:
+            payload = self._load_path(self.backup_file)
+            self._write_payload(self.state_file, payload)
 
     def _parse_event_created_at(self, value: Any) -> datetime | None:
         if not isinstance(value, str):
@@ -175,6 +207,119 @@ class Stage2State:
 
         data["shopping_sync_events"] = events
         self._append_archive_sync_events(data, removed_events)
+
+    def _record_recipe_uses(self, data: dict[str, Any], meal_plan: dict[str, Any]) -> None:
+        plan_id = meal_plan.get("plan_id")
+        entries = meal_plan.get("entries")
+        if not isinstance(plan_id, int) or not isinstance(entries, list):
+            return
+
+        history = data.get("recipe_use_history")
+        if not isinstance(history, list):
+            history = []
+
+        known = {
+            (
+                row.get("recipe_id"),
+                row.get("used_date"),
+                row.get("plan_id"),
+                row.get("entry_id"),
+            )
+            for row in history
+            if isinstance(row, dict)
+        }
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            recipe = entry.get("recipe")
+            recipe_id = recipe.get("id") if isinstance(recipe, dict) else None
+            entry_id = entry.get("entry_id")
+            used_date = entry.get("date")
+            if not isinstance(recipe_id, int) or not isinstance(entry_id, int) or not isinstance(used_date, str):
+                continue
+            key = (recipe_id, used_date, plan_id, entry_id)
+            if key in known:
+                continue
+            history.append(
+                {
+                    "recipe_id": recipe_id,
+                    "used_date": used_date,
+                    "plan_id": plan_id,
+                    "entry_id": entry_id,
+                }
+            )
+            known.add(key)
+        data["recipe_use_history"] = history
+
+    def recipe_use_history(self) -> list[dict[str, Any]]:
+        with self._lock:
+            data = self._load()
+            history = data.get("recipe_use_history")
+            return deepcopy(history) if isinstance(history, list) else []
+
+    def current_revision(self) -> int:
+        with self._lock:
+            data = self._load()
+            return int(data.get("derived_state_revision", 0))
+
+    def create_pending_projection(
+        self,
+        domain: str,
+        operation: str,
+        payload: dict[str, Any],
+        error: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            data = self._load()
+            now = datetime.now(timezone.utc).isoformat()
+            operation_id = str(uuid4())
+            record = {
+                "operation_id": operation_id,
+                "domain": domain,
+                "operation": operation,
+                "payload": deepcopy(payload),
+                "status": "pending",
+                "error": error,
+                "created_at": now,
+                "updated_at": now,
+            }
+            pending = data.get("pending_projections")
+            if not isinstance(pending, dict):
+                pending = {}
+            pending[operation_id] = record
+            data["pending_projections"] = pending
+            self._save(data)
+            return deepcopy(record)
+
+    def pending_projections(self) -> list[dict[str, Any]]:
+        with self._lock:
+            data = self._load()
+            pending = data.get("pending_projections")
+            if not isinstance(pending, dict):
+                return []
+            return [deepcopy(row) for row in pending.values() if isinstance(row, dict)]
+
+    def pending_projection(self, operation_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            data = self._load()
+            pending = data.get("pending_projections")
+            if not isinstance(pending, dict):
+                return None
+            record = pending.get(operation_id)
+            return deepcopy(record) if isinstance(record, dict) else None
+
+    def delete_pending_projections(self, operation_ids: set[str]) -> None:
+        with self._lock:
+            data = self._load()
+            pending = data.get("pending_projections")
+            if not isinstance(pending, dict):
+                return
+            changed = False
+            for operation_id in operation_ids:
+                if pending.pop(operation_id, None) is not None:
+                    changed = True
+            if changed:
+                self._save(data)
 
     def selected_keywords(self) -> list[int]:
         with self._lock:
@@ -244,6 +389,7 @@ class Stage2State:
             data["next_meal_plan_id"] = plan_id + 1
             payload["plan_id"] = plan_id
             data["meal_plans"][str(plan_id)] = payload
+            self._record_recipe_uses(data, payload)
             self._save(data)
         return payload
 
@@ -273,6 +419,7 @@ class Stage2State:
                 return None
             current.update(payload)
             data["meal_plans"][key] = current
+            self._record_recipe_uses(data, current)
             self._save(data)
             return deepcopy(current)
 
@@ -371,6 +518,13 @@ class Stage2State:
             if not isinstance(raw, dict):
                 return {}
             return {str(k): str(v) for k, v in raw.items()}
+
+    def delete_shopping_status(self, entry_id: int) -> None:
+        with self._lock:
+            data = self._load()
+            statuses = data.get("shopping_status_overrides")
+            if isinstance(statuses, dict) and statuses.pop(str(entry_id), None) is not None:
+                self._save(data)
 
     def set_shopping_item_metadata(self, entry_id: int, patch: dict[str, Any]) -> dict[str, Any]:
         with self._lock:

@@ -1,3 +1,9 @@
+/**
+ * Application-shell navigation and connectivity presentation.
+ * The shell exposes tab/online hooks to screens but does not own domain data.
+ */
+import { health } from "./js/api.js";
+
 (() => {
   const TAB_META = {
     home: { title: "Today's Dinner" },
@@ -74,8 +80,8 @@
     }
 
     try {
-      const response = await fetch(`${window.WFD_API_PREFIX}/health`, { cache: "no-store" });
-      apiReachable = response.ok;
+      await health();
+      apiReachable = true;
     } catch {
       apiReachable = false;
     }
@@ -134,6 +140,11 @@
     }
 
     for (const control of shoppingControls) {
+      if (control.id === "shop-mode-pending") {
+        control.dataset.shoppingModeActive = String(isShoppingMode);
+        control.hidden = !isShoppingMode || control.dataset.hasPending !== "true";
+        continue;
+      }
       control.hidden = !isShoppingMode;
     }
   }

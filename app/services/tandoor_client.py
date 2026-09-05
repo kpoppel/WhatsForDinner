@@ -1,8 +1,17 @@
+"""Typed transport boundary for the subset of Tandoor APIs used by the app.
+
+One lazy ``httpx.AsyncClient`` is reused for connection pooling and closed by
+the FastAPI lifespan. Requests are not retried here because writes do not have
+a general upstream idempotency contract.
+"""
+
 from __future__ import annotations
 
 from typing import Any
 
 import httpx
+import logging
+from time import perf_counter
 
 from app.config import settings
 
@@ -12,10 +21,23 @@ class TandoorError(RuntimeError):
 
 
 class TandoorClient:
+    """Send authenticated Tandoor requests and normalize transport failures."""
+
     def __init__(self) -> None:
         self.base_url = settings.tandoor_base_url.rstrip("/")
         self.timeout = settings.tandoor_timeout_seconds
         self.api_token = settings.tandoor_api_token
+        self._http_client: httpx.AsyncClient | None = None
+
+    async def close(self) -> None:
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
+
+    def _client(self) -> httpx.AsyncClient:
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(timeout=self.timeout)
+        return self._http_client
 
     def _headers(self) -> dict[str, str]:
         headers = {"Accept": "application/json"}
@@ -28,6 +50,18 @@ class TandoorClient:
                 headers["Authorization"] = f"Bearer {token}"
         return headers
 
+    def _record_timing(self, method: str, path: str, started_at: float, status: object, error: Exception | None = None) -> None:
+        if not settings.performance_metrics_enabled:
+            return
+        logging.getLogger("wfd.tandoor").info(
+            "event=tandoor_timing method=%s path=%s duration_ms=%.3f status=%s error=%s",
+            method,
+            path,
+            (perf_counter() - started_at) * 1000,
+            status,
+            str(error) if error else "",
+        )
+
     async def _request(
         self,
         method: str,
@@ -36,20 +70,25 @@ class TandoorClient:
         json: dict[str, Any] | None = None,
     ) -> Any:
         url = f"{self.base_url}{path}"
+        started_at = perf_counter()
+        status: object = "exception"
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.request(
-                    method=method,
-                    url=url,
-                    params=params,
-                    json=json,
-                    headers=self._headers(),
-                )
-                response.raise_for_status()
-                if response.content:
-                    return response.json()
-                return {"status": "ok"}
+            response = await self._client().request(
+                method=method,
+                url=url,
+                params=params,
+                json=json,
+                headers=self._headers(),
+            )
+            status = response.status_code
+            response.raise_for_status()
+            if response.content:
+                self._record_timing(method, path, started_at, status)
+                return response.json()
+            self._record_timing(method, path, started_at, status)
+            return {"status": "ok"}
         except httpx.HTTPStatusError as exc:
+            self._record_timing(method, path, started_at, exc.response.status_code, exc)
             body = exc.response.text.strip()
             body_snippet = body[:300] if body else ""
             raise TandoorError(
@@ -57,6 +96,7 @@ class TandoorClient:
                 + (f" Response: {body_snippet}" if body_snippet else "")
             ) from exc
         except httpx.HTTPError as exc:
+            self._record_timing(method, path, started_at, status, exc)
             raise TandoorError(f"Unable to reach Tandoor at {self.base_url}.") from exc
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:

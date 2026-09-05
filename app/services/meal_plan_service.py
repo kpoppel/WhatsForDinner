@@ -1,3 +1,10 @@
+"""Meal-plan generation and Tandoor projection orchestration.
+
+Local derived plans are accepted before their Tandoor projection. Failed
+projections become durable, explicitly retried operations; instance notes make
+ambiguous upstream creates reconcilable without duplicating meal-plan rows.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -13,6 +20,8 @@ from app.services.tandoor_client import TandoorClient, TandoorError
 
 
 class MealPlanService:
+    """Apply meal-plan rules and reconcile local plans with Tandoor rows."""
+
     def __init__(self, state: Stage2State, tandoor_client: TandoorClient) -> None:
         self._state = state
         self._client = tandoor_client
@@ -24,6 +33,30 @@ class MealPlanService:
         if plan_id not in self._meal_plan_mutation_locks:
             self._meal_plan_mutation_locks[plan_id] = asyncio.Lock()
         return self._meal_plan_mutation_locks[plan_id]
+
+    def _response(
+        self,
+        source: str,
+        data: Any,
+        projection: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "source": source,
+            "revision": self._state.current_revision(),
+            "projection": projection or {"status": "synchronized"},
+            "pending_projections": self._state.pending_projections(),
+            "data": data,
+        }
+
+    def _pending_projection_response(
+        self,
+        data: Any,
+        operation: str,
+        payload: dict[str, Any],
+        error: str,
+    ) -> dict[str, Any]:
+        pending = self._state.create_pending_projection("meal_plan", operation, payload, error)
+        return self._response("local-state", data, pending)
 
     def _parse_constraint_days(self, days: list[Any], start_date: date, length_days: int) -> set[int]:
         indexes: set[int] = set()
@@ -91,29 +124,16 @@ class MealPlanService:
 
     def _collect_recipe_history_dates(self) -> dict[int, list[date]]:
         history: dict[int, list[date]] = {}
-        for plan in self._state.list_meal_plans():
-            entries = plan.get("entries")
-            if not isinstance(entries, list):
+        for use in self._state.recipe_use_history():
+            recipe_id = use.get("recipe_id")
+            date_value = use.get("used_date")
+            if not isinstance(recipe_id, int) or not isinstance(date_value, str):
                 continue
-
-            for entry in entries:
-                if not isinstance(entry, dict):
-                    continue
-                recipe = entry.get("recipe")
-                if not isinstance(recipe, dict):
-                    continue
-                recipe_id = recipe.get("id")
-                if not isinstance(recipe_id, int):
-                    continue
-                date_value = entry.get("date")
-                if not isinstance(date_value, str):
-                    continue
-                try:
-                    entry_date = date.fromisoformat(date_value)
-                except ValueError:
-                    continue
-
-                history.setdefault(recipe_id, []).append(entry_date)
+            try:
+                entry_date = date.fromisoformat(date_value)
+            except ValueError:
+                continue
+            history.setdefault(recipe_id, []).append(entry_date)
 
         for recipe_id, dates in history.items():
             dates.sort()
@@ -131,7 +151,7 @@ class MealPlanService:
             return False
 
         for seen_date in history_dates.get(recipe_id, []):
-            if seen_date >= candidate_date:
+            if seen_date > candidate_date:
                 break
             if (candidate_date - seen_date).days <= no_repeat_days:
                 return True
@@ -423,15 +443,42 @@ class MealPlanService:
             payload["color"] = meal_type_color
         return payload
 
-    async def _list_remote_meal_plan_ids(self) -> set[int]:
+    def _pending_operation_ids_for_plan(self, plan_id: int) -> set[str]:
+        operation_ids: set[str] = set()
+        for record in self._state.pending_projections():
+            payload = record.get("payload")
+            if (
+                record.get("domain") == "meal_plan"
+                and isinstance(payload, dict)
+                and payload.get("plan_id") == plan_id
+                and isinstance(record.get("operation_id"), str)
+            ):
+                operation_ids.add(record["operation_id"])
+        return operation_ids
+
+    async def _remote_meal_plan_rows_by_instance(self) -> dict[str, dict[str, Any]]:
         payload = await self._client.list_meal_plans(limit=500)
         rows = self._extract_results(payload)
-        ids: set[int] = set()
+        by_instance: dict[str, dict[str, Any]] = {}
         for row in rows:
+            note = row.get("note")
             row_id = row.get("id")
-            if isinstance(row_id, int) and row_id > 0:
-                ids.add(row_id)
-        return ids
+            if not isinstance(note, str) or not note.startswith("wfd-instance:"):
+                continue
+            if not isinstance(row_id, int) or row_id < 1:
+                continue
+            by_instance[note.removeprefix("wfd-instance:")] = row
+        return by_instance
+
+    def _remote_meal_plan_row_matches(self, remote: dict[str, Any], desired: dict[str, Any]) -> bool:
+        remote_recipe = remote.get("recipe")
+        remote_recipe_id = remote_recipe.get("id") if isinstance(remote_recipe, dict) else remote_recipe
+        remote_date = str(remote.get("from_date") or "").split("T", 1)[0]
+        return (
+            remote_recipe_id == desired.get("recipe_id")
+            and remote_date == desired.get("date")
+            and remote.get("servings") == desired.get("servings")
+        )
 
     async def _delete_meal_plan_row_if_present(self, row_id: int | None) -> None:
         if not isinstance(row_id, int) or row_id < 1:
@@ -525,6 +572,12 @@ class MealPlanService:
             entries = []
 
         desired_sync = self._desired_meal_plan_row_sync(plan_payload, entries)
+        pending_operation_ids = self._pending_operation_ids_for_plan(plan_id)
+        remote_by_instance = (
+            await self._remote_meal_plan_rows_by_instance()
+            if pending_operation_ids
+            else {}
+        )
 
         previous_sync: dict[str, dict[str, Any]] = {}
         raw_previous_sync = self._state.get_meal_plan_instance_sync(plan_id)
@@ -553,6 +606,18 @@ class MealPlanService:
         for instance_key in sorted(desired_sync.keys()):
             desired_row = dict(desired_sync[instance_key])
             previous_row = previous_sync.get(instance_key)
+            remote_row = remote_by_instance.get(instance_key)
+
+            if isinstance(remote_row, dict):
+                remote_row_id = remote_row.get("id")
+                if self._remote_meal_plan_row_matches(remote_row, desired_row) and isinstance(remote_row_id, int):
+                    desired_row["meal_plan_row_id"] = remote_row_id
+                    if isinstance(previous_row, dict) and previous_row.get("meal_plan_row_id") == remote_row_id:
+                        desired_row["shopping_recipe_id"] = previous_row.get("shopping_recipe_id")
+                        desired_row["shopping_activated"] = bool(previous_row.get("shopping_activated", False))
+                    next_sync[instance_key] = desired_row
+                    continue
+                await self._delete_meal_plan_row_if_present(remote_row_id)
 
             if isinstance(previous_row, dict):
                 unchanged = (
@@ -579,21 +644,58 @@ class MealPlanService:
 
         serializable_sync = self._serialize_instance_sync(next_sync)
         self._state.set_meal_plan_instance_sync(plan_id, serializable_sync)
+        self._state.delete_pending_projections(pending_operation_ids)
 
     async def _delete_all_tandoor_meal_plan_rows(
         self,
         *,
         plan_id: int,
+        previous_sync: dict[str, dict[str, Any]] | None = None,
         ensure_tandoor_writes_enabled,
         operation_name: str,
     ) -> None:
         ensure_tandoor_writes_enabled(operation_name)
-        previous_sync = self._state.get_meal_plan_instance_sync(plan_id)
-        for _, value in previous_sync.items():
+        sync_rows = previous_sync if previous_sync is not None else self._state.get_meal_plan_instance_sync(plan_id)
+        for _, value in sync_rows.items():
             if not isinstance(value, dict):
                 continue
             row_id = value.get("meal_plan_row_id")
             await self._delete_meal_plan_row_if_present(row_id)
+
+    async def retry_pending_projection(self, operation_id: str, ensure_tandoor_writes_enabled) -> dict[str, Any]:
+        pending = self._state.pending_projection(operation_id)
+        if pending is None or pending.get("domain") != "meal_plan":
+            raise HTTPException(status_code=404, detail="Pending meal-plan projection not found.")
+        payload = pending.get("payload")
+        plan_id = payload.get("plan_id") if isinstance(payload, dict) else None
+        if not isinstance(plan_id, int):
+            raise HTTPException(status_code=409, detail="Pending meal-plan projection has no plan_id.")
+
+        try:
+            if pending.get("operation") == "delete_plan":
+                previous_sync = payload.get("instance_sync")
+                await self._delete_all_tandoor_meal_plan_rows(
+                    plan_id=plan_id,
+                    previous_sync=previous_sync if isinstance(previous_sync, dict) else {},
+                    ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
+                    operation_name="meal_plan_retry_delete",
+                )
+                self._state.delete_pending_projections({operation_id})
+                return self._response("local-state", {"deleted": True, "plan_id": plan_id})
+
+            plan = self._state.get_meal_plan(plan_id)
+            if plan is None:
+                raise HTTPException(status_code=409, detail="Pending meal plan no longer exists.")
+            await self._sync_tandoor_meal_plan_rows(
+                plan_id=plan_id,
+                plan_payload=plan,
+                ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
+                operation_name="meal_plan_retry_projection",
+            )
+        except TandoorError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        return self._response("tandoor+local-state", self._enrich_plan_recipe_urls(plan))
 
     async def generate_plan(
         self,
@@ -619,6 +721,16 @@ class MealPlanService:
             recipe_candidates = self._extract_results(result)
         except TandoorError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        unique_candidates: list[dict[str, Any]] = []
+        seen_candidate_ids: set[int] = set()
+        for candidate in recipe_candidates:
+            candidate_id = candidate.get("id")
+            if not isinstance(candidate_id, int) or candidate_id in seen_candidate_ids:
+                continue
+            seen_candidate_ids.add(candidate_id)
+            unique_candidates.append(candidate)
+        recipe_candidates = unique_candidates
 
         recipe_history_dates = self._collect_recipe_history_dates()
 
@@ -716,9 +828,14 @@ class MealPlanService:
                     operation_name="meal_plan_generate",
                 )
             except TandoorError as exc:
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
+                return self._pending_projection_response(
+                    self._enrich_plan_recipe_urls(stored),
+                    "generate",
+                    {"plan_id": stored["plan_id"]},
+                    str(exc),
+                )
         self._state.append_sync_event("meal_plan_generated", stored)
-        return {"source": "tandoor+local-state", "data": self._enrich_plan_recipe_urls(stored)}
+        return self._response("tandoor+local-state", self._enrich_plan_recipe_urls(stored))
 
     async def patch_plan(self, plan_id: int, payload: dict[str, Any], ensure_tandoor_writes_enabled=None) -> dict:
         lock = self._get_plan_mutation_lock(plan_id)
@@ -771,10 +888,15 @@ class MealPlanService:
                         operation_name="meal_plan_patch",
                     )
                 except TandoorError as exc:
-                    raise HTTPException(status_code=502, detail=str(exc)) from exc
+                    return self._pending_projection_response(
+                        self._enrich_plan_recipe_urls(updated),
+                        "patch",
+                        {"plan_id": plan_id, "payload": payload},
+                        str(exc),
+                    )
 
             self._state.append_sync_event("meal_plan_updated", {"plan_id": plan_id, "payload": payload})
-            return {"source": "local-state", "data": self._enrich_plan_recipe_urls(updated)}
+            return self._response("local-state", self._enrich_plan_recipe_urls(updated))
 
     async def add_entry(self, plan_id: int, payload: dict[str, Any], ensure_tandoor_writes_enabled=None) -> dict:
         lock = self._get_plan_mutation_lock(plan_id)
@@ -832,11 +954,16 @@ class MealPlanService:
                         operation_name="meal_plan_add_entry",
                     )
                 except TandoorError as exc:
-                    raise HTTPException(status_code=502, detail=str(exc)) from exc
+                    return self._pending_projection_response(
+                        self._enrich_plan_recipe_urls(updated),
+                        "add_entry",
+                        {"plan_id": plan_id, "entry": entry},
+                        str(exc),
+                    )
 
             self._state.append_sync_event("meal_plan_entry_added", {"plan_id": plan_id, "entry": entry})
 
-            return {"source": "local-state", "data": self._enrich_plan_recipe_urls(updated)}
+            return self._response("local-state", self._enrich_plan_recipe_urls(updated))
 
     async def patch_entry(
         self,
@@ -930,14 +1057,19 @@ class MealPlanService:
                         operation_name="meal_plan_patch_entry",
                     )
                 except TandoorError as exc:
-                    raise HTTPException(status_code=502, detail=str(exc)) from exc
+                    return self._pending_projection_response(
+                        self._enrich_plan_recipe_urls(updated),
+                        "patch_entry",
+                        {"plan_id": plan_id, "entry_id": entry_id, "payload": payload},
+                        str(exc),
+                    )
 
             self._state.append_sync_event(
                 "meal_plan_entry_updated",
                 {"plan_id": plan_id, "entry_id": entry_id, "payload": payload},
             )
 
-            return {"source": "local-state", "data": self._enrich_plan_recipe_urls(updated)}
+            return self._response("local-state", self._enrich_plan_recipe_urls(updated))
 
     async def delete_entry(self, plan_id: int, entry_id: int, ensure_tandoor_writes_enabled=None) -> dict:
         lock = self._get_plan_mutation_lock(plan_id)
@@ -973,11 +1105,16 @@ class MealPlanService:
                         operation_name="meal_plan_delete_entry",
                     )
                 except TandoorError as exc:
-                    raise HTTPException(status_code=502, detail=str(exc)) from exc
+                    return self._pending_projection_response(
+                        self._enrich_plan_recipe_urls(updated),
+                        "delete_entry",
+                        {"plan_id": plan_id, "entry_id": entry_id},
+                        str(exc),
+                    )
 
             self._state.append_sync_event("meal_plan_entry_deleted", {"plan_id": plan_id, "entry_id": entry_id})
 
-            return {"source": "local-state", "data": updated}
+            return self._response("local-state", updated)
 
     async def delete_plan(self, plan_id: int, ensure_tandoor_writes_enabled=None) -> dict:
         plan = self._state.get_meal_plan(plan_id)
@@ -985,28 +1122,31 @@ class MealPlanService:
             raise HTTPException(status_code=404, detail="Meal plan not found.")
 
         if ensure_tandoor_writes_enabled is not None:
-            try:
-                ensure_tandoor_writes_enabled("meal_plan_delete")
-                await self._delete_all_tandoor_meal_plan_rows(
-                    plan_id=plan_id,
-                    ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
-                    operation_name="meal_plan_delete",
-                )
-            except TandoorError as exc:
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            ensure_tandoor_writes_enabled("meal_plan_delete")
 
+        previous_sync = self._state.get_meal_plan_instance_sync(plan_id)
         deleted = self._state.delete_meal_plan(plan_id)
         if deleted is None:
             raise HTTPException(status_code=404, detail="Meal plan not found.")
 
+        if ensure_tandoor_writes_enabled is not None:
+            try:
+                await self._delete_all_tandoor_meal_plan_rows(
+                    plan_id=plan_id,
+                    previous_sync=previous_sync,
+                    ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
+                    operation_name="meal_plan_delete",
+                )
+            except TandoorError as exc:
+                return self._pending_projection_response(
+                    {"deleted": True, "plan_id": plan_id},
+                    "delete_plan",
+                    {"plan_id": plan_id, "instance_sync": previous_sync},
+                    str(exc),
+                )
+
         self._state.append_sync_event("meal_plan_deleted", {"plan_id": plan_id})
-        return {
-            "source": "local-state",
-            "data": {
-                "deleted": True,
-                "plan_id": plan_id,
-            },
-        }
+        return self._response("local-state", {"deleted": True, "plan_id": plan_id})
 
     def _build_bulk_entries_from_recipe_payload(self, recipe_payload: dict[str, Any]) -> list[dict[str, Any]]:
         entries: list[dict[str, Any]] = []

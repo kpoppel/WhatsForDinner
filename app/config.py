@@ -1,8 +1,12 @@
+"""Environment-backed runtime configuration for API and external services."""
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Validated settings loaded from environment variables and ``.env``."""
+
     app_name: str = "WhatsForDinner"
     api_v1_prefix: str = "/api/v1"
     tandoor_base_url: str = "http://localhost:8080"
@@ -29,6 +33,10 @@ class Settings(BaseSettings):
         validation_alias="GOOGLE_LLM_MODEL",
     )
     google_llm_timeout_seconds: float = Field(default=30.0)
+    performance_metrics_enabled: bool = Field(
+        default=False,
+        validation_alias="PERFORMANCE_METRICS_ENABLED",
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -1,3 +1,5 @@
+"""Persisted-state schema, migration, atomic-write, and recovery tests."""
+
 import json
 from datetime import datetime, timezone
 
@@ -13,8 +15,11 @@ def test_stage2_state_writes_schema_version(tmp_path) -> None:
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 5
     assert payload["archive"] == {"meal_plans": [], "sync_events": []}
+    assert payload["derived_state_revision"] == 0
+    assert payload["recipe_use_history"] == []
+    assert payload["pending_projections"] == {}
 
 
 def test_stage2_state_invalid_payload_fails_fast(tmp_path) -> None:
@@ -106,7 +111,7 @@ def test_stage2_state_migrates_v1_payload_to_v4(tmp_path) -> None:
     state.set_selected_keywords([])
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 5
     assert payload["meal_plan_instance_sync"] == {}
     assert payload["archive"] == {"meal_plans": [], "sync_events": []}
 
@@ -159,7 +164,7 @@ def test_stage2_state_migrates_v2_payload_and_strips_entry_ids(tmp_path) -> None
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 5
     instance = payload["meal_plan_instance_sync"]["1"]["instances"]["entry:1:primary:recipe:11"]
     assert "entry_ids" not in instance
 
@@ -206,9 +211,86 @@ def test_stage2_state_migrates_v3_payload_to_v4_with_archive_defaults(tmp_path) 
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 5
     assert payload["archive"] == {"meal_plans": [], "sync_events": []}
     compact_payload = payload["shopping_sync_events"][0]["payload"]
     assert compact_payload["plan_id"] == 4
     assert compact_payload["entry_count"] == 2
     assert "entries" not in compact_payload
+
+
+def test_stage2_state_migrates_v4_phase05_fields(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+
+    with state.state_file.open("r", encoding="utf-8") as fp:
+        payload = json.load(fp)
+    payload["schema_version"] = 4
+    payload.pop("derived_state_revision", None)
+    payload.pop("recipe_use_history", None)
+    payload.pop("pending_projections", None)
+    state.state_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    state.set_selected_keywords([])
+
+    with state.state_file.open("r", encoding="utf-8") as fp:
+        migrated = json.load(fp)
+    assert migrated["schema_version"] == 5
+    assert migrated["recipe_use_history"] == []
+    assert migrated["pending_projections"] == {}
+
+
+def test_stage2_state_records_recipe_uses_after_plan_deletion(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+    plan = state.create_meal_plan(
+        {
+            "start_date": "2026-09-05",
+            "length_days": 1,
+            "entries": [
+                {
+                    "entry_id": 1,
+                    "date": "2026-09-05",
+                    "recipe": {"id": 42, "title": "Soup"},
+                }
+            ],
+        }
+    )
+
+    state.delete_meal_plan(plan["plan_id"])
+
+    assert state.recipe_use_history() == [
+        {
+            "recipe_id": 42,
+            "used_date": "2026-09-05",
+            "plan_id": plan["plan_id"],
+            "entry_id": 1,
+        }
+    ]
+
+
+def test_stage2_state_creates_pending_projection_with_operation_id(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+
+    pending = state.create_pending_projection(
+        "meal_plan",
+        "patch",
+        {"plan_id": 7},
+        "Tandoor unavailable",
+    )
+
+    assert pending["operation_id"]
+    assert pending["status"] == "pending"
+    assert state.pending_projections() == [pending]
+
+
+def test_stage2_state_restores_previous_valid_backup(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+    state.set_meal_plan_rules(21)
+    state.set_user_settings(6, "17:30")
+
+    assert state.backup_file.is_file()
+    assert state.user_settings()["default_diners"] == 6
+
+    state.restore_backup()
+
+    assert state.meal_plan_rules() == {"no_repeat_days": 21}
+    assert state.user_settings()["default_diners"] == 2

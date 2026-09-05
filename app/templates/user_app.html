@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- Unified PWA shell; behavior and server-backed state live in ES modules. -->
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -6,8 +7,8 @@
   <meta name="theme-color" content="#1d5c4f" />
   <link rel="manifest" href="/shopping.webmanifest" />
   <title>WhatsForDinner</title>
-  <link rel="stylesheet" href="/static/shopping_app.css?v=20260817m" />
-  <link rel="stylesheet" href="/static/user_app.css?v=20260821a" />
+  <link rel="stylesheet" href="/static/shopping_app.css?v=20260905d" />
+  <link rel="stylesheet" href="/static/user_app.css?v=20260905d" />
 </head>
 <body>
   <main class="wf-shell">
@@ -19,7 +20,7 @@
       <div class="wf-header-actions">
         <button id="toggle-instructions" class="wf-icon-btn wf-shop-control" type="button" aria-label="Shopping mode instructions" hidden>?</button>
         <span id="shop-mode-network" class="status-dot is-offline wf-shop-control" role="status" aria-label="Offline" title="Offline" hidden></span>
-        <span id="shop-mode-pending" class="badge pending-sync wf-shop-control" role="status" aria-label="Pending sync: 0" title="Pending sync: 0" hidden><span class="pending-sync-icon" aria-hidden="true">⟳</span><span id="shop-mode-pending-count">0</span></span>
+        <button id="shop-mode-pending" class="badge pending-sync wf-shop-control" type="button" aria-label="Pending sync: 0" title="Pending sync: 0" hidden><span class="pending-sync-icon" aria-hidden="true">⟳</span><span id="shop-mode-pending-count">0</span></button>
         <button id="wf-settings-btn" class="wf-icon-btn" type="button" aria-label="Settings">⚙️</button>
       </div>
     </header>
@@ -373,11 +374,13 @@
 
   <script>window.WFD_API_PREFIX = {{ api_prefix_js }};</script>
   <script>window.WFD_TANDOOR_BASE_URL = {{ tandoor_base_url_js }};</script>
-  <script type="module" src="/static/js/shopping.js?v=20260817m"></script>
-  <script type="module" src="/static/shop_editor.js?v=20260817m"></script>
-  <script type="module" src="/static/meal_plans.js?v=20260821a"></script>
-  <script type="module" src="/static/home_tab.js?v=20260820a"></script>
-  <script type="module" src="/static/settings_tab.js?v=20260817m"></script>
-  <script type="module" src="/static/user_shell.js?v=20260817m"></script>
+  <script>window.WFD_PERFORMANCE_METRICS_ENABLED = {{ performance_metrics_enabled_js }};</script>
+  <script type="module" src="/static/js/performance_metrics.js?v=20260905d"></script>
+  <script type="module" src="/static/js/shopping.js?v=20260905d"></script>
+  <script type="module" src="/static/shop_editor.js?v=20260905d"></script>
+  <script type="module" src="/static/meal_plans.js?v=20260905d"></script>
+  <script type="module" src="/static/home_tab.js?v=20260905d"></script>
+  <script type="module" src="/static/settings_tab.js?v=20260905d"></script>
+  <script type="module" src="/static/user_shell.js?v=20260905d"></script>
 </body>
 </html>

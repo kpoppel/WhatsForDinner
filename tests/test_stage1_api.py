@@ -1,3 +1,5 @@
+"""Legacy Stage 1 API compatibility and application-route tests."""
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -156,6 +158,15 @@ def test_rudimentary_user_app_route() -> None:
     assert response.status_code == 200
     assert "WhatsForDinner" in response.text
     assert "Shopping Mode" in response.text
+    assert "window.WFD_PERFORMANCE_METRICS_ENABLED = false;" in response.text
+
+
+def test_api_response_exposes_timing_and_correlation_headers() -> None:
+    response = client.get("/api/v1/health", headers={"X-Correlation-ID": "phase6-test"})
+    assert response.status_code == 200
+    assert response.headers["X-Correlation-ID"] == "phase6-test"
+    assert float(response.headers["X-Request-Duration-Ms"]) >= 0
+    assert response.headers["Server-Timing"].startswith("app;dur=")
 
 
 def test_standalone_shopping_app_route_removed() -> None:

@@ -1,3 +1,4 @@
+# Production image for the single-process FastAPI application and static PWA.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

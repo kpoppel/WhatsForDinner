@@ -1,3 +1,5 @@
+/* Unified app-shell and Home, Settings, Meal Plans, and Shop Editor styles. */
+
 :root {
   --wf-bg: #f4f6f5;
   --wf-panel: #ffffff;
@@ -1326,6 +1328,17 @@ body {
   background: #fff3c9;
   border-color: #d7b85f;
   box-shadow: inset 4px 0 0 #b7791f;
+}
+
+.wf-editor-item.is-rejected {
+  border-color: #b94040;
+}
+
+.wf-editor-rejected {
+  margin: 0.2rem 0 0;
+  color: #9d2929;
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 .wf-editor-swipe-delete-right-hint {

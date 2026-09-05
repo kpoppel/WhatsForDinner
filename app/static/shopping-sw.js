@@ -1,4 +1,8 @@
-const CACHE_NAME = "wfd-shopping-pwa-v8";
+/**
+ * PWA service worker for complete shell precaching, network-first navigation,
+ * and network-with-cache-fallback static assets. API requests are never cached.
+ */
+const CACHE_NAME = "wfd-shopping-pwa-v11";
 const APP_FALLBACK_PATH = "/app";
 const APP_SHELL = [
   "/app",
@@ -8,12 +12,14 @@ const APP_SHELL = [
   "/static/home_tab.js",
   "/static/settings_tab.js",
   "/static/user_shell.js",
-  "/static/js/state.js",
   "/static/js/api.js",
+  "/static/js/performance_metrics.js",
   "/static/js/contracts.js",
   "/static/js/render.js",
+  "/static/js/render_scheduler.js",
   "/static/js/gestures.js",
   "/static/js/sync.js",
+  "/static/js/sync_coordinator.js",
   "/static/js/store/index.js",
   "/static/js/store/schema.js",
   "/static/js/store/commands.js",
@@ -30,33 +36,22 @@ const APP_SHELL = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      await Promise.all(APP_SHELL.map(async (path) => {
-        try {
-          const response = await fetch(path, { cache: "no-store" });
-          if (response && response.ok) {
-            await cache.put(path, response.clone());
-          }
-        } catch {
-          // Ignore individual precache failures.
-        }
-      }));
-    })
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(APP_SHELL))
+      .then(() => self.skipWaiting())
   );
-  self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
+    caches.keys()
+      .then((keys) => Promise.all(
         keys
           .filter((key) => key !== CACHE_NAME)
           .map((key) => caches.delete(key))
-      );
-    })
+      ))
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener("fetch", (event) => {
@@ -72,26 +67,19 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.mode === "navigate") {
-    // Cache-first for navigate: serve shell immediately offline, update cache in background.
     event.respondWith(
       (async () => {
-        const fallbackPath = APP_FALLBACK_PATH;
-        const cachedShell = await caches.match(fallbackPath);
-        const networkFetch = fetch(request)
-          .then(async (response) => {
-            if (response && response.ok) {
-              const cache = await caches.open(CACHE_NAME);
-              await cache.put(fallbackPath, response.clone());
-            }
-            return response;
-          })
-          .catch(() => null);
-        if (cachedShell) {
-          networkFetch.catch(() => {});
-          return cachedShell;
+        try {
+          const response = await fetch(request);
+        if (response && response.ok) {
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(APP_FALLBACK_PATH, response.clone());
         }
-        const networkResponse = await networkFetch;
-        return networkResponse || Response.error();
+        return response;
+        } catch {
+        const cachedShell = await caches.match(APP_FALLBACK_PATH);
+          return cachedShell || Response.error();
+        }
       })()
     );
     return;

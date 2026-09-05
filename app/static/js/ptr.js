@@ -1,3 +1,4 @@
+/** Pull-to-refresh gesture adapter that delegates recovery to synchronization. */
 let _ptrStartY = 0;
 let _ptrDragging = false;
 let _ptrIndicator = null;

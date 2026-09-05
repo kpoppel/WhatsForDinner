@@ -1,3 +1,5 @@
+"""Meal-plan generation, projection, retry, and shopping orchestration tests."""
+
 import asyncio
 from datetime import date
 
@@ -174,6 +176,41 @@ class FakeMealClient:
 class BrokenMealClient(FakeMealClient):
     async def list_recipes(self, search=None, limit=20, keyword_ids=None):
         raise TandoorError("recipes unavailable")
+
+
+class ProjectionFailureMealClient(FakeMealClient):
+    async def list_recipes(self, search=None, limit=20, keyword_ids=None):
+        return {"results": [{"id": 11, "name": "Roast Veg"}]}
+
+    async def create_meal_plan(self, payload):
+        raise TandoorError("Tandoor projection unavailable")
+
+
+class AmbiguousCreateMealClient(FakeMealClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.drop_create_response = True
+
+    async def create_meal_plan(self, payload):
+        created = await super().create_meal_plan(payload)
+        if self.drop_create_response:
+            self.drop_create_response = False
+            raise TandoorError("Tandoor response was lost")
+        return created
+
+
+class AmbiguousUpdateMealClient(FakeMealClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.create_calls = 0
+        self.drop_response_on_call: int | None = None
+
+    async def create_meal_plan(self, payload):
+        self.create_calls += 1
+        created = await super().create_meal_plan(payload)
+        if self.create_calls == self.drop_response_on_call:
+            raise TandoorError("Tandoor replacement response was lost")
+        return created
 
 
 class MissingDeleteMealClient(FakeMealClient):
@@ -594,6 +631,98 @@ def test_generate_plan_wraps_tandoor_list_errors(tmp_path) -> None:
         )
 
     assert exc_info.value.status_code == 502
+
+
+def test_generate_plan_keeps_local_state_when_projection_fails(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+    service = MealPlanService(state, ProjectionFailureMealClient())
+
+    result = asyncio.run(
+        service.generate_plan(
+            start_day=date(2026, 8, 10),
+            length_days=1,
+            diners=2,
+            constraints={"leftover_days": [], "takeout_days": [], "empty_days": []},
+            keyword_ids=[],
+            no_repeat_days=0,
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+        )
+    )
+
+    assert result["projection"]["status"] == "pending"
+    assert result["projection"]["operation_id"]
+    assert len(state.list_meal_plans()) == 1
+    assert len(state.pending_projections()) == 1
+
+
+def test_pending_projection_reconciliation_adopts_ambiguous_remote_create(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+    client = AmbiguousCreateMealClient()
+    service = MealPlanService(state, client)
+
+    generated = asyncio.run(
+        service.generate_plan(
+            start_day=date(2026, 8, 10),
+            length_days=1,
+            diners=2,
+            constraints={"leftover_days": [], "takeout_days": [], "empty_days": []},
+            keyword_ids=[],
+            no_repeat_days=0,
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+        )
+    )
+    plan_id = generated["data"]["plan_id"]
+
+    assert generated["projection"]["status"] == "pending"
+    assert len(client.meal_plan_rows) == 1
+
+    operation_id = generated["projection"]["operation_id"]
+    reconciled = asyncio.run(
+        service.retry_pending_projection(operation_id, ensure_tandoor_writes_enabled=ensure_writes_enabled)
+    )
+
+    assert reconciled["projection"]["status"] == "synchronized"
+    assert len(client.meal_plan_rows) == 1
+    assert state.pending_projections() == []
+
+
+def test_pending_projection_reconciliation_adopts_ambiguous_remote_replacement(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+    client = AmbiguousUpdateMealClient()
+    service = MealPlanService(state, client)
+
+    generated = asyncio.run(
+        service.generate_plan(
+            start_day=date(2026, 8, 10),
+            length_days=2,
+            diners=2,
+            constraints={"leftover_days": [], "takeout_days": [], "empty_days": []},
+            keyword_ids=[],
+            no_repeat_days=0,
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+        )
+    )
+    plan_id = generated["data"]["plan_id"]
+    assert len(client.meal_plan_rows) == 2
+
+    client.drop_response_on_call = 3
+    patched = asyncio.run(
+        service.patch_plan(
+            plan_id,
+            {"start_date": "2026-08-20"},
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+        )
+    )
+    assert patched["projection"]["status"] == "pending"
+    assert len(client.meal_plan_rows) == 2
+
+    operation_id = patched["projection"]["operation_id"]
+    asyncio.run(service.retry_pending_projection(operation_id, ensure_tandoor_writes_enabled=ensure_writes_enabled))
+
+    instance_notes = [row["note"] for row in client.meal_plan_rows.values()]
+    assert len(instance_notes) == 2
+    assert len(set(instance_notes)) == 2
+    assert state.pending_projections() == []
 
 
 def test_generate_shopping_remove_then_readd_same_recipe_resyncs_when_tracked_entry_missing(tmp_path) -> None:

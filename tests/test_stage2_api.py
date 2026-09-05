@@ -1,12 +1,20 @@
+"""Stage 2 API workflow and browser-facing response contract tests."""
+
 from copy import deepcopy
 from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
 
+from app import api as api_module
 from app.main import app
 from app.services.stage2_state import Stage2State
 
 client = TestClient(app)
+
+
+def test_api_services_are_stable_for_shared_dependencies() -> None:
+    assert api_module._shopping_service() is api_module._shopping_service()
+    assert api_module._meal_plan_service() is api_module._meal_plan_service()
 
 
 class MealPlanRowStatefulClient:
@@ -76,6 +84,69 @@ def use_temp_state(monkeypatch, tmp_path):
     state = Stage2State(str(tmp_path))
     monkeypatch.setattr("app.api.stage2_state", state)
     return state
+
+
+def test_retry_pending_shopping_reconciliation_route(monkeypatch, tmp_path) -> None:
+    state = use_temp_state(monkeypatch, tmp_path)
+    monkeypatch.setattr("app.api.client", MealPlanShoppingStatefulClient())
+    pending = state.create_pending_projection(
+        "shopping",
+        "reconcile_sync",
+        {"changes": []},
+        "view failed",
+    )
+
+    response = client.post(f"/api/v1/sync/pending/{pending['operation_id']}/retry")
+
+    assert response.status_code == 200
+    assert response.json()["projection"]["status"] == "synchronized"
+    assert response.json()["pending_projections"] == []
+    assert state.pending_projections() == []
+
+
+def test_retry_pending_projection_route_rejects_unknown_id(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    response = client.post("/api/v1/sync/pending/missing/retry")
+
+    assert response.status_code == 404
+
+
+def test_retry_pending_meal_plan_projection_reuses_marker(monkeypatch, tmp_path) -> None:
+    state = use_temp_state(monkeypatch, tmp_path)
+    fake_client = MealPlanShoppingStatefulClient()
+    fake_client.meal_plan_rows[1] = {
+        "id": 1,
+        "title": "Enchiladas",
+        "servings": 2,
+        "from_date": "2026-08-24",
+        "to_date": "2026-08-24",
+        "recipe": 301,
+        "note": "wfd-instance:entry:1:primary:recipe:301",
+    }
+    fake_client.next_meal_plan_row_id = 2
+    monkeypatch.setattr("app.api.client", fake_client)
+    plan = state.create_meal_plan({
+        "diners": 2,
+        "entries": [{
+            "entry_id": 1,
+            "date": "2026-08-24",
+            "servings": 2,
+            "recipe": {"id": 301, "name": "Enchiladas"},
+        }],
+    })
+    pending = state.create_pending_projection(
+        "meal_plan",
+        "sync_plan",
+        {"plan_id": plan["plan_id"]},
+        "create result was ambiguous",
+    )
+
+    response = client.post(f"/api/v1/sync/pending/{pending['operation_id']}/retry")
+
+    assert response.status_code == 200
+    assert len(fake_client.meal_plan_rows) == 1
+    assert state.pending_projections() == []
 
 
 class MealPlanShoppingStatefulClient:
@@ -1331,6 +1402,8 @@ def test_stage2_shopping_mutation_parity_direct_vs_sync(monkeypatch, tmp_path) -
             assert create_res.status_code == 200
             create_payload_json = create_res.json()
             assert len(create_payload_json["applied"]) == 1, create_payload_json
+            assert "sections" in create_payload_json["data"]
+            assert create_payload_json["cursor"] == create_payload_json["server_cursor"]
             created_id = create_payload_json["applied"][0]["data"]["id"]
         else:
             create_res = client.post("/api/v1/shopping-list/entries", json=create_payload)
@@ -1339,6 +1412,8 @@ def test_stage2_shopping_mutation_parity_direct_vs_sync(monkeypatch, tmp_path) -
 
         after_create = client.get("/api/v1/shopping-list/view")
         assert after_create.status_code == 200
+        if use_sync:
+            assert snapshot_signature(create_payload_json) == snapshot_signature(after_create.json())
 
         if use_sync:
             update_res = client.post(
@@ -1359,9 +1434,15 @@ def test_stage2_shopping_mutation_parity_direct_vs_sync(monkeypatch, tmp_path) -
                 json={"status": "completed"},
             )
         assert update_res.status_code == 200
+        if use_sync:
+            update_payload_json = update_res.json()
+            assert "sections" in update_payload_json["data"]
+            assert update_payload_json["cursor"] == update_payload_json["server_cursor"]
 
         after_update = client.get("/api/v1/shopping-list/view")
         assert after_update.status_code == 200
+        if use_sync:
+            assert snapshot_signature(update_payload_json) == snapshot_signature(after_update.json())
 
         if use_sync:
             delete_res = client.post(
@@ -1371,9 +1452,15 @@ def test_stage2_shopping_mutation_parity_direct_vs_sync(monkeypatch, tmp_path) -
         else:
             delete_res = client.delete(f"/api/v1/shopping-list/entries/{created_id}")
         assert delete_res.status_code == 200
+        if use_sync:
+            delete_payload_json = delete_res.json()
+            assert "sections" in delete_payload_json["data"]
+            assert delete_payload_json["cursor"] == delete_payload_json["server_cursor"]
 
         after_delete = client.get("/api/v1/shopping-list/view")
         assert after_delete.status_code == 200
+        if use_sync:
+            assert snapshot_signature(delete_payload_json) == snapshot_signature(after_delete.json())
 
         return {
             "after_create": snapshot_signature(after_create.json()),

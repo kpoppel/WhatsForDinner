@@ -1,4 +1,5 @@
 #!/bin/bash
+# Build and deploy the Caddy Compose stack using repository configuration.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

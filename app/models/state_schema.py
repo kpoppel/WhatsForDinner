@@ -1,10 +1,16 @@
+"""Canonical Pydantic schema for the versioned local state document.
+
+This module defines persisted shape only. Migration policy belongs to
+``state_migrations`` and file-system behavior belongs to ``Stage2State``.
+"""
+
 from __future__ import annotations
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CURRENT_STATE_SCHEMA_VERSION = 4
+CURRENT_STATE_SCHEMA_VERSION = 5
 
 
 class MealPlanRulesModel(BaseModel):
@@ -68,6 +74,28 @@ class StateArchiveModel(BaseModel):
     sync_events: list[ShoppingSyncEventModel] = Field(default_factory=list)
 
 
+class RecipeUseModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recipe_id: int
+    used_date: str
+    plan_id: int
+    entry_id: int
+
+
+class PendingProjectionModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: str
+    domain: str
+    operation: str
+    payload: dict[str, Any]
+    status: Literal["pending", "failed"]
+    error: str
+    created_at: str
+    updated_at: str
+
+
 class Stage2StateDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -86,9 +114,14 @@ class Stage2StateDocument(BaseModel):
     shopping_sync_events: list[ShoppingSyncEventModel]
     next_sync_event_id: int
     archive: StateArchiveModel = Field(default_factory=StateArchiveModel)
+    derived_state_revision: int = 0
+    recipe_use_history: list[RecipeUseModel] = Field(default_factory=list)
+    pending_projections: dict[str, PendingProjectionModel] = Field(default_factory=dict)
 
 
 def default_state_payload() -> dict[str, Any]:
+    """Return a new valid empty document for the current schema version."""
+
     return {
         "schema_version": CURRENT_STATE_SCHEMA_VERSION,
         "selected_keyword_ids": [],
@@ -111,4 +144,7 @@ def default_state_payload() -> dict[str, Any]:
             "meal_plans": [],
             "sync_events": [],
         },
+        "derived_state_revision": 0,
+        "recipe_use_history": [],
+        "pending_projections": {},
     }

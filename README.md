@@ -17,7 +17,33 @@ FastAPI backend for a mobile app that proxies recipe and shopping list data from
 - Contract violations are logged with request method, path, and correlation ID.
 - Stage 2 local JSON state is schema-versioned (`schema_version`) and validated on load and save.
 - Invalid persisted state fails fast; the server does not silently auto-heal broken state payloads.
+- Local responses carry a monotonic `revision`; browser stores reject older responses before applying them.
+- Meal-plan intent is accepted locally when Tandoor projection fails and is exposed as a durable pending projection with an operation ID.
+- Automatic projection retries are not enabled. Users explicitly retry pending reconciliation from the app.
 - No compatibility aliases or duplicate API keys are introduced to mask contract mismatches.
+
+The browser keeps meal plans and settings read-only while offline. Shopping changes are applied optimistically, persisted locally, and submitted through the shopping sync endpoint when connectivity returns. The service worker caches the application shell for offline use and uses network-first navigation so an online launch receives the current shell.
+
+## Developer code map
+
+Backend ownership:
+
+- `app/main.py` composes FastAPI, middleware, static files, and process lifecycle.
+- `app/api.py` owns HTTP routes and transformations between upstream payloads and client view models.
+- `app/models/contracts.py` defines strict HTTP mutation contracts; `app/models/state_schema.py` defines the persisted document.
+- `app/services/stage2_state.py` is the only local JSON repository and revision allocator.
+- `app/services/meal_plan_service.py` and `app/services/shopping_service.py` own domain rules and Tandoor projection workflows.
+- `app/services/tandoor_client.py` is the only backend Tandoor transport.
+
+Frontend ownership:
+
+- Screen modules (`home_tab.js`, `meal_plans.js`, `settings_tab.js`, and `shop_editor.js`) own DOM events, rendering, and ephemeral view state.
+- `app/static/js/store/commands.js` is the mutation and backend-command boundary; `selectors.js` is the model read boundary.
+- `app/static/js/api.js` is the only browser HTTP transport.
+- `app/static/js/sync.js` and `sync_coordinator.js` serialize shopping synchronization and reject stale work.
+- `app/static/js/render.js` projects shopping state into DOM; the service worker caches only the application shell and static assets.
+
+Screen code must not call `fetch`, mutate the exported store, or persist server-backed model data directly. Local UI preferences such as the selected grouping mode may remain screen-owned.
 
 ## Quick start
 
@@ -224,6 +250,8 @@ docker build -t whatsfordinner:latest -f Dockerfile ..
 - `DELETE /api/v1/shopping-list/entries/{entry_id}`
 - `GET /api/v1/shopping-list/sync?since=<cursor>`
 - `POST /api/v1/shopping-list/sync`
+- `GET /api/v1/sync/pending`
+- `POST /api/v1/sync/pending/{operation_id}/retry`
 
 ### Documentation endpoints
 
@@ -234,13 +262,17 @@ docker build -t whatsfordinner:latest -f Dockerfile ..
 
 ## Stage 2 state persistence
 
-Stage 2 stores local app state (selected keywords, meal-plan drafts, and shopping sync event cursors) in a JSON file:
+Stage 2 stores selected keywords, derived multi-day meal plans, recipe-use history, shopping overlays, sync cursors, revisions, and pending Tandoor projections in a JSON file:
 
 - file name: `state.json`
 - default data directory: `./data`
 - configurable with: `DATA_DIR`
 
-This local state is app-managed metadata; recipe and shopping list data still come from Tandoor APIs.
+Writes validate the complete document and atomically replace the state file. Before replacement, the previous valid state is written to `state.json.bak`. `Stage2State.restore_backup()` restores that backup for an operator-controlled recovery.
+
+The file lock is process-local, so deployments must run a single application process against a given `DATA_DIR`. Do not point multiple containers or Uvicorn workers at the same state file.
+
+Tandoor remains authoritative for recipes and its projected meal-plan and shopping rows. This service is authoritative for the derived plan objects, no-repeat history, shopping overlays, and pending projection records that implement the application workflows.
 
 ## Browser inspection
 

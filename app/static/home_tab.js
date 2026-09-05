@@ -1,5 +1,12 @@
+/**
+ * Home-screen adapter for today's meal, upcoming meals, and reminders.
+ * Server-backed reads and cache writes go through store commands/selectors;
+ * this module owns only Home-specific request choreography and DOM rendering.
+ */
 import {
-  api,
+  mealPlanCommands,
+  recipeCommands,
+  shoppingCommands,
   writeActiveMealPlanId,
   writeHomeActivePlanCache,
   writeMealPlanCache,
@@ -10,6 +17,8 @@ import {
   readMealPlanCache,
 } from "./js/store/selectors.js";
 import { assertRequiredFields } from "./js/contracts.js";
+import { selectSyncState } from "./js/store/selectors.js";
+import { createRenderScheduler } from "./js/render_scheduler.js";
 
 (() => {
   const tandoorBaseUrl = typeof window.WFD_TANDOOR_BASE_URL === "string"
@@ -285,7 +294,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       return null;
     }
 
-    const payload = await api(`/recipes?search=${encodeURIComponent(query)}&limit=20`);
+    const payload = await recipeCommands.search(query, 20);
     const data = payload && typeof payload === "object" ? payload.data : null;
     const rows = data && Array.isArray(data.results) ? data.results : [];
     if (rows.length === 0) {
@@ -505,7 +514,7 @@ import { assertRequiredFields } from "./js/contracts.js";
   }
 
   async function fetchActivePlan() {
-    const listPayload = await api("/meal-plans/stored");
+    const listPayload = await mealPlanCommands.list();
     assertRequiredFields(listPayload, ["data"], "Meal plan list response");
     const rows = listPayload.data;
     if (!Array.isArray(rows) || rows.length === 0) {
@@ -532,7 +541,7 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     lastSelectedPlanId = planId;
     writeActiveMealPlanId(planId);
-    const detailPayload = await api(`/meal-plans/${planId}`);
+    const detailPayload = await mealPlanCommands.get(planId);
     assertRequiredFields(detailPayload, ["data"], "Meal plan detail response");
     const plan = detailPayload.data;
     if (!plan || typeof plan !== "object") {
@@ -601,14 +610,14 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
   }
 
-  async function refreshHome() {
+  async function refreshHomeNow() {
     try {
       const planResult = await fetchPlanWithCacheFallback();
       const entries = planResult.entries;
 
       let reminderTexts = [];
       try {
-        const shoppingPayload = await api("/shopping-list/view?limit=400");
+        const shoppingPayload = await shoppingCommands.view(400);
         assertRequiredFields(shoppingPayload, ["data"], "Shopping view response");
         reminderTexts = shoppingReminderTexts(shoppingPayload);
       } catch {
@@ -626,6 +635,15 @@ import { assertRequiredFields } from "./js/contracts.js";
       renderHomeFallbackCard("Unable to load meal data", '<span>Open Meal Plans to refresh.</span>');
       upcomingList.innerHTML = '<p class="wf-home-empty">Unable to load upcoming meals right now.</p>';
     }
+  }
+
+  const homeRenderScheduler = createRenderScheduler({
+    getRevision: () => selectSyncState().revision,
+    render: () => { void refreshHomeNow(); },
+  });
+
+  function requestHomeRefresh(options = {}) {
+    return homeRenderScheduler.request(options);
   }
 
   openPlansButton.addEventListener("click", async () => {
@@ -669,16 +687,16 @@ import { assertRequiredFields } from "./js/contracts.js";
   const homeNavButton = document.querySelector('.wf-nav-btn[data-tab="home"]');
   if (homeNavButton) {
     homeNavButton.addEventListener("click", () => {
-      void refreshHome();
+      requestHomeRefresh({ source: "navigation" });
     });
   }
 
   window.addEventListener("wfd:data-changed", () => {
     const visible = homeTab.hidden === false;
     if (visible) {
-      void refreshHome();
+      requestHomeRefresh({ source: "store-change", force: true });
     }
   });
 
-  void refreshHome();
+  requestHomeRefresh({ source: "initial", force: true });
 })();

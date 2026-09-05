@@ -1,3 +1,5 @@
+"""Gemini transport adapter for handwritten shopping-list transcription."""
+
 from __future__ import annotations
 
 import base64
@@ -19,6 +21,8 @@ class OcrError(RuntimeError):
 
 
 class GeminiOcrClient:
+    """Submit one image to Gemini and return its plain-text transcription."""
+
     def __init__(self) -> None:
         self.api_key = settings.google_llm_api_key
         self.model = settings.google_llm_model

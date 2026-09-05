@@ -1,5 +1,20 @@
-import { state } from "./state.js";
+/**
+ * Shopping Mode projection from store selectors to DOM.
+ * Rendering is revision/generation aware and contains no backend access.
+ */
+import {
+  toggleShoppingSection,
+} from "./store/commands.js";
+import {
+  selectShoppingApiReachable,
+  selectShoppingCollapsedSections,
+  selectShoppingItems,
+  selectShoppingPendingChanges,
+  selectShoppingRejectedChanges,
+  selectSyncState,
+} from "./store/selectors.js";
 import { escapeAttr } from "./utils.js";
+import { createRenderScheduler } from "./render_scheduler.js";
 
 const DEBUG_MODE = false;
 
@@ -25,6 +40,13 @@ const SECTION_CONFIG = {
 
 // Set by initRender() to break the render ↔ gestures circular dependency.
 let _createCard;
+let latestRenderGeneration = -1;
+let latestRenderRevision = -1;
+let lastRenderMeta = null;
+const renderScheduler = createRenderScheduler({
+  render: (options) => renderNow(options),
+  getRevision: () => selectSyncState().revision,
+});
 
 function formatAmount(value) {
   const numeric = Number(value);
@@ -126,7 +148,13 @@ export function updateStatusBadges() {
   const network = document.getElementById("shop-mode-network");
   const pending = document.getElementById("shop-mode-pending");
   const pendingCount = document.getElementById("shop-mode-pending-count");
-  const online = state.apiReachable && navigator.onLine !== false;
+  const syncState = selectSyncState();
+  const projectionCount = Array.isArray(syncState.pendingProjections)
+    ? syncState.pendingProjections.length
+    : 0;
+  const pendingChanges = selectShoppingPendingChanges().length;
+  const rejectedChanges = selectShoppingRejectedChanges().length;
+  const online = selectShoppingApiReachable() && navigator.onLine !== false;
 
   network.classList.toggle("is-online", online);
   network.classList.toggle("is-offline", !online);
@@ -134,16 +162,26 @@ export function updateStatusBadges() {
   network.setAttribute("title", online ? "Online" : "Offline");
 
   if (pendingCount) {
-    pendingCount.textContent = String(state.pendingChanges.length);
+    pendingCount.textContent = String(pendingChanges + rejectedChanges);
   } else {
-    pending.textContent = `o ${state.pendingChanges.length}`;
+    pending.textContent = `o ${pendingChanges + rejectedChanges}`;
   }
-  pending.setAttribute("aria-label", `Pending sync: ${state.pendingChanges.length}`);
-  pending.setAttribute("title", `Pending sync: ${state.pendingChanges.length}`);
+  const pendingLabel = `Pending sync: ${pendingChanges}, rejected: ${rejectedChanges}`;
+  const projectionLabel = projectionCount > 0 ? `, reconciliation: ${projectionCount}` : "";
+  pending.dataset.hasPending = String(pendingChanges + rejectedChanges + projectionCount > 0);
+  pending.hidden = pending.dataset.shoppingModeActive !== "true" || pending.dataset.hasPending !== "true";
+  pending.disabled = projectionCount === 0;
+  pending.setAttribute("aria-label", `${pendingLabel}${projectionLabel}`);
+  pending.setAttribute(
+    "title",
+    projectionCount > 0
+      ? `${pendingLabel}${projectionLabel}. Retry reconciliation.`
+      : `${pendingLabel}. Correct rejected items to submit a new change.`,
+  );
 }
 
 export function sortedByStatus(status) {
-  return Object.values(state.itemsById)
+  return selectShoppingItems()
     .filter((item) => item && item.status === status)
     .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 }
@@ -177,7 +215,7 @@ export function updateSectionTitle(key, count) {
     return;
   }
   if (config.collapsible) {
-    const collapsed = !!state.collapsedSections[key];
+    const collapsed = !!selectShoppingCollapsedSections()[key];
     title.textContent = titleWithCount(config.label, count, collapsed);
     title.setAttribute("aria-expanded", String(!collapsed));
   } else {
@@ -194,7 +232,7 @@ export function applyCollapsedSectionState(key) {
   if (!container) {
     return;
   }
-  container.hidden = !!state.collapsedSections[key];
+  container.hidden = !!selectShoppingCollapsedSections()[key];
 }
 
 export function toggleCollapsedSection(key) {
@@ -202,7 +240,7 @@ export function toggleCollapsedSection(key) {
   if (!config || !config.collapsible) {
     return;
   }
-  state.collapsedSections[key] = !state.collapsedSections[key];
+  toggleShoppingSection(key);
   applyCollapsedSectionState(key);
   updateSectionTitle(key, sortedByStatus(key).length);
 }
@@ -266,7 +304,32 @@ export function renderSection(containerId, items, mode, groupByCategory = false)
   return mergedItems.length;
 }
 
-export function render() {
+function renderNow(options = {}) {
+  const renderStartedAt = performance.now();
+  const syncState = selectSyncState();
+  const generation = Number.isInteger(options.generation)
+    ? options.generation
+    : latestRenderGeneration;
+  const revision = Number.isInteger(options.revision)
+    ? options.revision
+    : syncState.revision;
+  if (generation < latestRenderGeneration || revision < latestRenderRevision) {
+    return false;
+  }
+  latestRenderGeneration = generation;
+  latestRenderRevision = revision;
+  lastRenderMeta = {
+    source: String(options.source || "unknown"),
+    status: String(options.status || syncState.status || "idle"),
+    revision,
+    generation,
+    requestedAt: Number.isFinite(options.requestedAt) ? options.requestedAt : null,
+    renderedAt: Date.now(),
+  };
+  if (document.body) {
+    document.body.dataset.wfdRenderSource = lastRenderMeta.source;
+    document.body.dataset.wfdRenderStatus = lastRenderMeta.status;
+  }
   const output = document.getElementById("output");
   if (output) {
     output.style.display = DEBUG_MODE ? "block" : "none";
@@ -284,6 +347,31 @@ export function render() {
   updateSectionTitle("completed", completedCount);
 
   updateStatusBadges();
+  lastRenderMeta.completedAt = Date.now();
+  lastRenderMeta.durationMs = performance.now() - renderStartedAt;
+  lastRenderMeta.queueDurationMs = Number.isFinite(options.requestedPerformanceAt)
+    ? renderStartedAt - options.requestedPerformanceAt
+    : null;
+  if (typeof window !== "undefined" && typeof window.WFD_recordRenderMetric === "function") {
+    window.WFD_recordRenderMetric({ ...lastRenderMeta });
+  }
+  return true;
+}
+
+export function getLastRenderMeta() {
+  return lastRenderMeta;
+}
+
+export function render(options = {}) {
+  return renderNow(options);
+}
+
+export function requestRender(options = {}) {
+  return renderScheduler.request(options);
+}
+
+export function getRenderCount() {
+  return renderScheduler.getRenderCount();
 }
 
 export { escapeAttr };

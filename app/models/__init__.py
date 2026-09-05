@@ -1,3 +1,5 @@
+"""Public request contracts and persisted-state models."""
+
 from app.models.contracts import (
     GenerateMealPlanRequest,
     MealPlanConstraints,

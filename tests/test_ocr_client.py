@@ -1,3 +1,5 @@
+"""Gemini OCR transport request, response, and failure contract tests."""
+
 import asyncio
 
 import httpx

@@ -1,6 +1,14 @@
+"""Versioned FastAPI routes and API-facing model transformations.
+
+Routes validate transport contracts and delegate mutations to domain services.
+Normalization helpers translate Tandoor payloads into stable client view models;
+they do not own persistence or synchronization policy.
+"""
+
 from __future__ import annotations
 
 from datetime import date, timedelta
+from functools import cache
 from typing import Any
 
 from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
@@ -34,12 +42,22 @@ stage2_state = Stage2State(
 )
 
 
+@cache
+def _shopping_service_for(state: Stage2State, tandoor_client: TandoorClient) -> ShoppingService:
+    return ShoppingService(state, tandoor_client)
+
+
 def _shopping_service() -> ShoppingService:
-    return ShoppingService(stage2_state, client)
+    return _shopping_service_for(stage2_state, client)
+
+
+@cache
+def _meal_plan_service_for(state: Stage2State, tandoor_client: TandoorClient) -> MealPlanService:
+    return MealPlanService(state, tandoor_client)
 
 
 def _meal_plan_service() -> MealPlanService:
-    return MealPlanService(stage2_state, client)
+    return _meal_plan_service_for(stage2_state, client)
 
 
 def _ocr_client() -> GeminiOcrClient:
@@ -590,6 +608,7 @@ async def config_keywords() -> dict:
 async def selected_keywords() -> dict:
     return {
         "source": "local-state",
+        "revision": stage2_state.current_revision(),
         "selected_keyword_ids": stage2_state.selected_keywords(),
     }
 
@@ -601,6 +620,7 @@ async def set_selected_keywords(payload: SetSelectedKeywordsRequest = Body(...))
     stage2_state.set_selected_keywords(keyword_ids)
     return {
         "source": "local-state",
+        "revision": stage2_state.current_revision(),
         "selected_keyword_ids": keyword_ids,
     }
 
@@ -610,6 +630,7 @@ async def get_meal_plan_rules() -> dict:
     rules = stage2_state.meal_plan_rules()
     return {
         "source": "local-state",
+        "revision": stage2_state.current_revision(),
         "data": rules,
     }
 
@@ -619,6 +640,7 @@ async def get_user_settings() -> dict:
     settings_data = stage2_state.user_settings()
     return {
         "source": "local-state",
+        "revision": stage2_state.current_revision(),
         "data": settings_data,
     }
 
@@ -631,6 +653,7 @@ async def set_user_settings(payload: UserSettingsRequest = Body(...)) -> dict:
     saved = stage2_state.set_user_settings(default_diners, default_notification_time)
     return {
         "source": "local-state",
+        "revision": stage2_state.current_revision(),
         "data": saved,
     }
 
@@ -642,6 +665,7 @@ async def set_meal_plan_rules(payload: MealPlanRulesRequest = Body(...)) -> dict
     rules = stage2_state.set_meal_plan_rules(no_repeat_days)
     return {
         "source": "local-state",
+        "revision": stage2_state.current_revision(),
         "data": rules,
     }
 
@@ -722,6 +746,7 @@ async def list_stored_meal_plans() -> dict:
 
     return {
         "source": "local-state",
+        "revision": stage2_state.current_revision(),
         "count": len(summary),
         "data": summary,
     }
@@ -732,7 +757,12 @@ async def get_meal_plan_stage2(plan_id: int) -> dict:
     plan = stage2_state.get_meal_plan(plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="Meal plan not found.")
-    return {"source": "local-state", "data": _enrich_plan_recipe_urls(plan)}
+    return {
+        "source": "local-state",
+        "revision": stage2_state.current_revision(),
+        "projection": {"status": "synchronized"},
+        "data": _enrich_plan_recipe_urls(plan),
+    }
 
 
 @router.delete("/meal-plans/stored/{plan_id}")
@@ -855,10 +885,39 @@ async def shopping_sync_get(
     changes = stage2_state.sync_events_since(since)[:limit]
     return {
         "source": "local-state",
+        "revision": stage2_state.current_revision(),
         "since": since,
         "server_cursor": stage2_state.current_sync_cursor(),
         "changes": changes,
     }
+
+
+@router.get("/sync/pending")
+async def pending_projections() -> dict:
+    return {
+        "source": "local-state",
+        "revision": stage2_state.current_revision(),
+        "data": stage2_state.pending_projections(),
+    }
+
+
+@router.post("/sync/pending/{operation_id}/retry")
+async def retry_pending_projection(operation_id: str) -> dict:
+    pending = stage2_state.pending_projection(operation_id)
+    if pending is None:
+        raise HTTPException(status_code=404, detail="Pending projection not found.")
+    if pending.get("domain") == "meal_plan":
+        return await _meal_plan_service().retry_pending_projection(
+            operation_id,
+            ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
+        )
+    if pending.get("domain") == "shopping":
+        return await _shopping_service().retry_pending_reconciliation(
+            operation_id,
+            extract_results=_extract_results,
+            build_shopping_view=_build_shopping_view,
+        )
+    raise HTTPException(status_code=409, detail="Pending projection domain is unsupported.")
 
 
 @router.post("/shopping-list/ocr", response_model=ShoppingListOcrResponse)
@@ -899,10 +958,17 @@ async def shopping_sync_post(payload: ShoppingSyncRequest = Body(...)) -> dict:
         local_store_group_payload=_local_store_group_payload,
         status_to_tandoor_fields=_status_to_tandoor_fields,
         effective_status=_effective_status,
+        extract_results=_extract_results,
+        build_shopping_view=_build_shopping_view,
     )
     return {
         "source": "tandoor+local-state",
+        "revision": response["revision"],
         "server_cursor": response["server_cursor"],
+        "cursor": response["cursor"],
+        "data": response["data"],
+        "projection": response.get("projection", {"status": "synchronized"}),
+        "pending_projections": response["pending_projections"],
         "applied": response["applied"],
         "rejected": response["rejected"],
     }

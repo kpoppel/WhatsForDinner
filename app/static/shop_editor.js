@@ -1,6 +1,23 @@
-import { state, persistCache, queueCreateChange, queueDeleteChange, queueUpdateChange } from "./js/state.js";
+/**
+ * Editable shopping-list screen built over the shared shopping store and sync.
+ * Local UI preferences and modal state stay here; accepted edits become store
+ * commands. OCR uses the gateway only to transcribe before items are accepted.
+ */
+import {
+  createShoppingChange,
+  deleteShoppingChange,
+  persistShoppingModel,
+  updateShoppingChange,
+} from "./js/store/commands.js";
+import {
+  selectShoppingItemById,
+  selectShoppingItems,
+  selectShoppingRejectedChanges,
+} from "./js/store/selectors.js";
+import { selectSyncState } from "./js/store/selectors.js";
 import { refresh, run, syncPending } from "./js/sync.js";
-import { isOnline, apiUpload } from "./js/api.js";
+import { gateway, isOnline } from "./js/api.js";
+import { createRenderScheduler } from "./js/render_scheduler.js";
 
 const VIEW_KEY = "wfd.shop-editor.view.v1";
 const SEGMENT_DEFAULT = "store";
@@ -30,6 +47,10 @@ const ocrErrorMessageNode = document.getElementById("wf-ocr-review-error-message
 const ocrResultsNode = document.getElementById("wf-ocr-review-results");
 const ocrCategorySelect = document.getElementById("wf-ocr-category");
 const ocrList = document.getElementById("wf-ocr-review-list");
+const editorRenderScheduler = createRenderScheduler({
+  getRevision: () => selectSyncState().revision,
+  render: () => renderEditorNow(),
+});
 
 if (
   !listNode || !statusNode || !dueBannerNode || !addButton || !addModal || !editModal ||
@@ -48,7 +69,7 @@ function initShopEditor() {
   bindModalControls();
   bindTabActivation();
   updateDueBanner();
-  renderEditor();
+  renderEditor({ source: "initial", force: true });
 }
 
 function setStatus(message) {
@@ -71,7 +92,7 @@ function setActiveView(next) {
     button.classList.toggle("is-active", selected);
     button.setAttribute("aria-selected", String(selected));
   }
-  renderEditor();
+  renderEditor({ source: "local-view", force: true });
 }
 
 function bindSegmentControls() {
@@ -110,7 +131,7 @@ function bindToolbarControls() {
 
 function serverStoreGroupNames() {
   const categories = new Set(["Other"]);
-  for (const item of Object.values(state.itemsById)) {
+  for (const item of selectShoppingItems()) {
     if (!item) {
       continue;
     }
@@ -148,7 +169,7 @@ function bindTabActivation() {
     shopButton.addEventListener("click", () => {
       run(async () => {
         await refresh();
-        renderEditor();
+        renderEditor({ source: "navigation" });
       });
     });
   }
@@ -159,7 +180,7 @@ function bindTabActivation() {
     if (source === "shop-editor") {
       return;
     }
-    renderEditor();
+    renderEditor({ source: "store-change", force: true });
   });
 }
 
@@ -201,7 +222,7 @@ function bindModalControls() {
 }
 
 function allItems() {
-  return Object.values(state.itemsById)
+  return selectShoppingItems()
     .filter((row) => row && row.id !== undefined && row.id !== null)
     .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
 }
@@ -387,7 +408,7 @@ function updateDueBanner() {
   dueBannerNode.textContent = `${due.length} reminder${due.length === 1 ? "" : "s"} due today.`;
 }
 
-function renderEditor() {
+function renderEditorNow() {
   listNode.innerHTML = "";
   updateDueBanner();
 
@@ -416,6 +437,10 @@ function renderEditor() {
   }
 }
 
+function renderEditor(options = {}) {
+  return editorRenderScheduler.request({ source: "editor", force: options.force !== false, ...options });
+}
+
 function suppressNextRowClick(row) {
   row.dataset.suppressNextClick = "1";
 }
@@ -435,13 +460,12 @@ async function deleteEditorEntries(entryIds) {
   }
 
   for (const entryId of ids) {
-    queueDeleteChange(entryId);
+    deleteShoppingChange(entryId);
   }
   renderEditor();
 
   if (isOnline()) {
     await syncPending(false);
-    await refresh();
   }
 
   renderEditor();
@@ -514,7 +538,7 @@ function itemAmountLabel(item) {
 
 function openMergedItemPicker(groupedItem, entryIds) {
   const items = Array.from(new Set(entryIds))
-    .map((entryId) => state.itemsById[String(entryId)])
+    .map((entryId) => selectShoppingItemById(entryId))
     .filter((item) => item && item.id !== undefined && item.id !== null)
     .sort((a, b) => {
       const recipeA = recipeInfo(a).name;
@@ -579,6 +603,14 @@ function createEditorRow(item) {
     ? item.entry_ids
     : [item.id];
   const isGrouped = entryIds.length > 1;
+  const rejectedEntryIds = new Set(selectShoppingRejectedChanges().map((change) => Number(change.entry_id)));
+  const isRejected = entryIds.some((entryId) => rejectedEntryIds.has(Number(entryId)));
+  const rejectionMarkup = isRejected
+    ? '<p class="wf-editor-rejected">Sync rejected. Edit to retry.</p>'
+    : "";
+  if (isRejected) {
+    row.classList.add("is-rejected");
+  }
 
   const amount = Number(item.amount ?? 0);
   const safeAmount = Number.isFinite(amount) ? amount : 0;
@@ -596,7 +628,7 @@ function createEditorRow(item) {
   if (isGrouped) {
     const groupedRecipeNames = Array.from(new Set(
       entryIds
-        .map((entryId) => recipeInfo(state.itemsById[String(entryId)]).name)
+        .map((entryId) => recipeInfo(selectShoppingItemById(entryId)).name)
         .filter((name) => String(name || "").trim().length > 0)
     )).sort((a, b) => a.localeCompare(b));
     const firstRecipeName = groupedRecipeNames[0] || recipe.name;
@@ -615,6 +647,7 @@ function createEditorRow(item) {
         <p class="wf-editor-name">${escapeHtml(item.name || "Unnamed")}</p>
         <p class="wf-editor-meta">${escapeHtml(recipeSummary)}</p>
         <p class="wf-editor-meta wf-editor-meta-store">${escapeHtml(storeGroupName(item))}</p>
+        ${rejectionMarkup}
       </div>
       <div class="wf-editor-actions">
         <div class="wf-stepper-value wf-stepper-value-stacked">${amountMarkup}</div>
@@ -640,6 +673,7 @@ function createEditorRow(item) {
       <p class="wf-editor-name">${escapeHtml(item.name || "Unnamed")}</p>
       <p class="wf-editor-meta">${escapeHtml(recipe.name)}</p>
       <p class="wf-editor-meta wf-editor-meta-store">${escapeHtml(storeGroupName(item))}</p>
+      ${rejectionMarkup}
     </div>
     <div class="wf-editor-actions">
       <button class="wf-bell-btn ${reminderOn ? "is-on" : ""}" type="button" data-action="toggle-reminder">🔔</button>
@@ -798,12 +832,11 @@ async function saveAddModal() {
     reminder_text: reminderEnabled ? reminderText : "",
   };
 
-  queueCreateChange(payload);
+  createShoppingChange(payload);
   renderEditor();
 
   if (isOnline()) {
     await syncPending(false);
-    await refresh();
     renderEditor();
     setStatus("Item added.");
     publishDataChanged();
@@ -888,7 +921,7 @@ async function submitOcrPhoto(file) {
   try {
     const formData = new FormData();
     formData.append("image", file);
-    response = await apiUpload("/shopping-list/ocr", formData);
+    response = await gateway.ocr(formData);
   } catch (error) {
     showOcrErrorState("Could not read the photo. Check your connection and try again.");
     return;
@@ -929,14 +962,13 @@ async function saveOcrReviewModal() {
       reminder_date: null,
       reminder_text: "",
     };
-    queueCreateChange(payload);
+    createShoppingChange(payload);
     tempId -= 1;
   }
   renderEditor();
 
   if (isOnline()) {
     await syncPending(false);
-    await refresh();
     renderEditor();
     setStatus(names.length === 1 ? "Item added." : `${names.length} items added.`);
     publishDataChanged();
@@ -1010,12 +1042,11 @@ async function deleteFromEditModal() {
     throw new Error("Invalid shopping item.");
   }
 
-  queueDeleteChange(entryId);
+  deleteShoppingChange(entryId);
   renderEditor();
 
   if (isOnline()) {
     await syncPending(false);
-    await refresh();
   }
 
   closeEditModal();
@@ -1025,7 +1056,7 @@ async function deleteFromEditModal() {
 }
 
 async function clearAllItems() {
-  const allItems = Object.values(state.itemsById).filter((item) => item && item.id !== undefined && item.id !== null);
+  const allItems = selectShoppingItems().filter((item) => item && item.id !== undefined && item.id !== null);
   if (allItems.length === 0) {
     setStatus("No items to clear.");
     return;
@@ -1036,13 +1067,12 @@ async function clearAllItems() {
   }
 
   for (const item of allItems) {
-    queueDeleteChange(item.id);
+    deleteShoppingChange(item.id);
   }
   renderEditor();
 
   if (isOnline()) {
     await syncPending(false);
-    await refresh();
   }
 
   renderEditor();
@@ -1051,8 +1081,8 @@ async function clearAllItems() {
 }
 
 async function queueAndSyncUpdate(entryId, patch) {
-  queueUpdateChange(entryId, patch);
-  persistCache();
+  updateShoppingChange(entryId, patch);
+  persistShoppingModel();
 
   if (!isOnline()) {
     setStatus("Offline: change queued and will sync when online.");
@@ -1060,12 +1090,11 @@ async function queueAndSyncUpdate(entryId, patch) {
   }
 
   await syncPending(false);
-  await refresh();
 }
 
 function nextTempId() {
-  const ids = Object.keys(state.itemsById)
-    .map((key) => Number(key))
+  const ids = selectShoppingItems()
+    .map((item) => Number(item.id))
     .filter((id) => Number.isInteger(id) && id < 0);
   if (ids.length === 0) {
     return -1;

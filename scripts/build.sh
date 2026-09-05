@@ -1,4 +1,5 @@
 #!/bin/bash
+# Build and tag the deployment container image.
 tag=${1:-latest}
 if [ "$1" == "" ]; then
   echo "Usage: $0 <tag: v1.0..0>"
