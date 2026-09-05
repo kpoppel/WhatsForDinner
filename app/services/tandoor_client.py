@@ -175,6 +175,13 @@ class TandoorClient:
     async def delete_shopping_entry(self, entry_id: int) -> Any:
         return await self._request("DELETE", f"/api/shopping-list-entry/{entry_id}/")
 
+    async def bulk_update_shopping_entries(self, entry_ids: list[int], checked: bool) -> Any:
+        return await self._request(
+            "POST",
+            "/api/shopping-list-entry/bulk/",
+            json={"ids": entry_ids, "checked": checked},
+        )
+
     async def create_shopping_list_from_recipe(self, payload: dict[str, Any]) -> Any:
         return await self._request("POST", "/api/shopping-list-recipe/", json=payload)
 

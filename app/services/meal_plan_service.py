@@ -8,12 +8,12 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.config import settings
-from app.services.stage2_state import Stage2State
+from app.services.server_state import ServerState
 from app.services.tandoor_client import TandoorClient, TandoorError
 
 
 class MealPlanService:
-    def __init__(self, state: Stage2State, tandoor_client: TandoorClient) -> None:
+    def __init__(self, state: ServerState, tandoor_client: TandoorClient) -> None:
         self._state = state
         self._client = tandoor_client
         self._shopping_generation_locks: dict[int, asyncio.Lock] = {}
@@ -731,7 +731,6 @@ class MealPlanService:
                 )
             except TandoorError as exc:
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
-        self._state.append_sync_event("meal_plan_generated", stored)
         return {"source": "tandoor+local-state", "data": self._enrich_plan_recipe_urls(stored)}
 
     async def patch_plan(self, plan_id: int, payload: dict[str, Any], ensure_tandoor_writes_enabled=None) -> dict:
@@ -787,7 +786,6 @@ class MealPlanService:
                 except TandoorError as exc:
                     raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-            self._state.append_sync_event("meal_plan_updated", {"plan_id": plan_id, "payload": payload})
             return {"source": "local-state", "data": self._enrich_plan_recipe_urls(updated)}
 
     async def add_entry(self, plan_id: int, payload: dict[str, Any], ensure_tandoor_writes_enabled=None) -> dict:
@@ -847,8 +845,6 @@ class MealPlanService:
                     )
                 except TandoorError as exc:
                     raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-            self._state.append_sync_event("meal_plan_entry_added", {"plan_id": plan_id, "entry": entry})
 
             return {"source": "local-state", "data": self._enrich_plan_recipe_urls(updated)}
 
@@ -946,11 +942,6 @@ class MealPlanService:
                 except TandoorError as exc:
                     raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-            self._state.append_sync_event(
-                "meal_plan_entry_updated",
-                {"plan_id": plan_id, "entry_id": entry_id, "payload": payload},
-            )
-
             return {"source": "local-state", "data": self._enrich_plan_recipe_urls(updated)}
 
     async def delete_entry(self, plan_id: int, entry_id: int, ensure_tandoor_writes_enabled=None) -> dict:
@@ -989,8 +980,6 @@ class MealPlanService:
                 except TandoorError as exc:
                     raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-            self._state.append_sync_event("meal_plan_entry_deleted", {"plan_id": plan_id, "entry_id": entry_id})
-
             return {"source": "local-state", "data": updated}
 
     async def delete_plan(self, plan_id: int, ensure_tandoor_writes_enabled=None) -> dict:
@@ -1013,7 +1002,6 @@ class MealPlanService:
         if deleted is None:
             raise HTTPException(status_code=404, detail="Meal plan not found.")
 
-        self._state.append_sync_event("meal_plan_deleted", {"plan_id": plan_id})
         return {
             "source": "local-state",
             "data": {
@@ -1144,16 +1132,6 @@ class MealPlanService:
             serializable_sync = self._serialize_instance_sync(next_sync)
 
             self._state.set_meal_plan_instance_sync(plan_id, serializable_sync)
-
-            self._state.append_sync_event(
-                "meal_plan_shopping_generated",
-                {
-                    "plan_id": plan_id,
-                    "mode": mode,
-                    "created_count": len(created),
-                    "failed_count": len(failed),
-                },
-            )
 
             shopping_view: dict[str, Any] | None = None
             shopping_view_error: str | None = None

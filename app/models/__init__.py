@@ -8,7 +8,7 @@ from app.models.contracts import (
 )
 from app.models.state_schema import (
     CURRENT_STATE_SCHEMA_VERSION,
-    Stage2StateDocument,
+    ServerStateDocument,
     default_state_payload,
 )
 
@@ -19,7 +19,7 @@ __all__ = [
     "MealPlanRulesRequest",
     "SetSelectedKeywordsRequest",
     "ShoppingSyncRequest",
-    "Stage2StateDocument",
+    "ServerStateDocument",
     "UserSettingsRequest",
     "default_state_payload",
 ]

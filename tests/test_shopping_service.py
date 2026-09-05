@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.services.shopping_service import ShoppingService
-from app.services.stage2_state import Stage2State
+from app.services.server_state import ServerState
 from app.services.tandoor_client import TandoorError
 
 
@@ -13,6 +13,7 @@ class FakeShoppingClient:
     def __init__(self) -> None:
         self.created_payloads = []
         self.updated_payloads = []
+        self.bulk_updated_payloads = []
         self.deleted_entry_ids = []
         self.next_id = 1
 
@@ -29,6 +30,10 @@ class FakeShoppingClient:
     async def delete_shopping_entry(self, entry_id):
         self.deleted_entry_ids.append(entry_id)
         return {"deleted": entry_id}
+
+    async def bulk_update_shopping_entries(self, entry_ids, checked):
+        self.bulk_updated_payloads.append((list(entry_ids), checked))
+        return {"updated": list(entry_ids)}
 
 
 class BrokenShoppingClient:
@@ -96,7 +101,7 @@ def effective_status(entry: dict, _overrides: dict[str, str]) -> str:
 
 
 def test_create_entry_ad_hoc_persists_local(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     service = ShoppingService(state, FakeShoppingClient())
 
     result = asyncio.run(
@@ -130,7 +135,7 @@ def test_create_entry_ad_hoc_persists_local(tmp_path) -> None:
 
 
 def test_create_update_delete_remote_roundtrip(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     client = FakeShoppingClient()
     service = ShoppingService(state, client)
 
@@ -175,7 +180,7 @@ def test_create_update_delete_remote_roundtrip(tmp_path) -> None:
 
 
 def test_apply_sync_changes_reports_rejected_and_applied(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     service = ShoppingService(state, FakeShoppingClient())
 
     result = asyncio.run(
@@ -195,7 +200,6 @@ def test_apply_sync_changes_reports_rejected_and_applied(tmp_path) -> None:
         )
     )
 
-    assert result["server_cursor"] >= 1
     assert any(row["operation"] == "create" for row in result["applied"])
     assert any(row["operation"] == "delete" for row in result["applied"])
     reasons = [row["reason"] for row in result["rejected"]]
@@ -204,7 +208,7 @@ def test_apply_sync_changes_reports_rejected_and_applied(tmp_path) -> None:
 
 
 def test_service_wraps_tandoor_errors(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     service = ShoppingService(state, BrokenShoppingClient())
 
     with pytest.raises(HTTPException) as exc_info:
@@ -220,3 +224,75 @@ def test_service_wraps_tandoor_errors(tmp_path) -> None:
         )
 
     assert exc_info.value.status_code == 502
+
+
+def test_sync_defers_batch_when_tandoor_is_unavailable(tmp_path) -> None:
+    state = ServerState(str(tmp_path))
+    service = ShoppingService(state, BrokenShoppingClient())
+
+    result = asyncio.run(
+        service.apply_sync_changes(
+            changes=[{"operation": "update", "entry_id": 3, "payload": {"status": "completed"}}],
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            extract_reminder_patch=extract_reminder_patch,
+            build_local_entry_payload=build_local_entry_payload,
+            local_store_group_payload=local_store_group_payload,
+            status_to_tandoor_fields=status_to_tandoor_fields,
+            effective_status=effective_status,
+        )
+    )
+
+    assert result == {"deferred": True, "applied": [], "rejected": []}
+    assert state.pending_shopping_changes() == {
+        "3": {"operation": "update", "entry_id": 3, "payload": {"status": "completed"}}
+    }
+
+
+def test_sync_retries_existing_deferred_changes(tmp_path) -> None:
+    state = ServerState(str(tmp_path))
+    state.set_pending_shopping_changes(
+        [{"operation": "update", "entry_id": 3, "payload": {"status": "completed"}}]
+    )
+    client = FakeShoppingClient()
+    service = ShoppingService(state, client)
+
+    result = asyncio.run(
+        service.apply_sync_changes(
+            changes=[],
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            extract_reminder_patch=extract_reminder_patch,
+            build_local_entry_payload=build_local_entry_payload,
+            local_store_group_payload=local_store_group_payload,
+            status_to_tandoor_fields=status_to_tandoor_fields,
+            effective_status=effective_status,
+        )
+    )
+
+    assert result["deferred"] is False
+    assert client.updated_payloads == [(3, {"checked": True, "delay_until": None})]
+    assert state.pending_shopping_changes() == {}
+
+
+def test_sync_uses_tandoor_bulk_for_completed_items(tmp_path) -> None:
+    state = ServerState(str(tmp_path))
+    client = FakeShoppingClient()
+    service = ShoppingService(state, client)
+
+    result = asyncio.run(
+        service.apply_sync_changes(
+            changes=[
+                {"operation": "update", "entry_id": 3, "payload": {"status": "completed"}},
+                {"operation": "update", "entry_id": 4, "payload": {"status": "completed"}},
+            ],
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            extract_reminder_patch=extract_reminder_patch,
+            build_local_entry_payload=build_local_entry_payload,
+            local_store_group_payload=local_store_group_payload,
+            status_to_tandoor_fields=status_to_tandoor_fields,
+            effective_status=effective_status,
+        )
+    )
+
+    assert result["deferred"] is False
+    assert client.bulk_updated_payloads == [([3, 4], True)]
+    assert client.updated_payloads == []

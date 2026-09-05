@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.services.meal_plan_service import MealPlanService
-from app.services.stage2_state import Stage2State
+from app.services.server_state import ServerState
 from app.services.tandoor_client import TandoorError
 
 
@@ -238,7 +238,7 @@ def build_shopping_view(entries: list[dict]) -> dict:
 
 
 def test_generate_plan_reuses_constraints_and_entries(tmp_path, monkeypatch) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     service = MealPlanService(state, FakeMealClient())
 
     # Existing plan history should prevent immediate repeat when no_repeat_days is active.
@@ -288,7 +288,7 @@ def test_generate_plan_reuses_constraints_and_entries(tmp_path, monkeypatch) -> 
 
 
 def test_patch_plan_rebases_dates_and_length(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     service = MealPlanService(state, FakeMealClient())
 
     plan = state.create_meal_plan(
@@ -314,7 +314,7 @@ def test_patch_plan_rebases_dates_and_length(tmp_path) -> None:
 
 
 def test_generate_shopping_from_plan_aggregates_success_and_failure(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     client = FakeMealClient()
     service = MealPlanService(state, client)
 
@@ -376,7 +376,7 @@ def test_generate_shopping_from_plan_aggregates_success_and_failure(tmp_path) ->
 
 
 def test_generate_shopping_from_plan_includes_all_extra_recipes(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     client = FakeMealClient()
     service = MealPlanService(state, client)
 
@@ -422,7 +422,7 @@ def test_generate_shopping_from_plan_includes_all_extra_recipes(tmp_path) -> Non
 
 
 def test_generate_shopping_from_plan_is_idempotent_and_syncs_add_remove(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     client = FakeMealClient()
     service = MealPlanService(state, client)
 
@@ -517,7 +517,7 @@ def test_generate_shopping_from_plan_is_idempotent_and_syncs_add_remove(tmp_path
 
 
 def test_generate_shopping_from_plan_same_recipe_on_second_day_increases_servings(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     client = FakeMealClient()
     service = MealPlanService(state, client)
 
@@ -586,7 +586,7 @@ def test_generate_shopping_from_plan_same_recipe_on_second_day_increases_serving
 
 
 def test_generate_plan_wraps_tandoor_list_errors(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     service = MealPlanService(state, BrokenMealClient())
 
     with pytest.raises(HTTPException) as exc_info:
@@ -605,7 +605,7 @@ def test_generate_plan_wraps_tandoor_list_errors(tmp_path) -> None:
 
 
 def test_generate_shopping_remove_then_readd_same_recipe_resyncs_when_tracked_entry_missing(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     client = MissingDeleteMealClient()
     service = MealPlanService(state, client)
 
@@ -719,7 +719,7 @@ def test_generate_shopping_remove_then_readd_same_recipe_resyncs_when_tracked_en
 
 
 def test_sync_tandoor_meal_plan_includes_mode_only_rows_without_recipe(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     client = FakeMealClient()
     service = MealPlanService(state, client)
 
@@ -779,7 +779,7 @@ def test_sync_tandoor_meal_plan_includes_mode_only_rows_without_recipe(tmp_path)
 
 
 def test_patch_entry_switch_to_non_planned_clears_recipe_and_syncs_mode_row(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     client = FakeMealClient()
     service = MealPlanService(state, client)
 
@@ -829,7 +829,7 @@ def test_patch_entry_switch_to_non_planned_clears_recipe_and_syncs_mode_row(tmp_
 
 
 def test_patch_entry_recipe_removal_deletes_tracked_shopping_entries(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     client = FakeMealClient()
     service = MealPlanService(state, client)
 
@@ -895,7 +895,7 @@ def test_patch_entry_recipe_removal_deletes_tracked_shopping_entries(tmp_path) -
 
 
 def test_patch_entry_keeps_unchanged_mode_rows_when_remote_snapshot_is_sparse(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     client = SparseRemoteMealPlanClient()
     service = MealPlanService(state, client)
 
@@ -983,7 +983,7 @@ def test_patch_entry_keeps_unchanged_mode_rows_when_remote_snapshot_is_sparse(tm
 
 
 def test_patch_entry_move_updates_tracked_tandoor_row_in_place(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     client = FakeMealClient()
     service = MealPlanService(state, client)
 
@@ -1045,7 +1045,7 @@ def test_patch_entry_move_updates_tracked_tandoor_row_in_place(tmp_path) -> None
 
 
 def test_generate_shopping_sync_preserves_mode_only_rows(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     client = FakeMealClient()
     service = MealPlanService(state, client)
 
@@ -1106,7 +1106,7 @@ def test_generate_shopping_sync_preserves_mode_only_rows(tmp_path) -> None:
 
 
 def test_delete_plan_removes_tracked_shopping_before_meal_rows(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     client = OrderedDeleteMealClient()
     service = MealPlanService(state, client)
 
@@ -1151,7 +1151,7 @@ def test_delete_plan_removes_tracked_shopping_before_meal_rows(tmp_path) -> None
 
 
 def test_delete_plan_aborts_when_shopping_cleanup_fails(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     client = OrderedDeleteMealClient(fail_shopping_ids={502})
     service = MealPlanService(state, client)
 
@@ -1197,7 +1197,7 @@ def test_delete_plan_aborts_when_shopping_cleanup_fails(tmp_path) -> None:
 
 
 def test_delete_plan_treats_missing_shopping_entries_as_already_removed(tmp_path) -> None:
-    state = Stage2State(str(tmp_path))
+    state = ServerState(str(tmp_path))
     client = OrderedDeleteMealClient(missing_shopping_ids={502})
     service = MealPlanService(state, client)
 

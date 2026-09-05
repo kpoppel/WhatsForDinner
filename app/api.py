@@ -23,24 +23,22 @@ from app.models.contracts import (
 from app.services.meal_plan_service import MealPlanService
 from app.services.ocr_client import GeminiOcrClient, OcrError
 from app.services.shopping_service import ShoppingService
-from app.services.stage2_state import Stage2State
+from app.services.server_state import ServerState
 from app.services.tandoor_client import TandoorClient, TandoorError
 
 router = APIRouter(tags=["mobile-api"])
 client = TandoorClient()
-stage2_state = Stage2State(
+server_state = ServerState(
     settings.stage2_data_dir,
-    sync_event_max_count=settings.stage2_sync_event_max_count,
-    sync_event_max_age_days=settings.stage2_sync_event_max_age_days,
 )
 
 
 def _shopping_service() -> ShoppingService:
-    return ShoppingService(stage2_state, client)
+    return ShoppingService(server_state, client)
 
 
 def _meal_plan_service() -> MealPlanService:
-    return MealPlanService(stage2_state, client)
+    return MealPlanService(server_state, client)
 
 
 def _ocr_client() -> GeminiOcrClient:
@@ -437,9 +435,10 @@ def _normalize_local_shopping_entry(
 
 
 def _build_shopping_view(entries: list[dict[str, Any]]) -> dict[str, Any]:
-    overrides = stage2_state.get_shopping_statuses()
-    metadata = stage2_state.get_shopping_item_metadata()
-    local_entries = stage2_state.list_local_shopping_entries()
+    overrides = server_state.get_shopping_statuses()
+    metadata = server_state.get_shopping_item_metadata()
+    local_entries = server_state.list_local_shopping_entries()
+    pending_changes = server_state.pending_shopping_changes()
     sectioned: dict[str, list[dict[str, Any]]] = {
         "remaining": [],
         "skipped": [],
@@ -448,6 +447,16 @@ def _build_shopping_view(entries: list[dict[str, Any]]) -> dict[str, Any]:
 
     for entry in entries:
         entry_id = entry.get("id")
+        pending = pending_changes.pop(str(entry_id), None) if isinstance(entry_id, int) else None
+        if isinstance(pending, dict) and pending.get("operation") == "delete":
+            continue
+        if isinstance(pending, dict) and pending.get("operation") == "update":
+            patch = pending.get("payload")
+            if isinstance(patch, dict):
+                entry = {**entry, **patch}
+                status_override = patch.get("status")
+                if isinstance(status_override, str) and status_override in SHOPPING_STATUSES:
+                    overrides[str(entry_id)] = status_override
         meta = metadata.get(str(entry_id), {}) if isinstance(entry_id, int) else {}
         status = _effective_status(entry, overrides)
         normalized = _normalize_shopping_entry(entry, status, meta if isinstance(meta, dict) else {})
@@ -591,7 +600,7 @@ async def config_keywords() -> dict:
 async def selected_keywords() -> dict:
     return {
         "source": "local-state",
-        "selected_keyword_ids": stage2_state.selected_keywords(),
+        "selected_keyword_ids": server_state.selected_keywords(),
     }
 
 
@@ -599,7 +608,7 @@ async def selected_keywords() -> dict:
 async def set_selected_keywords(payload: SetSelectedKeywordsRequest = Body(...)) -> dict:
     keyword_ids = sorted({int(v) for v in payload.keyword_ids})
 
-    stage2_state.set_selected_keywords(keyword_ids)
+    server_state.set_selected_keywords(keyword_ids)
     return {
         "source": "local-state",
         "selected_keyword_ids": keyword_ids,
@@ -608,7 +617,7 @@ async def set_selected_keywords(payload: SetSelectedKeywordsRequest = Body(...))
 
 @router.get("/config/meal-plan-rules")
 async def get_meal_plan_rules() -> dict:
-    rules = stage2_state.meal_plan_rules()
+    rules = server_state.meal_plan_rules()
     return {
         "source": "local-state",
         "data": rules,
@@ -617,7 +626,7 @@ async def get_meal_plan_rules() -> dict:
 
 @router.get("/config/user-settings")
 async def get_user_settings() -> dict:
-    settings_data = stage2_state.user_settings()
+    settings_data = server_state.user_settings()
     return {
         "source": "local-state",
         "data": settings_data,
@@ -629,7 +638,7 @@ async def set_user_settings(payload: UserSettingsRequest = Body(...)) -> dict:
     default_diners = int(payload.default_diners)
     default_notification_time = payload.default_notification_time.strip()
 
-    saved = stage2_state.set_user_settings(default_diners, default_notification_time)
+    saved = server_state.set_user_settings(default_diners, default_notification_time)
     return {
         "source": "local-state",
         "data": saved,
@@ -640,7 +649,7 @@ async def set_user_settings(payload: UserSettingsRequest = Body(...)) -> dict:
 async def set_meal_plan_rules(payload: MealPlanRulesRequest = Body(...)) -> dict:
     no_repeat_days = int(payload.no_repeat_days)
 
-    rules = stage2_state.set_meal_plan_rules(no_repeat_days)
+    rules = server_state.set_meal_plan_rules(no_repeat_days)
     return {
         "source": "local-state",
         "data": rules,
@@ -656,7 +665,7 @@ async def set_settings(payload: SettingsRequest = Body(...)) -> dict:
 
     return {
         "source": "local-state",
-        "data": stage2_state.set_settings(
+        "data": server_state.set_settings(
             default_diners,
             default_notification_time,
             no_repeat_days,
@@ -669,7 +678,7 @@ async def set_settings(payload: SettingsRequest = Body(...)) -> dict:
 async def generate_meal_plan(payload: GenerateMealPlanRequest = Body(...)) -> dict:
     start_day = payload.start_date
     length_days = int(payload.length_days)
-    configured_user_settings = stage2_state.user_settings()
+    configured_user_settings = server_state.user_settings()
     configured_default_diners = configured_user_settings.get("default_diners")
     if not isinstance(configured_default_diners, int):
         configured_default_diners = 2
@@ -690,9 +699,9 @@ async def generate_meal_plan(payload: GenerateMealPlanRequest = Body(...)) -> di
     if isinstance(raw_keyword_ids, list) and raw_keyword_ids:
         keyword_ids = [int(v) for v in raw_keyword_ids]
     else:
-        keyword_ids = stage2_state.selected_keywords()
+        keyword_ids = server_state.selected_keywords()
 
-    configured_rules = stage2_state.meal_plan_rules()
+    configured_rules = server_state.meal_plan_rules()
     raw_no_repeat = payload.no_repeat_days
     if raw_no_repeat is None:
         no_repeat_days = int(configured_rules.get("no_repeat_days", 30))
@@ -722,7 +731,7 @@ async def generate_meal_plan(payload: GenerateMealPlanRequest = Body(...)) -> di
 
 @router.get("/meal-plans/stored")
 async def list_stored_meal_plans() -> dict:
-    plans = stage2_state.list_meal_plans()
+    plans = server_state.list_meal_plans()
     summary: list[dict[str, Any]] = []
     for plan in plans:
         entries = plan.get("entries") if isinstance(plan.get("entries"), list) else []
@@ -748,7 +757,7 @@ async def list_stored_meal_plans() -> dict:
 
 @router.get("/meal-plans/{plan_id}")
 async def get_meal_plan_stage2(plan_id: int) -> dict:
-    plan = stage2_state.get_meal_plan(plan_id)
+    plan = server_state.get_meal_plan(plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="Meal plan not found.")
     return {"source": "local-state", "data": _enrich_plan_recipe_urls(plan)}
@@ -821,7 +830,19 @@ async def meal_plan_to_shopping_list(
 
 @router.get("/shopping-list/view")
 async def shopping_list_view(limit: int = Query(default=300, ge=1, le=1000)) -> dict:
-    return await _shopping_service().get_view(
+    shopping_service = _shopping_service()
+    pending_changes = list(server_state.pending_shopping_changes().values())
+    if pending_changes:
+        await shopping_service.apply_sync_changes(
+            changes=pending_changes,
+            ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
+            extract_reminder_patch=_extract_reminder_patch,
+            build_local_entry_payload=_build_local_entry_payload,
+            local_store_group_payload=_local_store_group_payload,
+            status_to_tandoor_fields=_status_to_tandoor_fields,
+            effective_status=_effective_status,
+        )
+    return await shopping_service.get_view(
         limit=limit,
         extract_results=_extract_results,
         build_shopping_view=_build_shopping_view,
@@ -866,20 +887,6 @@ async def shopping_entries_stage2_delete(entry_id: int) -> dict:
     )
 
 
-@router.get("/shopping-list/sync")
-async def shopping_sync_get(
-    since: int = Query(default=0, ge=0),
-    limit: int = Query(default=500, ge=1, le=2000),
-) -> dict:
-    changes = stage2_state.sync_events_since(since)[:limit]
-    return {
-        "source": "local-state",
-        "since": since,
-        "server_cursor": stage2_state.current_sync_cursor(),
-        "changes": changes,
-    }
-
-
 @router.post("/shopping-list/ocr", response_model=ShoppingListOcrResponse)
 async def shopping_list_ocr(image: UploadFile = File(...)) -> ShoppingListOcrResponse:
     if not settings.google_llm_api_key:
@@ -921,7 +928,7 @@ async def shopping_sync_post(payload: ShoppingSyncRequest = Body(...)) -> dict:
     )
     return {
         "source": "tandoor+local-state",
-        "server_cursor": response["server_cursor"],
+        "deferred": response["deferred"],
         "applied": response["applied"],
         "rejected": response["rejected"],
     }

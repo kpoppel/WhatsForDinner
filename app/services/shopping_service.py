@@ -5,14 +5,14 @@ from typing import Any, Callable
 
 from fastapi import HTTPException
 
-from app.services.stage2_state import Stage2State
+from app.services.server_state import ServerState
 from app.services.tandoor_client import TandoorClient, TandoorError
 
 SHOPPING_STATUSES = {"remaining", "skipped", "completed"}
 
 
 class ShoppingService:
-    def __init__(self, state: Stage2State, tandoor_client: TandoorClient) -> None:
+    def __init__(self, state: ServerState, tandoor_client: TandoorClient) -> None:
         self._state = state
         self._client = tandoor_client
         self._sync_lock = asyncio.Lock()
@@ -26,15 +26,18 @@ class ShoppingService:
     ) -> dict[str, Any]:
         try:
             data = await self._client.list_shopping_entries(limit=limit)
+            entries = extract_results(data)
+            self._state.set_shopping_snapshot(entries)
+            source = "tandoor+local-state"
         except TandoorError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-        entries = extract_results(data)
+            entries = self._state.shopping_snapshot()
+            if not entries:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            source = "cached-tandoor+local-state"
         view = build_shopping_view(entries)
 
         return {
-            "source": "tandoor+local-state",
-            "cursor": self._state.current_sync_cursor(),
+            "source": source,
             "data": view,
         }
 
@@ -68,10 +71,8 @@ class ShoppingService:
             if has_reminder_patch:
                 self._state.set_shopping_item_metadata(local_id, reminder_patch)
             self._state.set_shopping_status(local_id, status_value)
-            cursor = self._state.append_sync_event("shopping_entry_created", stored)
             return {
                 "source": "local-state",
-                "cursor": cursor,
                 "data": stored,
             }
 
@@ -91,10 +92,8 @@ class ShoppingService:
         if isinstance(created_id, int):
             self._state.set_shopping_status(created_id, status_value)
 
-        cursor = self._state.append_sync_event("shopping_entry_created", created)
         return {
             "source": "tandoor+local-state",
-            "cursor": cursor,
             "data": created,
         }
 
@@ -163,18 +162,8 @@ class ShoppingService:
             if has_reminder_patch:
                 self._state.set_shopping_item_metadata(entry_id, reminder_patch)
 
-            cursor = self._state.append_sync_event(
-                "shopping_entry_updated",
-                {
-                    "entry_id": entry_id,
-                    "request": payload,
-                    "data": updated_local,
-                    "status": status,
-                },
-            )
             return {
                 "source": "local-state",
-                "cursor": cursor,
                 "effective_status": str(updated_local.get("status") or "remaining"),
                 "data": updated_local,
             }
@@ -193,23 +182,12 @@ class ShoppingService:
         if has_reminder_patch:
             self._state.set_shopping_item_metadata(entry_id, reminder_patch)
 
-        cursor = self._state.append_sync_event(
-            "shopping_entry_updated",
-            {
-                "entry_id": entry_id,
-                "request": payload,
-                "data": updated,
-                "status": status,
-            },
-        )
-
         effective = status or effective_status(
             updated if isinstance(updated, dict) else {}, self._state.get_shopping_statuses()
         )
 
         return {
             "source": "tandoor+local-state",
-            "cursor": cursor,
             "effective_status": effective,
             "data": updated,
         }
@@ -223,10 +201,8 @@ class ShoppingService:
         deleted_local = self._state.delete_local_shopping_entry(entry_id)
         if deleted_local is not None:
             self._state.delete_shopping_item_metadata(entry_id)
-            cursor = self._state.append_sync_event("shopping_entry_deleted", {"entry_id": entry_id})
             return {
                 "source": "local-state",
-                "cursor": cursor,
                 "data": {"deleted": entry_id},
             }
 
@@ -237,10 +213,8 @@ class ShoppingService:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         self._state.delete_shopping_item_metadata(entry_id)
-        cursor = self._state.append_sync_event("shopping_entry_deleted", {"entry_id": entry_id})
         return {
             "source": "tandoor+local-state",
-            "cursor": cursor,
             "data": deleted,
         }
 
@@ -257,8 +231,54 @@ class ShoppingService:
         async with self._sync_lock:
             applied: list[dict[str, Any]] = []
             rejected: list[dict[str, Any]] = []
-
+            valid_changes: list[dict[str, Any]] = []
             for idx, change in enumerate(changes):
+                if not isinstance(change, dict):
+                    rejected.append({"index": idx, "reason": "Change must be an object."})
+                    continue
+                operation = change.get("operation")
+                entry_id = change.get("entry_id")
+                if operation in {"update", "delete"} and not isinstance(entry_id, int):
+                    rejected.append({"index": idx, "reason": "entry_id is required for update"})
+                    continue
+                valid_changes.append(change)
+
+            self._state.set_pending_shopping_changes(valid_changes)
+            changes_to_apply = list(self._state.pending_shopping_changes().values())
+            bulk_completed = [
+                (idx, change)
+                for idx, change in enumerate(changes_to_apply)
+                if change.get("operation") == "update"
+                and isinstance(change.get("entry_id"), int)
+                and change["entry_id"] > 0
+                and change.get("payload") == {"status": "completed"}
+            ]
+            bulk_indexes = {idx for idx, _ in bulk_completed}
+
+            if len(bulk_completed) > 1:
+                entry_ids = [change["entry_id"] for _, change in bulk_completed]
+                try:
+                    await self._client.bulk_update_shopping_entries(entry_ids, checked=True)
+                except TandoorError:
+                    return {
+                        "deferred": True,
+                        "applied": [],
+                        "rejected": [],
+                    }
+                for idx, change in bulk_completed:
+                    entry_id = change["entry_id"]
+                    self._state.set_shopping_status(entry_id, "completed")
+                    applied.append(
+                        {
+                            "index": idx,
+                            "operation": "update",
+                            "data": {"id": entry_id, "checked": True},
+                        }
+                    )
+
+            for idx, change in enumerate(changes_to_apply):
+                if idx in bulk_indexes and len(bulk_completed) > 1:
+                    continue
                 if not isinstance(change, dict):
                     rejected.append({"index": idx, "reason": "Change must be an object."})
                     continue
@@ -284,7 +304,6 @@ class ShoppingService:
                         applied.append(
                             {
                                 "index": idx,
-                                "cursor": result.get("cursor"),
                                 "operation": operation,
                                 "data": result.get("data"),
                             }
@@ -305,7 +324,6 @@ class ShoppingService:
                         applied.append(
                             {
                                 "index": idx,
-                                "cursor": result.get("cursor"),
                                 "operation": operation,
                                 "data": result.get("data"),
                             }
@@ -321,18 +339,26 @@ class ShoppingService:
                         applied.append(
                             {
                                 "index": idx,
-                                "cursor": result.get("cursor"),
                                 "operation": operation,
                                 "data": result.get("data"),
                             }
                         )
                     else:
                         rejected.append({"index": idx, "reason": f"Unsupported operation: {operation}"})
-                except (TandoorError, ValueError, HTTPException) as exc:
+                except HTTPException as exc:
+                    if exc.status_code == 502:
+                        return {
+                            "deferred": True,
+                            "applied": [],
+                            "rejected": [],
+                        }
+                    rejected.append({"index": idx, "reason": str(exc)})
+                except (TandoorError, ValueError) as exc:
                     rejected.append({"index": idx, "reason": str(exc)})
 
+            self._state.clear_pending_shopping_changes()
             return {
-                "server_cursor": self._state.current_sync_cursor(),
+                "deferred": False,
                 "applied": applied,
                 "rejected": rejected,
             }

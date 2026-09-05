@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.stage2_state import Stage2State
+from app.services.server_state import ServerState
 
 client = TestClient(app)
 
@@ -78,8 +78,8 @@ def setup_module(module) -> None:
 
 
 def use_temp_state(monkeypatch, tmp_path):
-    state = Stage2State(str(tmp_path))
-    monkeypatch.setattr("app.api.stage2_state", state)
+    state = ServerState(str(tmp_path))
+    monkeypatch.setattr("app.api.server_state", state)
     return state
 
 
@@ -249,7 +249,7 @@ def test_stage2_state_accepts_directory_path(tmp_path) -> None:
     state_dir = tmp_path / "state-dir"
     state_dir.mkdir(parents=True, exist_ok=True)
 
-    state = Stage2State(str(state_dir))
+    state = ServerState(str(state_dir))
 
     assert state.state_file == state_dir / "state.json"
     assert state.state_file.exists()
@@ -1227,11 +1227,6 @@ def test_stage2_shopping_view_and_sync(monkeypatch, tmp_path) -> None:
     done_payload = done_res.json()["data"]
     assert done_payload["checked"] is True
     assert done_payload.get("delay_until") is None
-
-    sync_res = client.get("/api/v1/shopping-list/sync?since=0")
-    assert sync_res.status_code == 200
-    assert sync_res.json()["server_cursor"] >= 1
-
 
 def test_stage2_shopping_view_uses_supermarket_category_name(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)

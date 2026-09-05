@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from fastapi import FastAPI
@@ -10,7 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import router as api_router
+from app.api import router as api_router, server_state
 from app.config import settings
 from app.inspect_ui import render_inspector
 from app.logging_config import configure_logging
@@ -19,10 +20,17 @@ from app.user_app import render_user_app
 configure_logging()
 logger = logging.getLogger("wfd.api")
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    server_state.flush()
+
 app = FastAPI(
     title=settings.app_name,
     description="FastAPI backend for mobile clients using Tandoor recipe and shopping data.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)

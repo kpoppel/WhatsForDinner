@@ -8,9 +8,8 @@ from pydantic import ValidationError
 
 from app.models.state_schema import (
     CURRENT_STATE_SCHEMA_VERSION,
-    Stage2StateDocument,
+    ServerStateDocument,
 )
-from app.services.sync_event_compaction import compact_sync_event_payload
 
 
 class StateSchemaError(ValueError):
@@ -44,47 +43,6 @@ def _migrate_v2_to_v3(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
-def _migrate_v3_to_v4(payload: dict[str, Any]) -> dict[str, Any]:
-    next_payload = deepcopy(payload)
-
-    raw_archive = next_payload.get("archive")
-    archive = raw_archive if isinstance(raw_archive, dict) else {}
-
-    meal_plan_archive = archive.get("meal_plans")
-    if not isinstance(meal_plan_archive, list):
-        meal_plan_archive = []
-
-    sync_archive = archive.get("sync_events")
-    if not isinstance(sync_archive, list):
-        sync_archive = []
-
-    archive["meal_plans"] = meal_plan_archive
-    archive["sync_events"] = sync_archive
-    next_payload["archive"] = archive
-
-    raw_events = next_payload.get("shopping_sync_events")
-    if isinstance(raw_events, list):
-        compacted_events: list[dict[str, Any]] = []
-        for raw_event in raw_events:
-            if not isinstance(raw_event, dict):
-                continue
-            compacted_events.append(
-                {
-                    "cursor": raw_event.get("cursor"),
-                    "operation": str(raw_event.get("operation") or ""),
-                    "payload": compact_sync_event_payload(
-                        str(raw_event.get("operation") or ""),
-                        raw_event.get("payload"),
-                    ),
-                    "created_at": raw_event.get("created_at"),
-                }
-            )
-        next_payload["shopping_sync_events"] = compacted_events
-
-    next_payload["schema_version"] = 4
-    return next_payload
-
-
 def _migrate_v4_to_v5(payload: dict[str, Any]) -> dict[str, Any]:
     next_payload = deepcopy(payload)
     if not isinstance(next_payload.get("derived_state_revision"), int):
@@ -111,6 +69,28 @@ def _migrate_v5_to_v6(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v6_to_v7(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    for key in (
+        "archive",
+        "shopping_sync_events",
+        "next_sync_event_id",
+        "derived_state_revision",
+    ):
+        next_payload.pop(key, None)
+    next_payload["schema_version"] = 7
+    return next_payload
+
+
+def _migrate_v7_to_v8(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    next_payload.pop("pending_projections", None)
+    next_payload["shopping_snapshot"] = []
+    next_payload["pending_shopping_changes"] = {}
+    next_payload["schema_version"] = 8
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(raw)
 
@@ -128,8 +108,8 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
         schema_version = payload.get("schema_version")
 
     if schema_version == 3:
-        payload = _migrate_v3_to_v4(payload)
-        schema_version = payload.get("schema_version")
+        payload["schema_version"] = 4
+        schema_version = 4
 
     if schema_version == 4:
         payload = _migrate_v4_to_v5(payload)
@@ -139,6 +119,14 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
         payload = _migrate_v5_to_v6(payload)
         schema_version = payload.get("schema_version")
 
+    if schema_version == 6:
+        payload = _migrate_v6_to_v7(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 7:
+        payload = _migrate_v7_to_v8(payload)
+        schema_version = payload.get("schema_version")
+
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:
         raise StateSchemaError(
             "Unsupported state schema_version "
@@ -146,7 +134,7 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
         )
 
     try:
-        document = Stage2StateDocument.model_validate(payload)
+        document = ServerStateDocument.model_validate(payload)
     except ValidationError as exc:
         raise StateSchemaError(f"Invalid stage2 state payload: {exc}") from exc
 

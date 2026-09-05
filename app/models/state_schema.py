@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CURRENT_STATE_SCHEMA_VERSION = 6
+CURRENT_STATE_SCHEMA_VERSION = 8
 
 
 class MealPlanRulesModel(BaseModel):
@@ -18,15 +18,6 @@ class UserSettingsModel(BaseModel):
 
     default_diners: int
     default_notification_time: str
-
-
-class ShoppingSyncEventModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    cursor: int
-    operation: str
-    payload: dict[str, Any]
-    created_at: str | None = None
 
 
 class ShoppingInstanceSyncRowModel(BaseModel):
@@ -52,22 +43,6 @@ class MealPlanInstanceSyncModel(BaseModel):
     instances: dict[str, ShoppingInstanceSyncRowModel] = Field(default_factory=dict)
 
 
-class ArchivedMealPlanModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    plan_id: int
-    archived_at: str
-    reason: str
-    data: dict[str, Any]
-
-
-class StateArchiveModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    meal_plans: list[ArchivedMealPlanModel] = Field(default_factory=list)
-    sync_events: list[ShoppingSyncEventModel] = Field(default_factory=list)
-
-
 class RecipeUseModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -77,20 +52,15 @@ class RecipeUseModel(BaseModel):
     entry_id: int
 
 
-class PendingProjectionModel(BaseModel):
+class PendingShoppingChangeModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    operation_id: str
-    domain: str
-    operation: str
+    operation: Literal["create", "update", "delete"]
+    entry_id: int | None = None
     payload: dict[str, Any]
-    status: Literal["pending", "failed"]
-    error: str
-    created_at: str
-    updated_at: str
 
 
-class Stage2StateDocument(BaseModel):
+class ServerStateDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal[CURRENT_STATE_SCHEMA_VERSION]
@@ -105,12 +75,9 @@ class Stage2StateDocument(BaseModel):
     local_shopping_entries: dict[str, dict[str, Any]]
     next_local_shopping_entry_id: int
     meal_plan_instance_sync: dict[str, MealPlanInstanceSyncModel] = Field(default_factory=dict)
-    shopping_sync_events: list[ShoppingSyncEventModel]
-    next_sync_event_id: int
-    archive: StateArchiveModel = Field(default_factory=StateArchiveModel)
-    derived_state_revision: int = 0
     recipe_use_history: list[RecipeUseModel] = Field(default_factory=list)
-    pending_projections: dict[str, PendingProjectionModel] = Field(default_factory=dict)
+    shopping_snapshot: list[dict[str, Any]] = Field(default_factory=list)
+    pending_shopping_changes: dict[str, PendingShoppingChangeModel] = Field(default_factory=dict)
 
 
 def default_state_payload() -> dict[str, Any]:
@@ -130,13 +97,7 @@ def default_state_payload() -> dict[str, Any]:
         "local_shopping_entries": {},
         "next_local_shopping_entry_id": -1,
         "meal_plan_instance_sync": {},
-        "shopping_sync_events": [],
-        "next_sync_event_id": 1,
-        "archive": {
-            "meal_plans": [],
-            "sync_events": [],
-        },
-        "derived_state_revision": 0,
         "recipe_use_history": [],
-        "pending_projections": {},
+        "shopping_snapshot": [],
+        "pending_shopping_changes": {},
     }
