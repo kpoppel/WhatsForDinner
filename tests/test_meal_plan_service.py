@@ -1059,6 +1059,37 @@ def test_patch_entry_move_updates_tracked_tandoor_row_in_place(tmp_path) -> None
     assert client.updated_meal_plan_calls[1][1]["from_date"] == "2026-08-10T18:00:00Z"
     assert set(client.meal_plan_rows) == {original_row_id, 2}
 
+    async def list_meal_plans_should_not_run(limit=50):
+        raise AssertionError("A targeted entry sync must not list all meal-plan rows.")
+
+    client.list_meal_plans = list_meal_plans_should_not_run
+    client.updated_meal_plan_calls.clear()
+    asyncio.run(
+        service.patch_entry(
+            plan_id,
+            1,
+            {"servings": 3},
+            defer_tandoor_sync=True,
+        )
+    )
+    assert state.pending_meal_plan_change(plan_id, 1) is not None
+
+    original_update_meal_plan = client.update_meal_plan
+
+    async def unavailable_update_meal_plan(meal_id, payload):
+        raise TandoorError("Tandoor unavailable")
+
+    client.update_meal_plan = unavailable_update_meal_plan
+    with pytest.raises(TandoorError, match="Tandoor unavailable"):
+        asyncio.run(service.sync_pending_entry(plan_id, 1, ensure_writes_enabled))
+    assert state.pending_meal_plan_change(plan_id, 1) is not None
+
+    client.update_meal_plan = original_update_meal_plan
+    asyncio.run(service.sync_pending_entry(plan_id, 1, ensure_writes_enabled))
+
+    assert [meal_id for meal_id, _ in client.updated_meal_plan_calls] == [original_row_id]
+    assert state.pending_meal_plan_change(plan_id, 1) is None
+
 
 def test_patch_entry_removes_obsolete_tandoor_sync_record(tmp_path) -> None:
     state = ServerState(str(tmp_path))

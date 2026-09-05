@@ -330,6 +330,36 @@ class ServerState:
                 owner["tandoor_sync"] = deepcopy(value)
             self._save(data)
 
+    def queue_meal_plan_entry_sync(
+        self,
+        plan_id: int,
+        entry_id: int,
+        previous_sync: dict[str, dict[str, Any]],
+    ) -> None:
+        """Persist an entry sync request until Tandoor acknowledges it."""
+        with self._lock:
+            data = self._load()
+            key = f"{plan_id}:{entry_id}"
+            if key not in data["pending_meal_plan_changes"]:
+                data["pending_meal_plan_changes"][key] = {
+                    "plan_id": plan_id,
+                    "entry_id": entry_id,
+                    "previous_sync": previous_sync,
+                }
+                self._save(data)
+
+    def pending_meal_plan_change(self, plan_id: int, entry_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            data = self._load()
+            change = data["pending_meal_plan_changes"].get(f"{plan_id}:{entry_id}")
+            return deepcopy(change) if isinstance(change, dict) else None
+
+    def clear_pending_meal_plan_change(self, plan_id: int, entry_id: int) -> None:
+        with self._lock:
+            data = self._load()
+            data["pending_meal_plan_changes"].pop(f"{plan_id}:{entry_id}", None)
+            self._save(data)
+
     def allocate_entry_id(self) -> int:
         with self._lock:
             data = self._load()

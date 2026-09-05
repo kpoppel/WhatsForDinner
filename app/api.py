@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, Query, UploadFile
 
 from app.config import settings
 from app.models.contracts import (
@@ -27,6 +29,7 @@ from app.services.server_state import ServerState
 from app.services.tandoor_client import TandoorClient, TandoorError
 
 router = APIRouter(tags=["mobile-api"])
+logger = logging.getLogger(__name__)
 client = TandoorClient()
 server_state = ServerState(
     settings.stage2_data_dir,
@@ -39,6 +42,17 @@ def _shopping_service() -> ShoppingService:
 
 def _meal_plan_service() -> MealPlanService:
     return MealPlanService(server_state, client)
+
+
+async def _sync_pending_meal_plan_entry(plan_id: int, entry_id: int) -> None:
+    try:
+        await _meal_plan_service().sync_pending_entry(
+            plan_id,
+            entry_id,
+            _ensure_tandoor_writes_enabled,
+        )
+    except (HTTPException, TandoorError) as exc:
+        logger.warning("meal_plan_entry_sync_deferred plan_id=%s entry_id=%s error=%s", plan_id, entry_id, exc)
 
 
 def _ocr_client() -> GeminiOcrClient:
@@ -797,14 +811,17 @@ async def add_meal_plan_entry(plan_id: int, payload: MealPlanEntryCreateRequest 
 async def patch_meal_plan_entry(
     plan_id: int,
     entry_id: int,
+    background_tasks: BackgroundTasks,
     payload: MealPlanEntryPatchRequest = Body(...),
 ) -> dict:
-    return await _meal_plan_service().patch_entry(
+    result = await _meal_plan_service().patch_entry(
         plan_id,
         entry_id,
         payload.model_dump(mode="python", exclude_unset=True),
-        ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
+        defer_tandoor_sync=True,
     )
+    background_tasks.add_task(_sync_pending_meal_plan_entry, plan_id, entry_id)
+    return result
 
 
 @router.delete("/meal-plans/{plan_id}/entries/{entry_id}")

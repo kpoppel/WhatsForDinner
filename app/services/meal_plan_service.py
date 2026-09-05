@@ -570,6 +570,64 @@ class MealPlanService:
         serializable_sync = self._serialize_instance_sync(next_sync)
         self._state.set_meal_plan_tandoor_sync(plan_id, serializable_sync)
 
+    async def sync_pending_entry(self, plan_id: int, entry_id: int, ensure_tandoor_writes_enabled) -> None:
+        """Apply one durable entry change without reconciling unrelated plan rows."""
+        pending_change = self._state.pending_meal_plan_change(plan_id, entry_id)
+        if pending_change is None:
+            return
+
+        lock = self._get_plan_mutation_lock(plan_id)
+        async with lock:
+            plan = self._state.get_meal_plan(plan_id)
+            if plan is None:
+                self._state.clear_pending_meal_plan_change(plan_id, entry_id)
+                return
+
+            previous_sync = pending_change["previous_sync"]
+            entry_prefix = f"entry:{entry_id}:"
+            tracked_sync = {
+                key: value
+                for key, value in previous_sync.items()
+                if key.startswith(entry_prefix) and isinstance(value, dict)
+            }
+            entries = plan.get("entries")
+            entry = self._find_entry(plan, entry_id)
+            desired_sync: dict[str, dict[str, Any]] = {}
+            if isinstance(entries, list) and entry is not None:
+                desired_sync = {
+                    key: value
+                    for key, value in self._desired_meal_plan_row_sync(plan, [entry]).items()
+                    if key.startswith(entry_prefix)
+                }
+
+            ensure_tandoor_writes_enabled("meal_plan_entry_sync")
+            for instance_key, tracked_row in tracked_sync.items():
+                if instance_key not in desired_sync:
+                    await self._delete_meal_plan_row_if_present(tracked_row.get("meal_plan_row_id"))
+
+            next_entry_sync: dict[str, dict[str, Any]] = {}
+            for instance_key, desired_row in desired_sync.items():
+                tracked_row = tracked_sync.get(instance_key)
+                if isinstance(tracked_row, dict) and isinstance(tracked_row.get("meal_plan_row_id"), int):
+                    row_id = tracked_row["meal_plan_row_id"]
+                    await self._update_meal_plan_row_for_instance(row_id, desired_row)
+                    desired_row["meal_plan_row_id"] = row_id
+                    desired_row["shopping_recipe_id"] = None
+                else:
+                    desired_row["meal_plan_row_id"] = await self._create_meal_plan_row_for_instance(desired_row)
+                    desired_row["shopping_recipe_id"] = None
+                next_entry_sync[instance_key] = desired_row
+
+            current_sync = self._state.get_meal_plan_tandoor_sync(plan_id)
+            retained_sync = {
+                key: value
+                for key, value in current_sync.items()
+                if not key.startswith(entry_prefix)
+            }
+            retained_sync.update(next_entry_sync)
+            self._state.set_meal_plan_tandoor_sync(plan_id, self._serialize_instance_sync(retained_sync))
+            self._state.clear_pending_meal_plan_change(plan_id, entry_id)
+
     async def _delete_all_tandoor_meal_plan_rows(
         self,
         *,
@@ -834,6 +892,7 @@ class MealPlanService:
         entry_id: int,
         payload: dict[str, Any],
         ensure_tandoor_writes_enabled=None,
+        defer_tandoor_sync: bool = False,
     ) -> dict:
         lock = self._get_plan_mutation_lock(plan_id)
         async with lock:
@@ -911,7 +970,9 @@ class MealPlanService:
 
             updated = self._state.update_meal_plan(plan_id, {"entries": entries})
 
-            if ensure_tandoor_writes_enabled is not None and isinstance(updated, dict):
+            if defer_tandoor_sync and target_day_index is None and isinstance(updated, dict):
+                self._state.queue_meal_plan_entry_sync(plan_id, entry_id, previous_sync)
+            elif ensure_tandoor_writes_enabled is not None and isinstance(updated, dict):
                 try:
                     await self._sync_tandoor_meal_plan_rows(
                         plan_id=plan_id,

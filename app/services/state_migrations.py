@@ -347,6 +347,14 @@ def _migrate_v15_to_v16(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v16_to_v17(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    if not isinstance(next_payload.get("pending_meal_plan_changes"), dict):
+        next_payload["pending_meal_plan_changes"] = {}
+    next_payload["schema_version"] = 17
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(raw)
 
@@ -413,6 +421,10 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     if schema_version == 15:
         payload = _migrate_v15_to_v16(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 16:
+        payload = _migrate_v16_to_v17(payload)
         schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:
