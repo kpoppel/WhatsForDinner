@@ -133,6 +133,8 @@ import { assertRequiredFields } from "./js/contracts.js";
   let generateShoppingLongPressTimer = 0;
   let generateShoppingLongPressTriggered = false;
   let generateShoppingSuppressClick = false;
+  let mealPlanActionQueue = Promise.resolve();
+  let mealPlanReorderRevision = 0;
 
   const GENERATE_SHOPPING_LONG_PRESS_MS = 700;
 
@@ -637,7 +639,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     return null;
   }
 
-  async function reorderEntry(dragEntryId, dropEntryId, dropPlacement = "before") {
+  function queueReorderEntry(dragEntryId, dropEntryId, dropPlacement = "before") {
     assertMealPlanWriteAllowed("reorder meal days");
     if (!Number.isInteger(selectedPlanId)) {
       return;
@@ -684,13 +686,28 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
     targetDayIndex = Math.max(0, Math.min(targetDayIndex, ordered.length - 1));
 
-    await api(`/meal-plans/${selectedPlanId}/entries/${dragEntryId}`, {
+    const [movedEntry] = ordered.splice(fromIndex, 1);
+    ordered.splice(targetDayIndex, 0, movedEntry);
+    selectedPlan.entries = ordered.map((entry, index) => ({ ...entry, day_index: index }));
+    renderPlanDetail(selectedPlan);
+    setStatus("Syncing meal day order...");
+
+    const planId = selectedPlanId;
+    mealPlanReorderRevision += 1;
+    const reorderRevision = mealPlanReorderRevision;
+    void runAction(() => syncReorderEntry(planId, dragEntryId, targetDayIndex, reorderRevision));
+  }
+
+  async function syncReorderEntry(planId, dragEntryId, targetDayIndex, reorderRevision) {
+    await api(`/meal-plans/${planId}/entries/${dragEntryId}`, {
       method: "PATCH",
       body: JSON.stringify({ target_day_index: targetDayIndex }),
     });
 
-    await reloadSelectedPlan();
-    setStatus("Meal day order updated.");
+    if (reorderRevision === mealPlanReorderRevision) {
+      await reloadSelectedPlan();
+      setStatus("Meal day order updated.");
+    }
     publishDataChanged();
   }
 
@@ -968,7 +985,7 @@ import { assertRequiredFields } from "./js/contracts.js";
           node.classList.remove("is-dragging");
         });
         if (Number.isInteger(sourceId)) {
-          void runAction(() => reorderEntry(sourceId, entryId, placement));
+          queueReorderEntry(sourceId, entryId, placement);
         }
       });
 
@@ -1053,7 +1070,7 @@ import { assertRequiredFields } from "./js/contracts.js";
         dayCard.classList.remove("is-dragging");
 
         if (Number.isInteger(targetId)) {
-          void runAction(() => reorderEntry(sourceId, targetId, placement));
+          queueReorderEntry(sourceId, targetId, placement);
         }
       });
 
@@ -1194,13 +1211,20 @@ import { assertRequiredFields } from "./js/contracts.js";
     selectedPlanId = planId;
     writeActiveMealPlanId(planId);
 
-    let planData = null;
+    const cachedPlan = cachedPlanDetail(planId);
+    let planData = cachedPlan;
+    if (cachedPlan) {
+      selectedPlan = cachedPlan;
+      cachePlanPreview(cachedPlan);
+      renderPlanDetail(cachedPlan);
+      setAppTab("meal-plan-detail");
+    }
+
     try {
       const payload = await api(`/meal-plans/${planId}`);
       assertRequiredFields(payload, ["data"], "Meal plan detail response");
       planData = payload.data;
     } catch {
-      planData = cachedPlanDetail(planId);
       if (!planData) {
         throw new Error("Unable to open this plan while offline.");
       }
@@ -2111,16 +2135,22 @@ import { assertRequiredFields } from "./js/contracts.js";
   });
 
   async function runAction(action) {
+    const queuedAction = mealPlanActionQueue.then(action);
+    mealPlanActionQueue = queuedAction.catch(() => {});
+
     try {
-      await action();
+      await queuedAction;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(message);
+      window.alert("Meal plan sync failed. Retry the change or reload the meal plan to revert it.");
     }
   }
 
   setAppTab("meal-plans");
   updateMealPlanActionAvailability();
   //setStatus("Choose a meal plan to edit.");
+  const cachedPlans = sortPlansMostRecentFirst(readMealPlanCache().list);
+  renderPlanList(cachedPlans);
   void runAction(refreshPlans);
 })();

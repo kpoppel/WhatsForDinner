@@ -628,6 +628,12 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
   }
 
+  function renderCachedHome() {
+    const planResult = fetchActivePlanFromCache();
+    renderToday(resolveTodayEntry(planResult.entries), []);
+    renderUpcoming(planResult.entries);
+  }
+
   openPlansButton.addEventListener("click", async () => {
     let targetUrl = todayRecipeUrl;
     if (!targetUrl && todayRecipeLookupTitle.length > 0) {
@@ -680,5 +686,6 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
   });
 
+  renderCachedHome();
   void refreshHome();
 })();

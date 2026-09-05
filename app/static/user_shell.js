@@ -67,6 +67,7 @@
   }
 
   async function probeApiReachability() {
+    const wasOnline = isOnline();
     if (navigator.onLine === false) {
       apiReachable = false;
       applyOnlineAwareControls();
@@ -81,6 +82,9 @@
     }
 
     applyOnlineAwareControls();
+    if (!wasOnline && isOnline()) {
+      window.dispatchEvent(new CustomEvent("wfd:connection-restored"));
+    }
   }
 
   function reportApiReachable(value) {
@@ -159,8 +163,6 @@
   window.WFD_setActiveTab = setActiveTab;
 
   window.addEventListener("online", () => {
-    apiReachable = true;
-    applyOnlineAwareControls();
     void probeApiReachability();
   });
 

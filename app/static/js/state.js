@@ -259,6 +259,8 @@ export function loadCache() {
   persistCache();
 }
 
+loadCache();
+
 export function queueStatusChange(entryId, status) {
   const id = shoppingItemId(entryId);
   if (id === null || !SHOPPING_STATUSES.has(status)) {

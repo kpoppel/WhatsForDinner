@@ -3,6 +3,7 @@ import { state, persistCache, applyPendingChanges, queueStatusChange, queueDelet
 import { render, updateStatusBadges } from "./render.js";
 
 const DEBUG_MODE = false;
+let pendingSync = Promise.resolve();
 
 export function show(data) {
   if (!DEBUG_MODE) {
@@ -16,6 +17,10 @@ export function show(data) {
 
 function publishDataChanged() {
   window.dispatchEvent(new CustomEvent("wfd:data-changed", { detail: { source: "shopping-mode" } }));
+}
+
+function notifySyncFailure() {
+  window.alert("Shopping list sync failed. Retry the change or reload the list to revert it.");
 }
 
 function normalizeEntryIds(entryIds) {
@@ -71,7 +76,16 @@ export async function refresh() {
   return payload;
 }
 
-export async function syncPending(showPayload = true) {
+export function syncPending(showPayload = true) {
+  const nextSync = pendingSync.then(() => syncPendingNow(showPayload));
+  pendingSync = nextSync.catch(() => {});
+  return nextSync.catch((error) => {
+    notifySyncFailure();
+    throw error;
+  });
+}
+
+async function syncPendingNow(showPayload) {
   compactPendingChanges();
   persistCache();
   updateStatusBadges();
@@ -95,7 +109,12 @@ export async function syncPending(showPayload = true) {
       .map((row) => row.index)
       .filter((value) => Number.isInteger(value) && value >= 0),
   );
-  state.pendingChanges = outgoing.filter((_, idx) => rejectedIndexes.has(idx));
+  const rejectedChanges = outgoing.filter((_, idx) => rejectedIndexes.has(idx));
+  state.pendingChanges = state.pendingChanges.filter((change) => !outgoing.includes(change));
+  state.pendingChanges.push(...rejectedChanges);
+  if (rejectedChanges.length > 0) {
+    notifySyncFailure();
+  }
   if (Number.isInteger(payload.server_cursor)) {
     state.serverCursor = payload.server_cursor;
   }
