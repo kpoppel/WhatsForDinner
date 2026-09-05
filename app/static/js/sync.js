@@ -66,11 +66,17 @@ export async function refreshAndSyncIfNeeded() {
 }
 
 export async function refresh() {
-  const payload = await api("/shopping-list/view");
-  hydrateShoppingFromServer(payload);
-  render();
-  show(payload);
-  return payload;
+  try {
+    const payload = await api("/shopping-list/view");
+    setApiReachable(true);
+    hydrateShoppingFromServer(payload);
+    render();
+    show(payload);
+    return payload;
+  } catch (error) {
+    setApiReachable(false);
+    throw error;
+  }
 }
 
 export function syncPending(showPayload = true) {
@@ -106,6 +112,7 @@ async function syncPendingNow(showPayload) {
     method: "POST",
     body: JSON.stringify({ changes: outgoing }),
   });
+  setApiReachable(true);
   const rejectedChanges = reconcileShoppingSync(payload, outgoing);
   if (rejectedChanges.length > 0) {
     notifySyncFailure();

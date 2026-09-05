@@ -1,4 +1,5 @@
-import { probeApiReachability } from "./js/commands/connectivity.js";
+import { probeApiReachability, setApiReachable } from "./js/commands/connectivity.js";
+import { apiReachable, browserOnline, isOnline } from "./js/selectors/connectivity.js";
 
 (() => {
   const TAB_META = {
@@ -25,11 +26,6 @@ import { probeApiReachability } from "./js/commands/connectivity.js";
   }
 
   let activeTab = "home";
-  let apiReachable = true;
-
-  function isOnline() {
-    return navigator.onLine !== false && apiReachable;
-  }
 
   function applyOnlineAwareControls() {
     const online = isOnline();
@@ -62,35 +58,27 @@ import { probeApiReachability } from "./js/commands/connectivity.js";
     window.dispatchEvent(new CustomEvent("wfd:online-state", {
       detail: {
         online,
-        browserOnline: navigator.onLine !== false,
-        apiReachable,
+        browserOnline: browserOnline(),
+        apiReachable: apiReachable(),
       },
     }));
   }
 
-  async function probeApiReachability() {
+  async function refreshApiReachability() {
     const wasOnline = isOnline();
-    if (navigator.onLine === false) {
-      apiReachable = false;
+    if (!browserOnline()) {
+      setApiReachable(false);
       applyOnlineAwareControls();
       return;
     }
 
-    apiReachable = await probeApiReachability();
+    await probeApiReachability();
 
     applyOnlineAwareControls();
     if (!wasOnline && isOnline()) {
       window.dispatchEvent(new CustomEvent("wfd:connection-restored"));
     }
   }
-
-  function reportApiReachable(value) {
-    apiReachable = Boolean(value);
-    applyOnlineAwareControls();
-  }
-
-  window.WFD_reportApiReachable = reportApiReachable;
-  window.WFD_isOnline = isOnline;
 
   function setActiveTab(nextTab) {
     if (!TAB_META[nextTab]) {
@@ -160,20 +148,20 @@ import { probeApiReachability } from "./js/commands/connectivity.js";
   window.WFD_setActiveTab = setActiveTab;
 
   window.addEventListener("online", () => {
-    void probeApiReachability();
+    void refreshApiReachability();
   });
 
   window.addEventListener("offline", () => {
-    apiReachable = false;
+    setApiReachable(false);
     applyOnlineAwareControls();
   });
 
   setActiveTab(activeTab);
   applyOnlineAwareControls();
-  void probeApiReachability();
+  void refreshApiReachability();
   setInterval(() => {
     if (!isOnline()) {
-      void probeApiReachability();
+      void refreshApiReachability();
     }
   }, 6000);
 })();

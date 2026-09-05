@@ -7,3 +7,7 @@ export function browserOnline() {
 export function isOnline() {
   return browserOnline() && state.apiReachable;
 }
+
+export function apiReachable() {
+  return state.apiReachable;
+}

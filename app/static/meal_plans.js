@@ -16,6 +16,8 @@ import {
   updateMealPlanEntry,
   updateMealPlanStartDate,
 } from "./js/commands/meal-plans.js";
+import { setApiReachable } from "./js/commands/connectivity.js";
+import { isOnline } from "./js/selectors/connectivity.js";
 import { readMealPlanCache } from "./js/store/selectors.js";
 import { assertRequiredFields } from "./js/contracts.js";
 
@@ -124,7 +126,6 @@ import { assertRequiredFields } from "./js/contracts.js";
   const generateSheetClass = "wf-plan-sheet-open";
   let activePlanId = null;
   let selectedPlanId = null;
-  let selectedPlan = null;
   const planPreviewTitlesById = new Map();
   let generateModalClosing = false;
 
@@ -140,7 +141,6 @@ import { assertRequiredFields } from "./js/contracts.js";
   let touchDraggedEntryId = null;
   let touchDropEntryId = null;
   let touchDropPlacement = "before";
-  let mealPlanApiReachable = true;
   let generateShoppingInFlight = false;
   let generateShoppingLongPressTimer = 0;
   let generateShoppingLongPressTriggered = false;
@@ -159,18 +159,19 @@ import { assertRequiredFields } from "./js/contracts.js";
     return null;
   }
 
-  function isMealPlanOfflineReadOnly() {
-    if (typeof window.WFD_isOnline === "function") {
-      return !window.WFD_isOnline();
+  function selectedPlanDetail() {
+    if (!Number.isInteger(selectedPlanId)) {
+      return null;
     }
-    return navigator.onLine === false || mealPlanApiReachable === false;
+    return cachedPlanDetail(selectedPlanId);
+  }
+
+  function isMealPlanOfflineReadOnly() {
+    return !isOnline();
   }
 
   function reportApiReachable(value) {
-    mealPlanApiReachable = Boolean(value);
-    if (typeof window.WFD_reportApiReachable === "function") {
-      window.WFD_reportApiReachable(mealPlanApiReachable);
-    }
+    setApiReachable(value);
   }
 
   function assertMealPlanWriteAllowed(action) {
@@ -627,10 +628,11 @@ import { assertRequiredFields } from "./js/contracts.js";
   }
 
   function findEntryById(entryId) {
-    if (!selectedPlan || typeof selectedPlan !== "object") {
+    const plan = selectedPlanDetail();
+    if (!plan) {
       return null;
     }
-    const entries = selectedPlan.entries;
+    const entries = plan.entries;
     if (!Array.isArray(entries)) {
       return null;
     }
@@ -652,10 +654,11 @@ import { assertRequiredFields } from "./js/contracts.js";
     if (!Number.isInteger(selectedPlanId)) {
       return;
     }
-    if (!selectedPlan || typeof selectedPlan !== "object") {
+    const plan = selectedPlanDetail();
+    if (!plan) {
       return;
     }
-    if (!Array.isArray(selectedPlan.entries)) {
+    if (!Array.isArray(plan.entries)) {
       return;
     }
     if (!Number.isInteger(dragEntryId) || !Number.isInteger(dropEntryId)) {
@@ -665,7 +668,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       return;
     }
 
-    const ordered = [...selectedPlan.entries].sort((a, b) => Number(a.day_index) - Number(b.day_index));
+    const ordered = [...plan.entries].sort((a, b) => Number(a.day_index) - Number(b.day_index));
 
     let fromIndex = -1;
     let toIndex = -1;
@@ -696,8 +699,11 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     const [movedEntry] = ordered.splice(fromIndex, 1);
     ordered.splice(targetDayIndex, 0, movedEntry);
-    selectedPlan.entries = ordered.map((entry, index) => ({ ...entry, day_index: index }));
-    renderPlanDetail(selectedPlan);
+    cachePlanDetail({
+      ...plan,
+      entries: ordered.map((entry, index) => ({ ...entry, day_index: index })),
+    });
+    renderPlanDetail(selectedPlanDetail());
     setStatus("Syncing meal day order...");
 
     const planId = selectedPlanId;
@@ -819,7 +825,6 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     if (selectedPlanId === planId) {
       selectedPlanId = null;
-      selectedPlan = null;
       writeActiveMealPlanId(null);
       renderPlanDetail(null);
       setAppTab("meal-plans");
@@ -840,7 +845,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       throw new Error("No meal plan selected.");
     }
 
-    const plan = selectedPlan;
+    const plan = selectedPlanDetail();
     if (!plan || typeof plan !== "object") {
       throw new Error("Open a meal plan first.");
     }
@@ -1121,7 +1126,6 @@ import { assertRequiredFields } from "./js/contracts.js";
     if (plans.length === 0) {
       activePlanId = null;
       selectedPlanId = null;
-      selectedPlan = null;
       writeActiveMealPlanId(null);
       renderPlanList(plans);
       renderPlanDetail(null);
@@ -1157,7 +1161,6 @@ import { assertRequiredFields } from "./js/contracts.js";
       const selectedStillExists = plans.some((row) => Number(row.plan_id) === selectedPlanId);
       if (!selectedStillExists) {
         selectedPlanId = null;
-        selectedPlan = null;
       }
     }
 
@@ -1193,10 +1196,9 @@ import { assertRequiredFields } from "./js/contracts.js";
       setStatus("Offline: showing cached meal plan.");
     }
 
-    selectedPlan = planData;
-    cachePlanPreview(selectedPlan);
-    cachePlanDetail(selectedPlan);
-    renderPlanDetail(selectedPlan);
+    cachePlanPreview(planData);
+    cachePlanDetail(planData);
+    renderPlanDetail(selectedPlanDetail());
 
     let plans = [];
     try {
@@ -1217,7 +1219,6 @@ import { assertRequiredFields } from "./js/contracts.js";
     const cachedPlan = cachedPlanDetail(planId);
     let planData = cachedPlan;
     if (cachedPlan) {
-      selectedPlan = cachedPlan;
       cachePlanPreview(cachedPlan);
       renderPlanDetail(cachedPlan);
       setAppTab("meal-plan-detail");
@@ -1234,10 +1235,9 @@ import { assertRequiredFields } from "./js/contracts.js";
       setStatus("Offline: opened cached meal plan.");
     }
 
-    selectedPlan = planData;
-    cachePlanPreview(selectedPlan);
-    cachePlanDetail(selectedPlan);
-    renderPlanDetail(selectedPlan);
+    cachePlanPreview(planData);
+    cachePlanDetail(planData);
+    renderPlanDetail(selectedPlanDetail());
     setAppTab("meal-plan-detail");
 
     let plans = [];
@@ -1251,7 +1251,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
     renderPlanList(plans);
 
-    setStatus(`Loaded meal plan ${planDateRangeLabel(selectedPlan)}.`);
+    setStatus(`Loaded meal plan ${planDateRangeLabel(selectedPlanDetail())}.`);
   }
 
   async function generateShoppingList(mode = "sync") {
@@ -1394,12 +1394,13 @@ import { assertRequiredFields } from "./js/contracts.js";
       setStatus("Offline: updating plan date is unavailable.");
       return;
     }
-    if (!selectedPlan || typeof selectedPlan !== "object") {
+    const plan = selectedPlanDetail();
+    if (!plan) {
       setStatus("Open a meal plan first.");
       return;
     }
 
-    const current = String(selectedPlan.start_date || "").trim();
+    const current = String(plan.start_date || "").trim();
     startDateEditInput.value = current;
     startDateSaveButton.disabled = false;
     startDateCancelButton.disabled = false;
@@ -2103,8 +2104,8 @@ import { assertRequiredFields } from "./js/contracts.js";
 
   window.addEventListener("wfd:online-state", () => {
     updateMealPlanActionAvailability();
-    if (selectedPlan) {
-      renderPlanDetail(selectedPlan);
+    if (selectedPlanDetail()) {
+      renderPlanDetail(selectedPlanDetail());
     }
   });
 

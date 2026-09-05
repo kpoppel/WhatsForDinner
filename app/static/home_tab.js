@@ -9,6 +9,7 @@ import {
   loadStoredMealPlans,
   searchHomeRecipes,
 } from "./js/commands/home.js";
+import { isOnline } from "./js/selectors/connectivity.js";
 import {
   readActiveMealPlanId,
   readHomeActivePlanCache,
@@ -410,11 +411,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
 
     setEditDayButton(true, "Edit");
-    if (typeof window.WFD_isOnline === "function") {
-      editDayButton.disabled = !window.WFD_isOnline();
-    } else {
-      editDayButton.disabled = navigator.onLine === false;
-    }
+    editDayButton.disabled = !isOnline();
   }
 
   function renderUpcoming(entries) {

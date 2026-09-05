@@ -1,10 +1,22 @@
 import { api } from "../api.js";
+import { setApiReachable } from "./connectivity.js";
+
+async function executeSettingsRequest(request) {
+  try {
+    const payload = await request();
+    setApiReachable(true);
+    return payload;
+  } catch (error) {
+    setApiReachable(false);
+    throw error;
+  }
+}
 
 export async function loadSettingsData() {
-  const userSettings = await api("/config/user-settings");
-  const mealPlanRules = await api("/config/meal-plan-rules");
-  const keywords = await api("/config/keywords");
-  const selectedKeywords = await api("/config/keywords/selected");
+  const userSettings = await executeSettingsRequest(() => api("/config/user-settings"));
+  const mealPlanRules = await executeSettingsRequest(() => api("/config/meal-plan-rules"));
+  const keywords = await executeSettingsRequest(() => api("/config/keywords"));
+  const selectedKeywords = await executeSettingsRequest(() => api("/config/keywords/selected"));
   return { userSettings, mealPlanRules, keywords, selectedKeywords };
 }
 
@@ -14,19 +26,19 @@ export async function saveSettingsData({
   noRepeatDays,
   keywordIds,
 }) {
-  await api("/config/user-settings", {
+  await executeSettingsRequest(() => api("/config/user-settings", {
     method: "PUT",
     body: JSON.stringify({
       default_diners: defaultDiners,
       default_notification_time: defaultReminderTime,
     }),
-  });
-  await api("/config/meal-plan-rules", {
+  }));
+  await executeSettingsRequest(() => api("/config/meal-plan-rules", {
     method: "PUT",
     body: JSON.stringify({ no_repeat_days: noRepeatDays }),
-  });
-  await api("/config/keywords/selected", {
+  }));
+  await executeSettingsRequest(() => api("/config/keywords/selected", {
     method: "PUT",
     body: JSON.stringify({ keyword_ids: keywordIds }),
-  });
+  }));
 }
