@@ -441,7 +441,6 @@ async function deleteEditorEntries(entryIds) {
 
   if (isOnline()) {
     await syncPending(false);
-    await refresh();
   }
 
   renderEditor();
@@ -803,7 +802,6 @@ async function saveAddModal() {
 
   if (isOnline()) {
     await syncPending(false);
-    await refresh();
     renderEditor();
     setStatus("Item added.");
     publishDataChanged();
@@ -1015,7 +1013,6 @@ async function deleteFromEditModal() {
 
   if (isOnline()) {
     await syncPending(false);
-    await refresh();
   }
 
   closeEditModal();
@@ -1042,7 +1039,6 @@ async function clearAllItems() {
 
   if (isOnline()) {
     await syncPending(false);
-    await refresh();
   }
 
   renderEditor();
@@ -1060,7 +1056,6 @@ async function queueAndSyncUpdate(entryId, patch) {
   }
 
   await syncPending(false);
-  await refresh();
 }
 
 function nextTempId() {

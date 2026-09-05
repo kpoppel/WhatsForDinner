@@ -149,3 +149,90 @@ if (uniqueIds.size !== 3) {{
         "Node queue-create regression test failed\n"
         f"STDOUT:\n{run.stdout}\nSTDERR:\n{run.stderr}"
     )
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required for frontend store smoke tests")
+def test_shopping_sync_hydrates_only_after_rejected_changes() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    sync_path = (repo_root / "app/static/js/sync.js").as_uri()
+
+    script = f"""
+class LocalStorageMock {{
+  constructor() {{ this.map = new Map(); }}
+  getItem(key) {{ return this.map.has(key) ? this.map.get(key) : null; }}
+  setItem(key, value) {{ this.map.set(key, String(value)); }}
+}}
+
+function element() {{
+  return {{
+    classList: {{ toggle() {{}} }},
+    style: {{}},
+    setAttribute() {{}},
+    appendChild() {{}},
+    innerHTML: '',
+    textContent: '',
+  }};
+}}
+
+globalThis.localStorage = new LocalStorageMock();
+Object.defineProperty(globalThis, 'navigator', {{ value: {{ onLine: true }}, configurable: true }});
+globalThis.window = {{
+  WFD_API_PREFIX: '/api/v1',
+  dispatchEvent() {{}},
+  alert() {{}},
+}};
+globalThis.CustomEvent = class {{ constructor(name, options) {{ this.name = name; this.options = options; }} }};
+globalThis.document = {{ getElementById() {{ return element(); }} }};
+
+const calls = [];
+globalThis.fetch = async (url) => {{
+  calls.push(url);
+  if (url.endsWith('/shopping-list/sync')) {{
+    return {{ ok: true, json: async () => ({{ applied: [{{}}], rejected: [], server_cursor: 1 }}) }};
+  }}
+  return {{ ok: true, json: async () => ({{
+    data: {{ sections: {{ remaining: [], skipped: [], completed: [] }} }},
+    cursor: 2,
+  }}) }};
+}};
+
+const sync = await import({sync_path!r});
+const stateModule = await import({(repo_root / 'app/static/js/state.js').as_uri()!r});
+stateModule.state.itemsById = {{}};
+stateModule.state.pendingChanges = [{{ operation: 'delete', entry_id: 1, queued_at: '2026-09-05T00:00:00Z' }}];
+
+await sync.syncPending(false);
+if (calls.length !== 1 || !calls[0].endsWith('/shopping-list/sync')) {{
+  throw new Error(`Successful sync should only POST once, got ${{calls.join(', ')}}`);
+}}
+
+stateModule.state.pendingChanges = [{{ operation: 'delete', entry_id: 2, queued_at: '2026-09-05T00:00:00Z' }}];
+globalThis.fetch = async (url) => {{
+  calls.push(url);
+  if (url.endsWith('/shopping-list/sync')) {{
+    return {{ ok: true, json: async () => ({{ applied: [], rejected: [{{ index: 0 }}], server_cursor: 2 }}) }};
+  }}
+  return {{ ok: true, json: async () => ({{
+    data: {{ sections: {{ remaining: [], skipped: [], completed: [] }} }},
+    cursor: 3,
+  }}) }};
+}};
+
+await sync.syncPending(false);
+if (calls.length !== 3 || !calls[2].endsWith('/shopping-list/view')) {{
+  throw new Error(`Rejected sync should hydrate once, got ${{calls.join(', ')}}`);
+}}
+"""
+
+    run = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert run.returncode == 0, (
+        "Node shopping-sync regression test failed\n"
+        f"STDOUT:\n{run.stdout}\nSTDERR:\n{run.stderr}"
+    )

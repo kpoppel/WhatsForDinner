@@ -79,7 +79,12 @@ export async function refresh() {
 export function syncPending(showPayload = true) {
   const nextSync = pendingSync.then(() => syncPendingNow(showPayload));
   pendingSync = nextSync.catch(() => {});
-  return nextSync.catch((error) => {
+  return nextSync.catch(async (error) => {
+    try {
+      await refresh();
+    } catch {
+      render();
+    }
     notifySyncFailure();
     throw error;
   });
@@ -119,9 +124,13 @@ async function syncPendingNow(showPayload) {
     state.serverCursor = payload.server_cursor;
   }
   persistCache();
-  try {
-    await refresh();
-  } catch {
+  if (rejectedChanges.length > 0) {
+    try {
+      await refresh();
+    } catch {
+      render();
+    }
+  } else {
     render();
   }
   if (showPayload) {
