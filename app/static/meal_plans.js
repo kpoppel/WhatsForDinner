@@ -3,7 +3,19 @@ import {
   cachePlanListRows,
   writeActiveMealPlanId,
 } from "./js/store/commands.js";
-import { requestMealPlan as storeApi } from "./js/commands/meal-plans.js";
+import {
+  createMealPlanEntry,
+  deleteMealPlanEntry,
+  deleteStoredMealPlan,
+  generateMealPlan,
+  generateMealPlanShoppingList,
+  loadMealPlan,
+  loadMealPlanDefaultDiners,
+  loadStoredMealPlans,
+  searchMealPlanRecipes,
+  updateMealPlanEntry,
+  updateMealPlanStartDate,
+} from "./js/commands/meal-plans.js";
 import { readMealPlanCache } from "./js/store/selectors.js";
 import { assertRequiredFields } from "./js/contracts.js";
 
@@ -217,17 +229,6 @@ import { assertRequiredFields } from "./js/contracts.js";
     const month = String(nowDate.getMonth() + 1).padStart(2, "0");
     const day = String(nowDate.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
-  }
-
-  async function api(path, options) {
-    try {
-      const payload = await storeApi(path, options);
-      reportApiReachable(true);
-      return payload;
-    } catch (error) {
-      reportApiReachable(false);
-      throw error;
-    }
   }
 
   function parseIsoDate(text) {
@@ -706,10 +707,12 @@ import { assertRequiredFields } from "./js/contracts.js";
   }
 
   async function syncReorderEntry(planId, dragEntryId, targetDayIndex, reorderRevision) {
-    await api(`/meal-plans/${planId}/entries/${dragEntryId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ target_day_index: targetDayIndex }),
-    });
+    await updateMealPlanEntry(
+      planId,
+      dragEntryId,
+      { target_day_index: targetDayIndex },
+      reportApiReachable,
+    );
 
     if (reorderRevision === mealPlanReorderRevision) {
       await reloadSelectedPlan();
@@ -803,9 +806,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     if (!Number.isInteger(selectedPlanId)) {
       throw new Error("No meal plan selected.");
     }
-    await api(`/meal-plans/${selectedPlanId}/entries/${entryId}`, {
-      method: "DELETE",
-    });
+    await deleteMealPlanEntry(selectedPlanId, entryId, reportApiReachable);
     await reloadSelectedPlan();
     setStatus("Meal day deleted.");
     publishDataChanged();
@@ -814,9 +815,7 @@ import { assertRequiredFields } from "./js/contracts.js";
   async function deleteStoredPlan(planId) {
     assertMealPlanWriteAllowed("delete a meal plan");
 
-    await api(`/meal-plans/stored/${planId}`, {
-      method: "DELETE",
-    });
+    await deleteStoredMealPlan(planId, reportApiReachable);
 
     if (selectedPlanId === planId) {
       selectedPlanId = null;
@@ -852,16 +851,13 @@ import { assertRequiredFields } from "./js/contracts.js";
     const nextDate = startDate ? toIsoDate(addDays(startDate, nextDayIndex)) : "";
     const defaultServings = Number(plan.diners);
 
-    const payload = await api(`/meal-plans/${selectedPlanId}/entries`, {
-      method: "POST",
-      body: JSON.stringify({
-        day_index: nextDayIndex,
-        date: nextDate,
-        mode: "planned",
-        servings: Number.isInteger(defaultServings) ? defaultServings : 2,
-        recipe: null,
-      }),
-    });
+    const payload = await createMealPlanEntry(selectedPlanId, {
+      day_index: nextDayIndex,
+      date: nextDate,
+      mode: "planned",
+      servings: Number.isInteger(defaultServings) ? defaultServings : 2,
+      recipe: null,
+    }, reportApiReachable);
 
     const updatedPlan = payload && typeof payload === "object" ? payload.data : null;
     const updatedEntries = Array.isArray(updatedPlan?.entries) ? updatedPlan.entries : [];
@@ -1106,7 +1102,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     let listFromApi = false;
 
     try {
-      const listPayload = await api("/meal-plans/stored");
+      const listPayload = await loadStoredMealPlans(reportApiReachable);
       assertRequiredFields(listPayload, ["data"], "Meal plan list response");
       const rawPlans = Array.isArray(listPayload.data) ? listPayload.data : [];
       plans = sortPlansMostRecentFirst(rawPlans);
@@ -1145,7 +1141,7 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     if (Number.isInteger(firstPlanId) && !planPreviewTitlesById.has(firstPlanId)) {
       try {
-        const activePayload = await api(`/meal-plans/${firstPlanId}`);
+        const activePayload = await loadMealPlan(firstPlanId, reportApiReachable);
         assertRequiredFields(activePayload, ["data"], "Meal plan detail response");
         cachePlanPreview(activePayload.data);
         cachePlanDetail(activePayload.data);
@@ -1186,7 +1182,7 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     let planData = null;
     try {
-      const payload = await api(`/meal-plans/${selectedPlanId}`);
+      const payload = await loadMealPlan(selectedPlanId, reportApiReachable);
       assertRequiredFields(payload, ["data"], "Meal plan detail response");
       planData = payload.data;
     } catch {
@@ -1204,7 +1200,7 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     let plans = [];
     try {
-      const listPayload = await api("/meal-plans/stored");
+      const listPayload = await loadStoredMealPlans(reportApiReachable);
       const rawPlans = Array.isArray(listPayload.data) ? listPayload.data : [];
       plans = sortPlansMostRecentFirst(rawPlans);
       cachePlanListRows(plans);
@@ -1228,7 +1224,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     }
 
     try {
-      const payload = await api(`/meal-plans/${planId}`);
+      const payload = await loadMealPlan(planId, reportApiReachable);
       assertRequiredFields(payload, ["data"], "Meal plan detail response");
       planData = payload.data;
     } catch {
@@ -1246,7 +1242,7 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     let plans = [];
     try {
-      const listPayload = await api("/meal-plans/stored");
+      const listPayload = await loadStoredMealPlans(reportApiReachable);
       const rawPlans = Array.isArray(listPayload.data) ? listPayload.data : [];
       plans = sortPlansMostRecentFirst(rawPlans);
       cachePlanListRows(plans);
@@ -1274,9 +1270,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     generateShoppingButton.textContent = mode === "regenerate_missing" ? "Re-generating..." : "Generating...";
 
     try {
-      const payload = await api(`/meal-plans/${selectedPlanId}/shopping-list?mode=${encodeURIComponent(mode)}`, {
-        method: "POST",
-      });
+      const payload = await generateMealPlanShoppingList(selectedPlanId, mode, reportApiReachable);
       assertRequiredFields(payload, ["data"], "Meal plan shopping response");
 
       const data = payload.data;
@@ -1332,7 +1326,7 @@ import { assertRequiredFields } from "./js/contracts.js";
   }
 
   async function loadDefaultDinersForGenerateModal() {
-    const payload = await api("/config/user-settings");
+    const payload = await loadMealPlanDefaultDiners(reportApiReachable);
     const data = payload.data;
     if (!data || typeof data !== "object") {
       throw new Error("User settings response is invalid.");
@@ -1443,10 +1437,7 @@ import { assertRequiredFields } from "./js/contracts.js";
     startDateSaveButton.textContent = "Saving...";
 
     try {
-      await api(`/meal-plans/${selectedPlanId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ start_date: startDate }),
-      });
+      await updateMealPlanStartDate(selectedPlanId, startDate, reportApiReachable);
 
       closeStartDateModal();
       await reloadSelectedPlan();
@@ -1500,10 +1491,7 @@ import { assertRequiredFields } from "./js/contracts.js";
         },
       };
 
-      const result = await api("/meal-plans/generate", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      const result = await generateMealPlan(payload, reportApiReachable);
 
       const planData = result.data;
       const planId = Number(planData.plan_id);
@@ -1781,7 +1769,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       return;
     }
 
-    const payload = await api(`/recipes?search=${encodeURIComponent(query)}&limit=8`);
+    const payload = await searchMealPlanRecipes(query, reportApiReachable);
     const results = extractRecipeResults(payload);
     renderMealEditorSearchResults(results);
   }
@@ -2011,10 +1999,7 @@ import { assertRequiredFields } from "./js/contracts.js";
         notes: buildLegacyNotes(reminderEnabled, reminderText),
       };
 
-      await api(`/meal-plans/${selectedPlanId}/entries/${entryId}`, {
-        method: "PATCH",
-        body: JSON.stringify(patch),
-      });
+      await updateMealPlanEntry(selectedPlanId, entryId, patch, reportApiReachable);
 
       closeMealEditorModal();
       await reloadSelectedPlan();
