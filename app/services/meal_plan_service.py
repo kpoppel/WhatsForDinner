@@ -234,6 +234,7 @@ class MealPlanService:
                         "instance_key": key,
                         "entry_id": entry_id,
                         "recipe_id": recipe_id,
+                        "recipe_title": self._recipe_title(primary_recipe),
                         "role": "primary",
                         "slot_index": None,
                         "purpose": "meal",
@@ -268,6 +269,7 @@ class MealPlanService:
                     "instance_key": key,
                     "entry_id": entry_id,
                     "recipe_id": recipe_id,
+                    "recipe_title": self._recipe_title(recipe),
                     "role": "extra",
                     "slot_index": idx,
                     "purpose": str(purpose) if purpose is not None else "extra",
@@ -318,6 +320,7 @@ class MealPlanService:
                 "instance_key": instance_key,
                 "entry_id": entry_id,
                 "recipe_id": None,
+                "recipe_title": None,
                 "role": "primary",
                 "slot_index": None,
                 "purpose": mode,
@@ -373,6 +376,7 @@ class MealPlanService:
             "instance_key": instance_key,
             "entry_id": entry_id,
             "recipe_id": recipe_id,
+            "recipe_title": str(row.get("recipe_title")) if isinstance(row.get("recipe_title"), str) else None,
             "role": role,
             "slot_index": slot_index,
             "purpose": purpose,
@@ -460,11 +464,11 @@ class MealPlanService:
                 mode_label = "Eating Out"
 
         if isinstance(recipe_id, int):
-            title = f"WFD {from_date} Recipe {recipe_id}"
+            title = str(instance.get("recipe_title") or f"Recipe {recipe_id}")
         elif isinstance(mode_label, str):
-            title = f"WFD {from_date} {mode_label}"
+            title = mode_label
         else:
-            title = f"WFD {from_date}"
+            title = "Meal"
 
         payload = {
             "title": title,
@@ -490,6 +494,7 @@ class MealPlanService:
                 "instance_key": str(row.get("instance_key") or instance_key),
                 "entry_id": int(row.get("entry_id") or 0),
                 "recipe_id": int(row.get("recipe_id")) if isinstance(row.get("recipe_id"), int) else None,
+                "recipe_title": str(row.get("recipe_title")) if isinstance(row.get("recipe_title"), str) else None,
                 "role": str(row.get("role") or "primary"),
                 "slot_index": row.get("slot_index") if isinstance(row.get("slot_index"), int) else None,
                 "purpose": str(row.get("purpose")) if row.get("purpose") is not None else None,
@@ -552,6 +557,7 @@ class MealPlanService:
             if isinstance(previous_row, dict):
                 unchanged = (
                     previous_row.get("recipe_id") == desired_row.get("recipe_id")
+                    and previous_row.get("recipe_title") == desired_row.get("recipe_title")
                     and int(previous_row.get("servings")) == int(desired_row.get("servings"))
                     and str(previous_row.get("date") or "") == str(desired_row.get("date") or "")
                 )

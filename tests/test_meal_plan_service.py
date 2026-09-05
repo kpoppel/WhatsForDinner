@@ -766,9 +766,7 @@ def test_sync_tandoor_meal_plan_includes_mode_only_rows_without_recipe(tmp_path)
     rows = list(client.meal_plan_rows.values())
     assert len(rows) == 3
     titles = [str(row.get("title") or "") for row in rows]
-    assert any("Leftovers" in title for title in titles)
-    assert any("Takeout" in title for title in titles)
-    assert any("Eating Out" in title for title in titles)
+    assert set(titles) == {"Leftovers", "Takeout", "Eating Out"}
     assert all("recipe" not in row for row in rows)
 
 
@@ -819,7 +817,7 @@ def test_patch_entry_switch_to_non_planned_clears_recipe_and_syncs_mode_row(tmp_
     rows = list(client.meal_plan_rows.values())
     assert len(rows) == 1
     assert "recipe" not in rows[0]
-    assert "Leftovers" in str(rows[0].get("title") or "")
+    assert rows[0].get("title") == "Leftovers"
 
 
 def test_patch_entry_recipe_removal_deletes_tracked_shopping_entries(tmp_path) -> None:
@@ -972,9 +970,7 @@ def test_patch_entry_keeps_unchanged_mode_rows_when_remote_snapshot_is_sparse(tm
     rows = list(client.meal_plan_rows.values())
     assert len(rows) == 4
     titles = [str(row.get("title") or "") for row in rows]
-    assert any("Leftovers" in title for title in titles)
-    assert any("Takeout" in title for title in titles)
-    assert any("Eating Out" in title for title in titles)
+    assert set(titles) == {"Roast Veg", "Leftovers", "Takeout", "Eating Out"}
 
 
 def test_generate_shopping_sync_preserves_mode_only_rows(tmp_path) -> None:
@@ -1023,7 +1019,7 @@ def test_generate_shopping_sync_preserves_mode_only_rows(tmp_path) -> None:
     )
 
     initial_titles = [str(row.get("title") or "") for row in client.meal_plan_rows.values()]
-    assert any("Leftovers" in title for title in initial_titles)
+    assert "Leftovers" in initial_titles
 
     asyncio.run(
         service.generate_shopping_from_plan(
@@ -1035,7 +1031,7 @@ def test_generate_shopping_sync_preserves_mode_only_rows(tmp_path) -> None:
     )
 
     titles_after = [str(row.get("title") or "") for row in client.meal_plan_rows.values()]
-    assert any("Leftovers" in title for title in titles_after)
+    assert "Leftovers" in titles_after
 
 
 def test_delete_plan_removes_tracked_shopping_before_meal_rows(tmp_path) -> None:
