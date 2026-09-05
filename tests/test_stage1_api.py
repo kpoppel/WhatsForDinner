@@ -14,12 +14,14 @@ def setup_module(module) -> None:
 
 
 def test_health_route() -> None:
+    """Verify the health endpoint exposes the expected liveness payload."""
     response = client.get("/api/v1/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
 def test_versioned_openapi_schema_route() -> None:
+    """Verify the versioned OpenAPI schema remains available."""
     response = client.get("/api/v1/openapi.json")
     assert response.status_code == 200
     payload = response.json()
@@ -28,6 +30,7 @@ def test_versioned_openapi_schema_route() -> None:
 
 
 def test_versioned_docs_routes() -> None:
+    """Verify Swagger and ReDoc are served under the versioned API prefix."""
     swagger_response = client.get("/api/v1/docs")
     assert swagger_response.status_code == 200
     assert "/api/v1/openapi.json" in swagger_response.text
@@ -38,6 +41,7 @@ def test_versioned_docs_routes() -> None:
 
 
 def test_recipes_route_uses_tandoor_payload(monkeypatch) -> None:
+    """Verify recipe search forwards upstream data through normalization."""
     class FakeClient:
         async def list_recipes(self, search=None, limit=20, keyword_ids=None):
             return {
@@ -55,6 +59,7 @@ def test_recipes_route_uses_tandoor_payload(monkeypatch) -> None:
 
 
 def test_recipes_route_forwards_keyword_ids(monkeypatch) -> None:
+    """Verify keyword filters reach the Tandoor recipe client."""
     captured: dict[str, object] = {}
 
     class FakeClient:
@@ -74,6 +79,7 @@ def test_recipes_route_forwards_keyword_ids(monkeypatch) -> None:
 
 
 def test_recipe_tags_route_returns_list(monkeypatch) -> None:
+    """Verify recipe tags are exposed as a stable list response."""
     class FakeClient:
         async def list_tags(self):
             return [{"id": 1, "name": "Quick"}, {"id": 2, "name": "Family"}]
@@ -86,6 +92,7 @@ def test_recipe_tags_route_returns_list(monkeypatch) -> None:
 
 
 def test_today_meal_route_returns_structured_payload(monkeypatch) -> None:
+    """Verify today's meal route returns recipe and ingredient structure."""
     class FakeClient:
         async def list_recipes(self, search=None, limit=20, keyword_ids=None):
             return {
@@ -124,6 +131,7 @@ def test_today_meal_route_returns_structured_payload(monkeypatch) -> None:
 
 
 def test_shopping_entry_write_routes(monkeypatch) -> None:
+    """Verify legacy shopping write routes delegate to the Tandoor client."""
     class FakeClient:
         async def create_shopping_entry(self, payload):
             return {"id": 5, **payload}
@@ -154,6 +162,7 @@ def test_shopping_entry_write_routes(monkeypatch) -> None:
 
 
 def test_rudimentary_user_app_route() -> None:
+    """Verify the unified user application shell is routable."""
     response = client.get("/app")
     assert response.status_code == 200
     assert "WhatsForDinner" in response.text
@@ -162,6 +171,7 @@ def test_rudimentary_user_app_route() -> None:
 
 
 def test_api_response_exposes_timing_and_correlation_headers() -> None:
+    """Verify API middleware exposes correlation and timing response headers."""
     response = client.get("/api/v1/health", headers={"X-Correlation-ID": "phase6-test"})
     assert response.status_code == 200
     assert response.headers["X-Correlation-ID"] == "phase6-test"
@@ -170,5 +180,6 @@ def test_api_response_exposes_timing_and_correlation_headers() -> None:
 
 
 def test_standalone_shopping_app_route_removed() -> None:
+    """Verify the deprecated standalone shopping route remains unavailable."""
     response = client.get("/shopping")
     assert response.status_code == 404

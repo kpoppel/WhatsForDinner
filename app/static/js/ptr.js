@@ -5,6 +5,7 @@ let _ptrIndicator = null;
 let _ptrScrollContainers = [];
 const PTR_THRESHOLD = 80;
 
+/** Identify elements whose own scroll position can absorb a pull gesture. */
 function isScrollable(node) {
   if (!(node instanceof HTMLElement)) {
     return false;
@@ -15,6 +16,7 @@ function isScrollable(node) {
   return allowsScroll && node.scrollHeight - node.clientHeight > 1;
 }
 
+/** Collect scrollable ancestors so pull-to-refresh does not steal their gesture. */
 function getScrollableAncestors(target) {
   const containers = [];
   let node = target instanceof Element ? target : null;
@@ -34,6 +36,7 @@ function getScrollableAncestors(target) {
   return containers;
 }
 
+/** Check the invariant required before a downward refresh gesture may start. */
 function areContainersAtTop(containers) {
   if (!Array.isArray(containers) || containers.length === 0) {
     return window.scrollY === 0;
@@ -41,6 +44,7 @@ function areContainersAtTop(containers) {
   return containers.every((container) => container.scrollTop <= 0);
 }
 
+/** Resolve the shared pull-to-refresh indicator from the app shell. */
 function getPtrIndicator() {
   if (!_ptrIndicator) {
     _ptrIndicator = document.createElement("div");
@@ -51,6 +55,7 @@ function getPtrIndicator() {
   return _ptrIndicator;
 }
 
+/** Wire touch tracking and trigger refresh only after the pull threshold is met. */
 export function setupPullToRefresh({ isOnline, run, refreshAndSyncIfNeeded }) {
   document.addEventListener("touchstart", (e) => {
     _ptrStartY = e.touches[0].pageY;

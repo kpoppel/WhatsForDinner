@@ -3,6 +3,7 @@
  * prevent an older refresh from replacing a newer optimistic mutation.
  */
 export function createSyncCoordinator({ onStatus }) {
+  /** Coordinate refresh/push ownership and discard stale asynchronous results. */
   let refreshInFlight = null;
   let pushInFlight = null;
   let pushKey = null;
@@ -11,12 +12,14 @@ export function createSyncCoordinator({ onStatus }) {
   let pushStartedAt = null;
 
   function report(status, error = null) {
+    /** Publish coordinator state to the sync command boundary. */
     if (typeof onStatus === "function") {
       onStatus({ status, error });
     }
   }
 
   function record(operation, status, startedAt, error = null) {
+    /** Record the latest operation timing for diagnostics. */
     if (typeof window === "undefined" || typeof window.WFD_recordSyncMetric !== "function") {
       return;
     }
@@ -31,6 +34,7 @@ export function createSyncCoordinator({ onStatus }) {
   }
 
   function refresh(load, apply) {
+    /** Run a canonical refresh under a new generation token. */
     if (refreshInFlight) {
       return refreshInFlight;
     }
@@ -62,6 +66,7 @@ export function createSyncCoordinator({ onStatus }) {
   }
 
   function runPush(request) {
+    /** Execute one FIFO push while preserving coordinator status. */
     const pushGeneration = ++generation;
     const startedAt = { monotonic: performance.now(), wall: Date.now() };
     pushStartedAt = startedAt;
@@ -82,6 +87,7 @@ export function createSyncCoordinator({ onStatus }) {
   }
 
   function push(key, load, apply) {
+    /** Queue a push and apply its result only if it remains current. */
     if (pushInFlight) {
       if (key !== pushKey) {
         queuedPushes.push({ key, load, apply });
@@ -105,6 +111,7 @@ export function createSyncCoordinator({ onStatus }) {
   }
 
   function invalidate() {
+    /** Advance generation so in-flight responses can no longer win. */
     generation += 1;
   }
 

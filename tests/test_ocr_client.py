@@ -9,6 +9,7 @@ from app.services.ocr_client import GeminiOcrClient, OcrError
 
 
 def test_transcribe_handwritten_list_parses_gemini_response(monkeypatch) -> None:
+    """Verify Gemini response text is extracted into the OCR client result."""
     client = GeminiOcrClient()
 
     class FakeResponse:
@@ -44,6 +45,7 @@ def test_transcribe_handwritten_list_parses_gemini_response(monkeypatch) -> None
 
 
 def test_transcribe_handwritten_list_raises_ocr_error_on_malformed_response(monkeypatch) -> None:
+    """Verify malformed provider payloads become the domain OCR error."""
     client = GeminiOcrClient()
 
     class FakeResponse:

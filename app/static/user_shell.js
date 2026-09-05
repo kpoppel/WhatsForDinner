@@ -32,10 +32,12 @@ import { health } from "./js/api.js";
   let apiReachable = true;
 
   function isOnline() {
+    /** Combine browser state with the latest API reachability signal. */
     return navigator.onLine !== false && apiReachable;
   }
 
   function applyOnlineAwareControls() {
+    /** Enable or disable controls according to their declared online policy. */
     const online = isOnline();
     shell.classList.toggle("wf-is-offline", !online);
 
@@ -73,6 +75,7 @@ import { health } from "./js/api.js";
   }
 
   async function probeApiReachability() {
+    /** Probe health and publish the result used by all online-only controls. */
     if (navigator.onLine === false) {
       apiReachable = false;
       applyOnlineAwareControls();
@@ -90,6 +93,7 @@ import { health } from "./js/api.js";
   }
 
   function reportApiReachable(value) {
+    /** Update shell connectivity state and notify dependent modules. */
     apiReachable = Boolean(value);
     applyOnlineAwareControls();
   }
@@ -98,6 +102,7 @@ import { health } from "./js/api.js";
   window.WFD_isOnline = isOnline;
 
   function setActiveTab(nextTab) {
+    /** Switch the visible tab while preserving the shell's URL/state contract. */
     if (!TAB_META[nextTab]) {
       return;
     }

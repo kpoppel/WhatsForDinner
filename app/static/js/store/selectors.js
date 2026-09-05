@@ -7,22 +7,27 @@ import {
 } from "./schema.js";
 import { store } from "./index.js";
 
+/** Return current shopping rows as a stable array snapshot. */
 export function selectShoppingItems() {
   return Object.values(store.shopping.itemsById);
 }
 
+/** Read one shopping row by normalized ID. */
 export function selectShoppingItemById(entryId) {
   return store.shopping.itemsById[String(entryId)];
 }
 
+/** Return queued optimistic shopping mutations. */
 export function selectShoppingPendingChanges() {
   return store.shopping.pendingChanges;
 }
 
+/** Return mutations rejected by the server and awaiting correction. */
 export function selectShoppingRejectedChanges() {
   return store.shopping.rejectedChanges;
 }
 
+/** Read source/status metadata for a store domain. */
 export function selectDomainMeta(domain) {
   if (domain === "shopping") {
     return store.shopping.meta;
@@ -36,38 +41,47 @@ export function selectDomainMeta(domain) {
   return store.sync.meta;
 }
 
+/** Report the latest API reachability signal used by mutation gating. */
 export function selectShoppingApiReachable() {
   return store.shopping.apiReachable;
 }
 
+/** Return the persisted collapsed-state map for shopping sections. */
 export function selectShoppingCollapsedSections() {
   return store.shopping.collapsedSections;
 }
 
+/** Return the cached meal-plan list/detail model. */
 export function selectMealPlanCache() {
   return store.mealPlans.cache;
 }
 
+/** Return cached meal-plan summaries for list views. */
 export function selectMealPlans() {
   return store.mealPlans;
 }
 
+/** Return the settings slice used by the settings view. */
 export function selectSettings() {
   return store.settings;
 }
 
+/** Return browser and API connectivity state. */
 export function selectConnectivity() {
   return store.connectivity;
 }
 
+/** Return revision, status, and pending projection state. */
 export function selectSyncState() {
   return store.sync;
 }
 
+/** Return unresolved server-side projection operations. */
 export function selectPendingProjections() {
   return store.sync.pendingProjections;
 }
 
+/** Read the active meal-plan ID from the in-memory store. */
 export function readActiveMealPlanId() {
   if (Number.isInteger(store.mealPlans.activePlanId)) {
     return store.mealPlans.activePlanId;
@@ -85,6 +99,7 @@ export function readActiveMealPlanId() {
   }
 }
 
+/** Read the complete meal-plan cache without mutating it. */
 export function readMealPlanCache() {
   if (store.mealPlans.cache.list.length > 0 || Object.keys(store.mealPlans.cache.byId).length > 0) {
     return store.mealPlans.cache;
@@ -113,6 +128,7 @@ export function readMealPlanCache() {
   }
 }
 
+/** Read the home plan cache, optionally sorting its entry projection. */
 export function readHomeActivePlanCache(sortEntries) {
   try {
     const raw = localStorage.getItem(HOME_ACTIVE_PLAN_CACHE_KEY);

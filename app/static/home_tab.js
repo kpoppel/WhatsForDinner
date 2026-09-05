@@ -71,12 +71,14 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   let todayRecipeLookupTitle = "";
 
   function setTab(tabName) {
+    /** Navigate from the home tab to another top-level app view. */
     if (typeof window.WFD_setActiveTab === "function") {
       window.WFD_setActiveTab(tabName);
     }
   }
 
   function modeBadgeLabel(mode) {
+    /** Convert an entry mode into the compact home-view badge label. */
     if (mode === "leftover") {
       return "Leftovers";
     }
@@ -90,6 +92,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function modeBadgeClass(mode) {
+    /** Map an entry mode to its stable CSS state class. */
     if (mode === "leftover") {
       return "wf-badge wf-badge-leftovers";
     }
@@ -103,6 +106,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function escapeHtml(value) {
+    /** Escape server-derived text before inserting it into home markup. */
     return String(value)
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
@@ -111,6 +115,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function normalizeTimeTo24hInText(input) {
+    /** Normalize reminder times for human-readable home snippets. */
     const source = String(input || "");
     const pattern = /\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*([AaPp][Mm])\b/g;
 
@@ -142,6 +147,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function parseIsoDate(text) {
+    /** Parse an ISO date without allowing invalid dates into sorting logic. */
     if (typeof text !== "string") {
       return null;
     }
@@ -153,6 +159,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function todayIsoDate() {
+    /** Return the browser-local current day in ISO form. */
     const now = new Date();
     const yyyy = String(now.getFullYear());
     const mm = String(now.getMonth() + 1).padStart(2, "0");
@@ -161,6 +168,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function entryReminder(entry) {
+    /** Build a reminder descriptor from a meal-plan entry. */
     if (entry && typeof entry === "object") {
       const enabled = entry.reminder_enabled === true;
       const textRaw = entry.reminder_text;
@@ -197,6 +205,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function titleFromEntry(entry) {
+    /** Resolve the display title for a meal-plan entry. */
     if (!entry || typeof entry !== "object") {
       return "No meal planned";
     }
@@ -226,6 +235,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function sortEntries(entries) {
+    /** Sort entries by day index/date for deterministic home rendering. */
     if (!Array.isArray(entries)) {
       return [];
     }
@@ -240,6 +250,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function resolveTodayEntry(entries) {
+    /** Select today's entry, falling back to the first available day. */
     const today = todayIsoDate();
     for (const entry of entries) {
       if (String(entry.date) === today) {
@@ -250,6 +261,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function recipeUrlFromEntry(entry) {
+    /** Read a navigable recipe URL from an entry's normalized recipe. */
     if (!entry || typeof entry !== "object") {
       return null;
     }
@@ -271,6 +283,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function recipeLookupTitleFromEntry(entry) {
+    /** Resolve the recipe title used by the external lookup action. */
     if (!entry || typeof entry !== "object") {
       return "";
     }
@@ -328,6 +341,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function setViewRecipeButton(recipeUrl, lookupTitle = "") {
+    /** Update recipe action visibility and destination for the active entry. */
     todayRecipeUrl = typeof recipeUrl === "string" && recipeUrl.trim().length > 0
       ? recipeUrl.trim()
       : null;
@@ -337,11 +351,13 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function setEditDayButton(enabled, label) {
+    /** Update the home edit-day action without changing plan state. */
     editDayButton.textContent = label;
     editDayButton.disabled = !enabled;
   }
 
   function renderHomeFallbackCard(title, metaHtml) {
+    /** Render the empty/error-safe home card state. */
     todayEntryId = null;
     todayKicker.textContent = "Today";
     todayTitle.textContent = title;
@@ -352,6 +368,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function renderToday(entry, shoppingReminderTexts) {
+    /** Render today's meal projection and its reminder metadata. */
     if (!entry) {
       renderHomeFallbackCard("No meal planned", '<span>Set up a plan to populate this card.</span>');
       return;
@@ -422,6 +439,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function renderUpcoming(entries) {
+    /** Render upcoming meal entries in chronological order. */
     upcomingList.innerHTML = "";
 
     const today = todayIsoDate();
@@ -471,6 +489,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function shoppingReminderTexts(viewPayload) {
+    /** Extract due shopping reminders from the canonical shopping payload. */
     const reminders = [];
 
     if (!viewPayload || typeof viewPayload !== "object") {
@@ -564,6 +583,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function fetchActivePlanFromCache() {
+    /** Read the selected plan detail from the shared cache. */
     const cache = readMealPlanCache();
     const rows = Array.isArray(cache.list) ? cache.list : [];
     if (rows.length === 0) {
@@ -643,6 +663,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   });
 
   function requestHomeRefresh(options = {}) {
+    /** Schedule a home refresh while coalescing repeated data-change events. */
     return homeRenderScheduler.request(options);
   }
 

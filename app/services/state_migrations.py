@@ -24,6 +24,7 @@ class StateSchemaError(ValueError):
 
 
 def _migrate_v1_to_v2(payload: dict[str, Any]) -> dict[str, Any]:
+    """Add per-instance sync storage while preserving the v1 input."""
     next_payload = deepcopy(payload)
     if not isinstance(next_payload.get("meal_plan_instance_sync"), dict):
         next_payload["meal_plan_instance_sync"] = {}
@@ -32,6 +33,7 @@ def _migrate_v1_to_v2(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _migrate_v2_to_v3(payload: dict[str, Any]) -> dict[str, Any]:
+    """Remove obsolete entry ID arrays from v2 instance records."""
     next_payload = deepcopy(payload)
     plan_sync = next_payload.get("meal_plan_instance_sync")
     if isinstance(plan_sync, dict):
@@ -51,6 +53,7 @@ def _migrate_v2_to_v3(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _migrate_v3_to_v4(payload: dict[str, Any]) -> dict[str, Any]:
+    """Add archives and compact historical sync events for schema v4."""
     next_payload = deepcopy(payload)
 
     raw_archive = next_payload.get("archive")
@@ -92,6 +95,7 @@ def _migrate_v3_to_v4(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _migrate_v4_to_v5(payload: dict[str, Any]) -> dict[str, Any]:
+    """Add revision, recipe-history, and pending-projection fields for v5."""
     next_payload = deepcopy(payload)
     if not isinstance(next_payload.get("derived_state_revision"), int):
         next_payload["derived_state_revision"] = 0

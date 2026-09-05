@@ -663,6 +663,7 @@ class MealPlanService:
             await self._delete_meal_plan_row_if_present(row_id)
 
     async def retry_pending_projection(self, operation_id: str, ensure_tandoor_writes_enabled) -> dict[str, Any]:
+        """Retry one durable Tandoor projection and clear it after success."""
         pending = self._state.pending_projection(operation_id)
         if pending is None or pending.get("domain") != "meal_plan":
             raise HTTPException(status_code=404, detail="Pending meal-plan projection not found.")
@@ -708,6 +709,7 @@ class MealPlanService:
         no_repeat_days: int,
         ensure_tandoor_writes_enabled=None,
     ) -> dict:
+        """Generate, persist, and project a new rule-aware meal plan."""
         leftover_days = self._parse_constraint_days(constraints.get("leftover_days", []), start_day, length_days)
         takeout_days = self._parse_constraint_days(constraints.get("takeout_days", []), start_day, length_days)
         empty_days = self._parse_constraint_days(constraints.get("empty_days", []), start_day, length_days)
@@ -838,6 +840,7 @@ class MealPlanService:
         return self._response("tandoor+local-state", self._enrich_plan_recipe_urls(stored))
 
     async def patch_plan(self, plan_id: int, payload: dict[str, Any], ensure_tandoor_writes_enabled=None) -> dict:
+        """Patch one plan under its per-plan lock and synchronize its rows."""
         lock = self._get_plan_mutation_lock(plan_id)
         async with lock:
             current = self._state.get_meal_plan(plan_id)
@@ -899,6 +902,7 @@ class MealPlanService:
             return self._response("local-state", self._enrich_plan_recipe_urls(updated))
 
     async def add_entry(self, plan_id: int, payload: dict[str, Any], ensure_tandoor_writes_enabled=None) -> dict:
+        """Append an entry locally, then project the changed plan upstream."""
         lock = self._get_plan_mutation_lock(plan_id)
         async with lock:
             plan = self._state.get_meal_plan(plan_id)

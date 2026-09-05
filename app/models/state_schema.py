@@ -120,6 +120,7 @@ class Stage2StateDocument(BaseModel):
 
 
 def default_state_payload() -> dict[str, Any]:
+    """Build a fresh valid state document for first-run initialization."""
     """Return a new valid empty document for the current schema version."""
 
     return {

@@ -5,6 +5,7 @@ import { suppressNextCardClick, consumeSuppressedCardClick } from "./render.js";
 // Injected by initGestures() from shopping.js to avoid a circular dependency with sync.js.
 let _run, _setStatus, _deleteEntry, _setStatusMany, _deleteEntries;
 
+/** Inject domain actions so gesture wiring remains independent of sync.js. */
 export function initGestures({ run, setStatus, deleteEntry, setStatusMany, deleteEntries }) {
   _run = run;
   _setStatus = setStatus;
@@ -13,6 +14,7 @@ export function initGestures({ run, setStatus, deleteEntry, setStatusMany, delet
   _deleteEntries = deleteEntries;
 }
 
+/** Normalize one card's single or aggregated entry IDs. */
 function normalizeEntryIds(value) {
   if (Array.isArray(value)) {
     return value
@@ -23,6 +25,7 @@ function normalizeEntryIds(value) {
   return Number.isInteger(single) && single !== 0 ? [single] : [];
 }
 
+/** Prefer batch status updates while retaining the injected single-item path. */
 async function setStatusForEntries(entryIds, status) {
   const ids = normalizeEntryIds(entryIds);
   if (ids.length === 0) {
@@ -37,6 +40,7 @@ async function setStatusForEntries(entryIds, status) {
   }
 }
 
+/** Prefer batch deletes while retaining the injected single-item path. */
 async function deleteEntries(entryIds) {
   const ids = normalizeEntryIds(entryIds);
   if (ids.length === 0) {
@@ -51,6 +55,7 @@ async function deleteEntries(entryIds) {
   }
 }
 
+/** Attach right-swipe deletion while suppressing its synthetic click. */
 export function attachSwipeRightDeleteGesture(card, entryIds) {
   let startX = 0;
   let startY = 0;
@@ -112,6 +117,7 @@ export function attachSwipeRightDeleteGesture(card, entryIds) {
   }, true);
 }
 
+/** Make a skipped card click restore all entries represented by the card. */
 export function attachRestoreToRemainingClick(card, entryIds) {
   card.addEventListener("click", () => {
     if (consumeSuppressedCardClick(card)) {
@@ -121,6 +127,7 @@ export function attachRestoreToRemainingClick(card, entryIds) {
   });
 }
 
+/** Attach completion click and left-swipe postpone behavior. */
 export function attachRemainingCardGestures(card, entryIds) {
   let startX = 0;
   let startY = 0;
@@ -182,6 +189,7 @@ export function attachRemainingCardGestures(card, entryIds) {
   });
 }
 
+/** Attach restore click and left-swipe deletion behavior. */
 export function attachCompletedCardGestures(card, entryIds) {
   let startX = 0;
   let startY = 0;
@@ -243,6 +251,7 @@ export function attachCompletedCardGestures(card, entryIds) {
   });
 }
 
+/** Build one shopping card and wire gestures for its display mode. */
 export function createCard(item, mode) {
   const card = document.createElement("div");
   card.className = "shop-card";

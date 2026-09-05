@@ -7,6 +7,7 @@ const MAX_METRICS = 200;
 const metrics = [];
 const enabled = typeof window !== "undefined" && window.WFD_PERFORMANCE_METRICS_ENABLED === true;
 
+/** Buffer one bounded performance metric for diagnostics and server-free review. */
 function record(kind, metric) {
   if (!enabled || !metric || typeof metric !== "object") {
     return;

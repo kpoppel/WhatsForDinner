@@ -36,6 +36,7 @@ class UserSettingsRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_time(self) -> "UserSettingsRequest":
+        """Require notification times to use the persisted HH:MM contract."""
         if TIME_24H_RE.match(self.default_notification_time.strip()) is None:
             raise ValueError("default_notification_time must be HH:MM (24-hour).")
         return self
@@ -155,6 +156,7 @@ class ShoppingSyncChange(BaseModel):
 
     @model_validator(mode="after")
     def validate_entry_id(self) -> "ShoppingSyncChange":
+        """Require entry IDs for update and delete operations."""
         if self.operation in {SyncOperation.update, SyncOperation.delete} and self.entry_id is None:
             raise ValueError("entry_id is required for update and delete operations.")
         return self

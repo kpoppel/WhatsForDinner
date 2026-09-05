@@ -169,6 +169,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   const GENERATE_SHOPPING_LONG_PRESS_MS = 700;
 
   function cachedPlanDetail(planId) {
+    /** Read a plan detail from the shared cache without issuing a request. */
     const cache = readMealPlanCache();
     const row = cache.byId[String(planId)];
     if (row && typeof row === "object") {
@@ -178,6 +179,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function isMealPlanOfflineReadOnly() {
+    /** Return whether plan mutations must be blocked by offline state. */
     if (typeof window.WFD_isOnline === "function") {
       return !window.WFD_isOnline();
     }
@@ -185,6 +187,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function assertMealPlanWriteAllowed(action) {
+    /** Enforce the online-only mutation policy for meal plans. */
     if (isMealPlanOfflineReadOnly()) {
       throw new Error(`Cannot ${action} while offline. Meal plan editing is disabled.`);
     }
@@ -192,6 +195,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function updateMealPlanActionAvailability() {
+    /** Reflect connectivity and pending-request state in plan controls. */
     const isOffline = isMealPlanOfflineReadOnly();
     generateButton.disabled = isOffline;
     changeStartDateButton.disabled = isOffline;
@@ -211,18 +215,22 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function setStatus(message) {
+    /** Publish a transient status message for plan actions. */
     statusNode.textContent = message;
   }
 
   function setGenerateShoppingLongPressActive(isActive) {
+    /** Reflect the long-press shopping-generation affordance in the UI. */
     generateShoppingButton.classList.toggle("is-long-press-active", isActive);
   }
 
   function publishDataChanged() {
+    /** Notify home and shopping views after a plan mutation. */
     window.dispatchEvent(new CustomEvent("wfd:data-changed", { detail: { source: "meal-plans" } }));
   }
 
   function setAppTab(tabName) {
+    /** Navigate back to another top-level app tab. */
     if (typeof window.WFD_setActiveTab === "function") {
       window.WFD_setActiveTab(tabName);
       return;
@@ -237,6 +245,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function toIsoDate(nowDate) {
+    /** Format a local date as the API's YYYY-MM-DD value. */
     const year = nowDate.getFullYear();
     const month = String(nowDate.getMonth() + 1).padStart(2, "0");
     const day = String(nowDate.getDate()).padStart(2, "0");
@@ -244,6 +253,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function parseIsoDate(text) {
+    /** Parse an ISO date for date arithmetic and editor validation. */
     if (typeof text !== "string") {
       return null;
     }
@@ -257,12 +267,14 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function addDays(sourceDate, amount) {
+    /** Return a new date offset without mutating the source date. */
     const clone = new Date(sourceDate.getTime());
     clone.setDate(clone.getDate() + amount);
     return clone;
   }
 
   function planDateRangeLabel(plan) {
+    /** Build the detailed plan date-range label. */
     const startRaw = String(plan.start_date);
     const startDate = parseIsoDate(startRaw);
     if (startDate === null) {
@@ -279,6 +291,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function planListDateRangeLabel(plan) {
+    /** Build the compact list-card date-range label. */
     const startRaw = String(plan.start_date);
     const startDate = parseIsoDate(startRaw);
     if (startDate === null) {
@@ -295,6 +308,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function planMetaText(plan) {
+    /** Summarize diners, length, and plan state for list cards. */
     const lengthDays = Number(plan.length_days);
     const entryCount = Number(plan.entry_count);
     const dayText = lengthDays === 1 ? "Day" : "Days";
@@ -303,6 +317,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function buildPlanPreviewTitles(entries) {
+    /** Select the first few entry titles used in plan previews. */
     if (!Array.isArray(entries) || entries.length === 0) {
       return [];
     }
@@ -326,6 +341,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function cachePlanPreview(plan) {
+    /** Cache a list preview while preserving separately loaded details. */
     const planId = Number(plan?.plan_id);
     if (!Number.isInteger(planId)) {
       return;
@@ -335,6 +351,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function planIncludesText(plan) {
+    /** Build the compact constraints summary shown on plan cards. */
     const planId = Number(plan?.plan_id);
     const titles = Number.isInteger(planId) ? planPreviewTitlesById.get(planId) : null;
 
@@ -351,6 +368,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function sortPlansMostRecentFirst(plans) {
+    /** Sort plan summaries by start date and stable plan ID. */
     if (!Array.isArray(plans)) {
       return [];
     }
@@ -392,6 +410,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function modeBadge(mode) {
+    /** Convert an entry mode into its visible badge label. */
     if (mode === "leftover") {
       return "Leftovers";
     }
@@ -405,6 +424,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function modeClass(mode) {
+    /** Map an entry mode to the corresponding CSS class. */
     if (mode === "leftover") {
       return "wf-plan-mode wf-plan-mode-leftover";
     }
@@ -418,6 +438,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function escapeHtml(value) {
+    /** Escape plan data before inserting it into generated markup. */
     return String(value)
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
@@ -426,6 +447,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function entryRecipeTitle(entry) {
+    /** Resolve the primary recipe title for a day entry. */
     if (entry && typeof entry === "object") {
       const recipe = entry.recipe;
       if (recipe && typeof recipe === "object") {
@@ -438,6 +460,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function parseEntryReminder(entry) {
+    /** Normalize reminder fields used by plan cards and editors. */
     let enabled = false;
     let text = "";
 
@@ -473,6 +496,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function renderPlanListNow(plans) {
+    /** Render the plan list projection and its card actions. */
     listNode.innerHTML = "";
 
     if (!Array.isArray(plans) || plans.length === 0) {
@@ -537,10 +561,12 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function suppressNextPlanCardClick(card) {
+    /** Prevent a swipe gesture from triggering the following click. */
     card.dataset.suppressNextClick = "1";
   }
 
   function consumeSuppressedPlanCardClick(card) {
+    /** Consume a plan-card click suppression marker once. */
     if (card.dataset.suppressNextClick === "1") {
       card.dataset.suppressNextClick = "0";
       return true;
@@ -549,6 +575,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function attachPlanCardSwipeRightDeleteGesture(card, planId) {
+    /** Attach right-swipe deletion to a stored plan card. */
     let startX = 0;
     let startY = 0;
     let deltaX = 0;
@@ -614,6 +641,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function clearDayDropTargets() {
+    /** Remove transient drag/drop affordances from all day cards. */
     detailNode.querySelectorAll(".wf-plan-day.is-drop-target, .wf-plan-day.is-drop-before, .wf-plan-day.is-drop-after").forEach((node) => {
       node.classList.remove("is-drop-target");
       node.classList.remove("is-drop-before");
@@ -622,6 +650,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function setDropTarget(entryId, placement = "before") {
+    /** Mark one entry as the current reorder destination. */
     clearDayDropTargets();
     if (!Number.isInteger(entryId)) {
       return;
@@ -639,6 +668,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function findEntryById(entryId) {
+    /** Find an entry in the currently opened plan detail. */
     if (!mealPlanState.selectedPlan || typeof mealPlanState.selectedPlan !== "object") {
       return null;
     }
@@ -660,6 +690,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function reorderEntry(dragEntryId, dropEntryId, dropPlacement = "before") {
+    /** Persist a reordered entry and refresh the canonical plan detail. */
     assertMealPlanWriteAllowed("reorder meal days");
     if (!Number.isInteger(mealPlanState.selectedPlanId)) {
       return;
@@ -706,21 +737,50 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
     }
     targetDayIndex = Math.max(0, Math.min(targetDayIndex, ordered.length - 1));
 
-    const payload = await mealPlanCommands.patchEntry(
-      mealPlanState.selectedPlanId,
-      dragEntryId,
-      { target_day_index: targetDayIndex },
-    );
-    applyCanonicalPlanResponse(payload);
+    const previousPlan = mealPlanState.selectedPlan;
+    const startDate = parseIsoDate(String(previousPlan.start_date));
+    const optimisticEntries = [...ordered];
+    const [draggedEntry] = optimisticEntries.splice(fromIndex, 1);
+    optimisticEntries.splice(targetDayIndex, 0, draggedEntry);
+    const optimisticPlan = {
+      ...previousPlan,
+      entries: optimisticEntries.map((entry, index) => ({
+        ...entry,
+        day_index: index,
+        date: startDate === null ? entry.date : toIsoDate(addDays(startDate, index)),
+      })),
+    };
+
+    setMealPlanDetail(optimisticPlan);
+    cachePlanPreview(optimisticPlan);
+    cachePlanDetail(optimisticPlan);
+    renderPlanDetail(optimisticPlan);
     setStatus("Meal day order updated.");
+
+    try {
+      const payload = await mealPlanCommands.patchEntry(
+        mealPlanState.selectedPlanId,
+        dragEntryId,
+        { target_day_index: targetDayIndex },
+      );
+      applyCanonicalPlanResponse(payload);
+    } catch (error) {
+      setMealPlanDetail(previousPlan);
+      cachePlanPreview(previousPlan);
+      cachePlanDetail(previousPlan);
+      renderPlanDetail(previousPlan);
+      throw error;
+    }
     publishDataChanged();
   }
 
   function suppressNextDayCardClick(dayCard) {
+    /** Prevent a day-card gesture from triggering its click action. */
     dayCard.dataset.suppressNextClick = "1";
   }
 
   function consumeSuppressedDayCardClick(dayCard) {
+    /** Consume a day-card click suppression marker once. */
     if (dayCard.dataset.suppressNextClick === "1") {
       dayCard.dataset.suppressNextClick = "0";
       return true;
@@ -729,6 +789,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function attachSwipeRightDeleteGesture(dayCard, entryId) {
+    /** Attach right-swipe deletion to a meal day card. */
     let startX = 0;
     let startY = 0;
     let deltaX = 0;
@@ -797,6 +858,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function deleteMealDay(entryId) {
+    /** Delete one day entry and reopen the canonical plan detail. */
     assertMealPlanWriteAllowed("delete a meal day");
     if (!Number.isInteger(mealPlanState.selectedPlanId)) {
       throw new Error("No meal plan selected.");
@@ -808,6 +870,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function deleteStoredPlan(planId) {
+    /** Delete a stored plan after enforcing online mutation policy. */
     assertMealPlanWriteAllowed("delete a meal plan");
 
     await mealPlanCommands.remove(planId);
@@ -830,6 +893,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function addMealDay() {
+    /** Add a day entry to the active plan using the next day index. */
     assertMealPlanWriteAllowed("add a meal day");
     if (!Number.isInteger(mealPlanState.selectedPlanId)) {
       throw new Error("No meal plan selected.");
@@ -873,6 +937,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function renderPlanDetailNow(plan) {
+    /** Render day cards and entry actions for the opened plan. */
     detailNode.innerHTML = "";
 
     if (!plan || typeof plan !== "object") {
@@ -1108,6 +1173,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function applyCanonicalPlanResponse(payload) {
+    /** Accept a revision-safe API response into cache and detail state. */
     assertRequiredFields(payload, ["data"], "Meal plan mutation response");
     if (!acceptsRevision(payload.revision)) {
       return null;
@@ -1141,6 +1207,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function refreshPlans() {
+    /** Fetch stored plans and refresh the visible list projection. */
     let plans = [];
     let listFromApi = false;
 
@@ -1217,6 +1284,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function openPlanEditor(planId) {
+    /** Load the requested plan detail with latest-request ownership. */
     const requestId = ++latestPlanOpenRequest;
     setMealPlanSelection(planId);
     writeActiveMealPlanId(planId);
@@ -1245,6 +1313,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function generateShoppingList(mode = "sync") {
+    /** Generate shopping rows for the active plan when online. */
     assertMealPlanWriteAllowed("generate a shopping list from meal plans");
     if (!Number.isInteger(mealPlanState.selectedPlanId)) {
       throw new Error("Select a meal plan first.");
@@ -1284,6 +1353,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function clearGenerateShoppingLongPressTimer() {
+    /** Cancel the pending long-press timer for shopping generation. */
     if (generateShoppingLongPressTimer !== 0) {
       clearTimeout(generateShoppingLongPressTimer);
       generateShoppingLongPressTimer = 0;
@@ -1291,6 +1361,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function startGenerateShoppingLongPress() {
+    /** Start the guarded long-press action for shopping generation. */
     if (isMealPlanOfflineReadOnly()) {
       return;
     }
@@ -1312,10 +1383,12 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function endGenerateShoppingLongPress() {
+    /** Finish a long-press interaction and clear its visual state. */
     clearGenerateShoppingLongPressTimer();
   }
 
   async function loadDefaultDinersForGenerateModal() {
+    /** Load the persisted diner default into the generation form. */
     const payload = await settingsCommands.user();
     const data = payload.data;
     if (!data || typeof data !== "object") {
@@ -1332,6 +1405,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function openGenerateModal() {
+    /** Open and initialize the meal-plan generation dialog. */
     if (isMealPlanOfflineReadOnly()) {
       setStatus("Offline: meal plan generation is unavailable.");
       return;
@@ -1348,6 +1422,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function hideGenerateModalAfterTransition() {
+    /** Hide the generation modal after its closing transition completes. */
     if (!generateModalClosing) {
       return;
     }
@@ -1356,6 +1431,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function closeGenerateModal() {
+    /** Close the meal-plan generation dialog and clear transient state. */
     if (generateModal.hidden) {
       return;
     }
@@ -1366,6 +1442,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function closeGenerateModalIfBackdrop(event) {
+    /** Close generation modal only when the backdrop itself was clicked. */
     if (event.target !== generateModal) {
       return;
     }
@@ -1373,6 +1450,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function closeGenerateModalIfEscape(event) {
+    /** Close generation modal on the Escape keyboard action. */
     if (event.key !== "Escape") {
       return;
     }
@@ -1380,6 +1458,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function openStartDateModal() {
+    /** Open the start-date editor for the active meal plan. */
     if (isMealPlanOfflineReadOnly()) {
       setStatus("Offline: updating plan date is unavailable.");
       return;
@@ -1398,6 +1477,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function closeStartDateModal() {
+    /** Close the start-date editor without persisting changes. */
     if (startDateModal.hidden) {
       return;
     }
@@ -1405,6 +1485,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function closeStartDateModalIfBackdrop(event) {
+    /** Close the start-date modal when its backdrop is clicked. */
     if (event.target !== startDateModal) {
       return;
     }
@@ -1412,6 +1493,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function saveStartDate() {
+    /** Validate and persist a changed plan start date. */
     assertMealPlanWriteAllowed("update meal plan start date");
     if (!Number.isInteger(mealPlanState.selectedPlanId)) {
       throw new Error("No meal plan selected.");
@@ -1441,6 +1523,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function setGenerateSavingState(isSaving) {
+    /** Disable generation controls while the request is in flight. */
     generateSaveButton.disabled = isSaving;
     generateCancelButton.disabled = isSaving;
     if (isSaving) {
@@ -1451,6 +1534,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function generatePlan() {
+    /** Submit the generation form and open the resulting plan detail. */
     assertMealPlanWriteAllowed("generate a meal plan");
     setGenerateSavingState(true);
 
@@ -1500,6 +1584,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function firstEditorRecipe() {
+    /** Return the primary recipe currently selected in the day editor. */
     if (!Array.isArray(editorRecipes) || editorRecipes.length === 0) {
       return null;
     }
@@ -1511,6 +1596,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function recipePurposeDescription(purpose, index) {
+    /** Build the accessible label for an extra-recipe purpose pill. */
     if (purpose === "shopping_only") {
       return "Shopping list only";
     }
@@ -1521,6 +1607,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function syncMealTitleFromFirstRecipe() {
+    /** Keep the editor title aligned with its primary recipe selection. */
     if (editorMealTitleManuallySet) {
       return;
     }
@@ -1533,6 +1620,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function updateRecipePurposePills(container, selectedPurpose) {
+    /** Render purpose choices for an extra recipe slot. */
     const purposeButtons = Array.from(container.querySelectorAll("[data-purpose]"));
     for (const button of purposeButtons) {
       if (!(button instanceof HTMLButtonElement)) {
@@ -1546,11 +1634,13 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function setAddRecipePurpose(purpose) {
+    /** Store the purpose selected for the next extra recipe. */
     editorAddRecipePurpose = purpose === "shopping_only" ? "shopping_only" : "meal";
     updateRecipePurposePills(mealEditorRecipesPurpose, editorAddRecipePurpose);
   }
 
   function renderEditorRecipeCards() {
+    /** Render selected primary and extra recipes in the meal editor. */
     mealEditorRecipesList.innerHTML = "";
 
     if (!Array.isArray(editorRecipes) || editorRecipes.length === 0) {
@@ -1622,6 +1712,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function setEditorRecipes(recipes) {
+    /** Replace editor recipe selections while preserving contract shape. */
     if (!Array.isArray(recipes)) {
       editorRecipes = [];
       renderEditorRecipeCards();
@@ -1654,6 +1745,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function setAddRecipeRowVisible(visible) {
+    /** Toggle the extra-recipe insertion row in the editor. */
     const show = Boolean(visible);
     mealEditorRecipesAddRow.hidden = !show;
     mealEditorRecipesSearchResults.hidden = !show;
@@ -1671,6 +1763,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function renderMealEditorSearchResults(results) {
+    /** Render recipe search results for selection in the editor modal. */
     mealEditorRecipesSearchResults.innerHTML = "";
 
     if (!Array.isArray(results) || results.length === 0) {
@@ -1712,6 +1805,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function extractRecipeResults(payload) {
+    /** Normalize recipe search response shapes to displayable rows. */
     const data = payload.data;
 
     if (Array.isArray(data)) {
@@ -1746,6 +1840,8 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function searchRecipesLive() {
+    /** Query recipes using the current editor search term. */
+    /** Search recipes for the editor while retaining current selections. */
     const query = mealEditorRecipesSearchInput.value.trim();
 
     if (mealEditorRecipesAddRow.hidden) {
@@ -1763,6 +1859,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function scheduleRecipeSearch() {
+    /** Debounce live recipe search to avoid request bursts while typing. */
     if (editorSearchTimer) {
       window.clearTimeout(editorSearchTimer);
     }
@@ -1773,6 +1870,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function setEditorMode(nextMode) {
+    /** Set the active entry mode and update related editor controls. */
     editorMode = nextMode;
 
     for (const button of mealEditorModes) {
@@ -1808,17 +1906,20 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function setEditorServings(nextValue) {
+    /** Clamp and store the editor servings value. */
     const clamped = Math.max(1, Math.min(20, nextValue));
     editorServings = clamped;
     mealEditorDinersValue.textContent = String(clamped);
   }
 
   function openMealEditorModal() {
+    /** Open the day-entry editor modal with current draft state. */
     mealEditorModal.hidden = false;
     mealEditorClosing = false;
   }
 
   function closeMealEditorModal() {
+    /** Close the day-entry editor without saving the draft. */
     if (mealEditorModal.hidden) {
       return;
     }
@@ -1830,6 +1931,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function closeMealEditorIfBackdrop(event) {
+    /** Close the day-entry editor only for backdrop clicks. */
     if (event.target !== mealEditorModal) {
       return;
     }
@@ -1837,6 +1939,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function closeMealEditorIfEscape(event) {
+    /** Close the day-entry editor on Escape. */
     if (event.key !== "Escape") {
       return;
     }
@@ -1847,6 +1950,8 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function openMealEditor(entryId) {
+    /** Load one entry into the editor and open its modal. */
+    /** Load one day entry into the recipe/mode editor modal. */
     const entry = findEntryById(entryId);
     if (!entry) {
       throw new Error("Meal day was not found.");
@@ -1917,6 +2022,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function toEditorRecipePayload(recipe) {
+    /** Convert a search result into the editor's recipe contract. */
     const title = String(recipe.title || "").trim();
     if (title.length === 0) {
       return null;
@@ -1929,6 +2035,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function buildLegacyNotes(reminderEnabled, reminderText) {
+    /** Preserve reminder metadata in the legacy notes field when required. */
     const payload = {
       reminder_enabled: reminderEnabled,
       reminder_text: reminderText,
@@ -1937,6 +2044,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function saveMealEditor() {
+    /** Validate and persist the active day entry editor state. */
     assertMealPlanWriteAllowed("edit this meal day");
     if (!Number.isInteger(mealPlanState.selectedPlanId)) {
       throw new Error("No meal plan selected.");
@@ -2122,6 +2230,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function runAction(action) {
+    /** Execute a plan action and surface failures in the plan status area. */
     try {
       await action();
     } catch (error) {

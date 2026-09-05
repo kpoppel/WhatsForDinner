@@ -29,6 +29,7 @@ const coordinator = createSyncCoordinator({
   },
 });
 
+/** Show diagnostic payloads only when explicit debug mode is enabled. */
 export function show(data) {
   if (!DEBUG_MODE) {
     return;
@@ -39,10 +40,12 @@ export function show(data) {
   }
 }
 
+/** Notify sibling tabs/views that canonical shopping data changed. */
 function publishDataChanged() {
   window.dispatchEvent(new CustomEvent("wfd:data-changed", { detail: { source: "shopping-mode" } }));
 }
 
+/** Normalize batch IDs and discard invalid or duplicate values. */
 function normalizeEntryIds(entryIds) {
   if (!Array.isArray(entryIds)) {
     return [];
@@ -54,6 +57,7 @@ function normalizeEntryIds(entryIds) {
   ));
 }
 
+/** Execute a UI action while presenting failures through the debug surface. */
 export async function run(action) {
   try {
     await action();
@@ -62,6 +66,7 @@ export async function run(action) {
   }
 }
 
+/** Refresh canonical data online, then flush any queued local mutations. */
 export async function refreshAndSyncIfNeeded() {
   if (!browserOnline()) {
     setApiReachable(false);
@@ -74,10 +79,12 @@ export async function refreshAndSyncIfNeeded() {
   }
 }
 
+/** Apply the server's shopping projection through the command boundary. */
 function hydrateFromServer(payload) {
   hydrateShoppingModel(payload.data.sections, payload.cursor);
 }
 
+/** Fetch and revision-check the canonical shopping view. */
 export async function refresh() {
   return coordinator.refresh(
     () => gateway.shopping.view(),
@@ -103,6 +110,7 @@ export async function refresh() {
   );
 }
 
+/** Push compacted offline changes and restore them if transport fails. */
 export async function syncPending(showPayload = true) {
   compactShoppingPendingChanges();
   updateStatusBadges();
@@ -158,6 +166,7 @@ export async function syncPending(showPayload = true) {
   }
 }
 
+/** Retry durable reconciliation operations and apply their canonical results. */
 export async function retryPendingProjections() {
   const pending = [...selectPendingProjections()];
   for (const projection of pending) {
@@ -179,6 +188,7 @@ export async function retryPendingProjections() {
   publishDataChanged();
 }
 
+/** Apply one optimistic status mutation and sync it when online. */
 export async function setStatus(entryId, status) {
   if (!SHOPPING_STATUSES.has(status)) {
     throw new Error("Invalid status for shopping mode.");
@@ -206,6 +216,7 @@ export async function setStatus(entryId, status) {
   });
 }
 
+/** Apply and sync one status to a normalized batch of entries. */
 export async function setStatusMany(entryIds, status) {
   if (!SHOPPING_STATUSES.has(status)) {
     throw new Error("Invalid status for shopping mode.");
@@ -244,6 +255,7 @@ export async function setStatusMany(entryIds, status) {
   });
 }
 
+/** Apply one optimistic delete and sync it when online. */
 export async function deleteEntry(entryId) {
   deleteShoppingChange(entryId);
   coordinator.invalidate();
@@ -267,6 +279,7 @@ export async function deleteEntry(entryId) {
   });
 }
 
+/** Apply and sync deletion for a normalized batch of entries. */
 export async function deleteEntries(entryIds) {
   const ids = normalizeEntryIds(entryIds);
   if (ids.length === 0) {

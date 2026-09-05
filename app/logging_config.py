@@ -6,6 +6,7 @@ import logging
 
 
 def configure_logging() -> None:
+    """Install the application's structured logging configuration once."""
     """Configure the process-wide logging format and default level."""
 
     logging.basicConfig(

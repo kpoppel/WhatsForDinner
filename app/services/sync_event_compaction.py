@@ -6,11 +6,13 @@ from typing import Any
 
 
 def _updated_fields(payload: Any, key: str) -> list[str]:
+    """Return sorted changed-field names from an update payload."""
     patch = payload.get(key) if isinstance(payload, dict) else None
     return sorted(list(patch.keys())) if isinstance(patch, dict) else []
 
 
 def compact_sync_event_payload(operation: str, payload: Any) -> dict[str, Any]:
+    """Keep sync history small while retaining operation-specific replay data."""
     """Return the minimal stable payload for a persisted sync event."""
 
     source = payload if isinstance(payload, dict) else {}

@@ -10,6 +10,7 @@ from app.services.state_migrations import StateSchemaError
 
 
 def test_stage2_state_writes_schema_version(tmp_path) -> None:
+    """Verify first-run state is initialized at the current schema version."""
     state = Stage2State(str(tmp_path))
 
     with state.state_file.open("r", encoding="utf-8") as fp:
@@ -23,6 +24,7 @@ def test_stage2_state_writes_schema_version(tmp_path) -> None:
 
 
 def test_stage2_state_invalid_payload_fails_fast(tmp_path) -> None:
+    """Verify invalid persisted state is rejected instead of reshaped silently."""
     state = Stage2State(str(tmp_path))
 
     invalid_payload = {
@@ -52,6 +54,7 @@ def test_stage2_state_invalid_payload_fails_fast(tmp_path) -> None:
 
 
 def test_stage2_state_sync_event_retention_by_max_count(tmp_path) -> None:
+    """Verify oldest sync events are pruned and archived by count."""
     state = Stage2State(str(tmp_path), sync_event_max_count=2, sync_event_max_age_days=365)
 
     state.append_sync_event("event_a", {"v": 1})
@@ -63,6 +66,7 @@ def test_stage2_state_sync_event_retention_by_max_count(tmp_path) -> None:
 
 
 def test_stage2_state_sync_event_retention_by_max_age(tmp_path) -> None:
+    """Verify stale sync events are pruned according to configured age."""
     state = Stage2State(str(tmp_path), sync_event_max_count=10, sync_event_max_age_days=1)
 
     state.append_sync_event("event_old", {"v": 1})
@@ -85,6 +89,7 @@ def test_stage2_state_sync_event_retention_by_max_age(tmp_path) -> None:
 
 
 def test_stage2_state_migrates_v1_payload_to_v4(tmp_path) -> None:
+    """Verify legacy v1 state migrates through the current schema chain."""
     state = Stage2State(str(tmp_path))
 
     legacy_payload = {
@@ -117,6 +122,7 @@ def test_stage2_state_migrates_v1_payload_to_v4(tmp_path) -> None:
 
 
 def test_stage2_state_migrates_v2_payload_and_strips_entry_ids(tmp_path) -> None:
+    """Verify v2 instance rows lose the obsolete entry_ids field."""
     state = Stage2State(str(tmp_path))
 
     v2_payload = {
@@ -170,6 +176,7 @@ def test_stage2_state_migrates_v2_payload_and_strips_entry_ids(tmp_path) -> None
 
 
 def test_stage2_state_migrates_v3_payload_to_v4_with_archive_defaults(tmp_path) -> None:
+    """Verify v3 migration creates archive collections and compacts events."""
     state = Stage2State(str(tmp_path))
 
     v3_payload = {
@@ -220,6 +227,7 @@ def test_stage2_state_migrates_v3_payload_to_v4_with_archive_defaults(tmp_path) 
 
 
 def test_stage2_state_migrates_v4_phase05_fields(tmp_path) -> None:
+    """Verify v4 migration adds revision, history, and projection defaults."""
     state = Stage2State(str(tmp_path))
 
     with state.state_file.open("r", encoding="utf-8") as fp:
@@ -240,6 +248,7 @@ def test_stage2_state_migrates_v4_phase05_fields(tmp_path) -> None:
 
 
 def test_stage2_state_records_recipe_uses_after_plan_deletion(tmp_path) -> None:
+    """Verify recipe-use history remains available after plan deletion."""
     state = Stage2State(str(tmp_path))
     plan = state.create_meal_plan(
         {
@@ -268,6 +277,7 @@ def test_stage2_state_records_recipe_uses_after_plan_deletion(tmp_path) -> None:
 
 
 def test_stage2_state_creates_pending_projection_with_operation_id(tmp_path) -> None:
+    """Verify pending projections receive durable unique operation IDs."""
     state = Stage2State(str(tmp_path))
 
     pending = state.create_pending_projection(
@@ -283,6 +293,7 @@ def test_stage2_state_creates_pending_projection_with_operation_id(tmp_path) -> 
 
 
 def test_stage2_state_restores_previous_valid_backup(tmp_path) -> None:
+    """Verify backup restoration replaces primary state with validated data."""
     state = Stage2State(str(tmp_path))
     state.set_meal_plan_rules(21)
     state.set_user_settings(6, "17:30")

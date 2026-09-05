@@ -10,6 +10,7 @@ import { updateStatusBadges } from "./render.js";
 const apiPrefix = window.WFD_API_PREFIX;
 let requestSequence = 0;
 
+/** Record transport timing and correlation metadata without owning UI state. */
 function recordRequestMetric(path, operation, requestId, startedAt, wallStartedAt, response, responseSize, requestSize, error = null) {
   if (typeof window.WFD_recordApiMetric !== "function") {
     return;
@@ -34,6 +35,7 @@ function recordRequestMetric(path, operation, requestId, startedAt, wallStartedA
   });
 }
 
+/** Convert a non-2xx response into an error retaining status and detail. */
 function apiError(response, data) {
   const detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data);
   const error = new Error(detail);
@@ -43,14 +45,17 @@ function apiError(response, data) {
   return error;
 }
 
+/** Return the browser's current network signal. */
 export function browserOnline() {
   return navigator.onLine !== false;
 }
 
+/** Require both browser connectivity and a reachable backend. */
 export function isOnline() {
   return browserOnline() && selectShoppingApiReachable();
 }
 
+/** Publish API reachability and refresh shell indicators. */
 export function setApiReachable(value) {
   updateApiReachability(value);
   if (typeof window.WFD_reportApiReachable === "function") {
@@ -61,10 +66,12 @@ export function setApiReachable(value) {
   }
 }
 
+/** Send a JSON API request through the single transport boundary. */
 export async function api(path, options = {}, operation = path) {
   return request(path, options, false, operation);
 }
 
+/** Execute JSON or multipart transport while preserving reachability errors. */
 async function request(path, options, isUpload, operation) {
   if (options === null) {
     options = {};
@@ -101,10 +108,12 @@ async function request(path, options, isUpload, operation) {
   }
 }
 
+/** Upload multipart form data without forcing a JSON content type. */
 export async function apiUpload(path, formData) {
   return request(path, { method: "POST", body: formData }, true, `upload:${path}`);
 }
 
+/** Fetch the lightweight backend health response. */
 export function health() {
   return api("/health", { cache: "no-store" }, "health");
 }

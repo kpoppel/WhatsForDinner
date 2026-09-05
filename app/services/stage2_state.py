@@ -55,6 +55,7 @@ class Stage2State:
                 self._save(data, advance_revision=False)
 
     def _ensure_archive(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Ensure archive collections exist and contain dictionary records only."""
         raw_archive = data.get("archive")
         archive = raw_archive if isinstance(raw_archive, dict) else {}
 
@@ -72,6 +73,7 @@ class Stage2State:
         return archive
 
     def _prune_archive(self, data: dict[str, Any]) -> None:
+        """Bound archived plans and events according to configured limits."""
         archive = self._ensure_archive(data)
 
         meal_plans = archive.get("meal_plans", [])
@@ -83,6 +85,7 @@ class Stage2State:
             archive["sync_events"] = sync_events[-self._archive_sync_event_max_count :]
 
     def _append_archive_sync_events(self, data: dict[str, Any], events: list[dict[str, Any]]) -> None:
+        """Move pruned sync events into the bounded archive collection."""
         if len(events) == 0:
             return
         archive = self._ensure_archive(data)
@@ -94,6 +97,7 @@ class Stage2State:
         self._prune_archive(data)
 
     def _archive_meal_plan(self, data: dict[str, Any], meal_plan: dict[str, Any], reason: str) -> None:
+        """Archive a deleted plan as a defensive historical snapshot."""
         plan_id = meal_plan.get("plan_id")
         if not isinstance(plan_id, int):
             return
@@ -111,9 +115,11 @@ class Stage2State:
         self._prune_archive(data)
 
     def _load(self) -> dict[str, Any]:
+        """Load and validate the primary state document."""
         return self._load_path(self.state_file)
 
     def _load_path(self, path: Path) -> dict[str, Any]:
+        """Load, migrate, and validate a specific state-file path."""
         with path.open("r", encoding="utf-8") as fp:
             data = json.load(fp)
 
@@ -127,6 +133,7 @@ class Stage2State:
             raise
 
     def _write_payload(self, path: Path, payload: dict[str, Any]) -> None:
+        """Atomically write JSON and fsync both file and containing directory."""
         tmp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
@@ -153,6 +160,7 @@ class Stage2State:
                 tmp_path.unlink(missing_ok=True)
 
     def _save(self, data: dict[str, Any], advance_revision: bool = True) -> None:
+        """Validate and atomically persist state, optionally advancing revision."""
         if advance_revision:
             current_revision = data.get("derived_state_revision", 0)
             data["derived_state_revision"] = int(current_revision) + 1
@@ -162,11 +170,13 @@ class Stage2State:
         self._write_payload(self.state_file, payload)
 
     def restore_backup(self) -> None:
+        """Replace primary state with the validated backup snapshot."""
         with self._lock:
             payload = self._load_path(self.backup_file)
             self._write_payload(self.state_file, payload)
 
     def _parse_event_created_at(self, value: Any) -> datetime | None:
+        """Parse event timestamps as UTC for age-based pruning."""
         if not isinstance(value, str):
             return None
         text = value.strip()
@@ -182,6 +192,7 @@ class Stage2State:
         return parsed.astimezone(timezone.utc)
 
     def _prune_sync_events(self, data: dict[str, Any]) -> None:
+        """Drop expired/over-limit events and archive what was removed."""
         raw_events = data.get("shopping_sync_events")
         if not isinstance(raw_events, list):
             data["shopping_sync_events"] = []
@@ -209,6 +220,7 @@ class Stage2State:
         self._append_archive_sync_events(data, removed_events)
 
     def _record_recipe_uses(self, data: dict[str, Any], meal_plan: dict[str, Any]) -> None:
+        """Add unique recipe-use records for the plan's concrete entries."""
         plan_id = meal_plan.get("plan_id")
         entries = meal_plan.get("entries")
         if not isinstance(plan_id, int) or not isinstance(entries, list):
@@ -252,12 +264,14 @@ class Stage2State:
         data["recipe_use_history"] = history
 
     def recipe_use_history(self) -> list[dict[str, Any]]:
+        """Return a defensive copy of recipe-use records used by plan rules."""
         with self._lock:
             data = self._load()
             history = data.get("recipe_use_history")
             return deepcopy(history) if isinstance(history, list) else []
 
     def current_revision(self) -> int:
+        """Read the monotonic revision assigned to the latest saved state."""
         with self._lock:
             data = self._load()
             return int(data.get("derived_state_revision", 0))
@@ -269,6 +283,7 @@ class Stage2State:
         payload: dict[str, Any],
         error: str,
     ) -> dict[str, Any]:
+        """Persist a retryable upstream projection failure and return its record."""
         with self._lock:
             data = self._load()
             now = datetime.now(timezone.utc).isoformat()
@@ -292,6 +307,7 @@ class Stage2State:
             return deepcopy(record)
 
     def pending_projections(self) -> list[dict[str, Any]]:
+        """List all durable projection failures without exposing mutable state."""
         with self._lock:
             data = self._load()
             pending = data.get("pending_projections")
@@ -300,6 +316,7 @@ class Stage2State:
             return [deepcopy(row) for row in pending.values() if isinstance(row, dict)]
 
     def pending_projection(self, operation_id: str) -> dict[str, Any] | None:
+        """Return one pending projection by ID, or ``None`` when it is unknown."""
         with self._lock:
             data = self._load()
             pending = data.get("pending_projections")
@@ -309,6 +326,7 @@ class Stage2State:
             return deepcopy(record) if isinstance(record, dict) else None
 
     def delete_pending_projections(self, operation_ids: set[str]) -> None:
+        """Remove acknowledged projection records in one locked state update."""
         with self._lock:
             data = self._load()
             pending = data.get("pending_projections")
@@ -322,11 +340,13 @@ class Stage2State:
                 self._save(data)
 
     def selected_keywords(self) -> list[int]:
+        """Return the keyword IDs selected for recipe filtering."""
         with self._lock:
             data = self._load()
             return [int(v) for v in data.get("selected_keyword_ids", [])]
 
     def set_selected_keywords(self, keyword_ids: list[int]) -> list[int]:
+        """Replace selected recipe keywords and persist the new filter."""
         with self._lock:
             data = self._load()
             data["selected_keyword_ids"] = keyword_ids
@@ -334,6 +354,7 @@ class Stage2State:
         return keyword_ids
 
     def meal_plan_rules(self) -> dict[str, int]:
+        """Return persisted meal-plan generation rules."""
         with self._lock:
             data = self._load()
             rules = data.get("meal_plan_rules")
@@ -345,6 +366,7 @@ class Stage2State:
             return {"no_repeat_days": value}
 
     def set_meal_plan_rules(self, no_repeat_days: int) -> dict[str, int]:
+        """Persist the no-repeat window used by meal-plan generation."""
         with self._lock:
             data = self._load()
             data["meal_plan_rules"] = {"no_repeat_days": no_repeat_days}
@@ -352,6 +374,7 @@ class Stage2State:
         return {"no_repeat_days": no_repeat_days}
 
     def user_settings(self) -> dict[str, Any]:
+        """Return validated user-facing defaults stored in application state."""
         with self._lock:
             data = self._load()
             raw = data.get("user_settings")
@@ -369,6 +392,7 @@ class Stage2State:
             }
 
     def set_user_settings(self, default_diners: int, default_notification_time: str) -> dict[str, Any]:
+        """Persist diner and notification defaults as one atomic state mutation."""
         with self._lock:
             data = self._load()
             data["user_settings"] = {
@@ -383,6 +407,7 @@ class Stage2State:
         }
 
     def create_meal_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Allocate, persist, and index a new local meal plan."""
         with self._lock:
             data = self._load()
             plan_id = int(data.get("next_meal_plan_id", 1))
@@ -394,12 +419,14 @@ class Stage2State:
         return payload
 
     def get_meal_plan(self, plan_id: int) -> dict[str, Any] | None:
+        """Return a defensive copy of one local meal plan when present."""
         with self._lock:
             data = self._load()
             plan = data["meal_plans"].get(str(plan_id))
             return deepcopy(plan) if isinstance(plan, dict) else None
 
     def list_meal_plans(self) -> list[dict[str, Any]]:
+        """Return all local plans newest first without sharing stored objects."""
         with self._lock:
             data = self._load()
             values: list[dict[str, Any]] = []
@@ -411,6 +438,7 @@ class Stage2State:
             return values
 
     def update_meal_plan(self, plan_id: int, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Merge a validated plan patch and record any newly seen recipe uses."""
         with self._lock:
             data = self._load()
             key = str(plan_id)
@@ -424,6 +452,7 @@ class Stage2State:
             return deepcopy(current)
 
     def delete_meal_plan(self, plan_id: int) -> dict[str, Any] | None:
+        """Delete a local plan, archive it, and remove its sync bookkeeping."""
         with self._lock:
             data = self._load()
             removed = data["meal_plans"].pop(str(plan_id), None)
@@ -437,6 +466,7 @@ class Stage2State:
             return deepcopy(removed)
 
     def get_meal_plan_instance_sync(self, plan_id: int) -> dict[str, dict[str, Any]]:
+        """Return sanitized per-instance upstream IDs for one meal plan."""
         with self._lock:
             data = self._load()
             raw_sync = data.get("meal_plan_instance_sync")
@@ -455,6 +485,7 @@ class Stage2State:
             return sanitized
 
     def set_meal_plan_instance_sync(self, plan_id: int, instances: dict[str, dict[str, Any]]) -> None:
+        """Replace one plan's instance-sync map with a defensive sanitized copy."""
         with self._lock:
             data = self._load()
             if not isinstance(data.get("meal_plan_instance_sync"), dict):
@@ -467,6 +498,7 @@ class Stage2State:
             self._save(data)
 
     def allocate_entry_id(self) -> int:
+        """Allocate the next positive meal-plan entry ID transactionally."""
         with self._lock:
             data = self._load()
             entry_id = int(data.get("next_entry_id", 1))
@@ -475,6 +507,7 @@ class Stage2State:
             return entry_id
 
     def append_sync_event(self, operation: str, payload: dict[str, Any]) -> int:
+        """Append a compact shopping event and return its cursor."""
         with self._lock:
             data = self._load()
             event_id = int(data.get("next_sync_event_id", 1))
@@ -492,6 +525,7 @@ class Stage2State:
             return event_id
 
     def sync_events_since(self, cursor: int) -> list[dict[str, Any]]:
+        """Return immutable copies of shopping events after a cursor."""
         with self._lock:
             data = self._load()
             return [
@@ -501,17 +535,20 @@ class Stage2State:
             ]
 
     def current_sync_cursor(self) -> int:
+        """Return the cursor of the newest persisted shopping event."""
         with self._lock:
             data = self._load()
             return max(int(data.get("next_sync_event_id", 1)) - 1, 0)
 
     def set_shopping_status(self, entry_id: int, status: str) -> None:
+        """Persist the app-owned status override for a shopping entry."""
         with self._lock:
             data = self._load()
             data["shopping_status_overrides"][str(entry_id)] = status
             self._save(data)
 
     def get_shopping_statuses(self) -> dict[str, str]:
+        """Return all persisted shopping status overrides by string ID."""
         with self._lock:
             data = self._load()
             raw = data.get("shopping_status_overrides", {})
@@ -520,6 +557,7 @@ class Stage2State:
             return {str(k): str(v) for k, v in raw.items()}
 
     def delete_shopping_status(self, entry_id: int) -> None:
+        """Remove one status override when an entry is deleted."""
         with self._lock:
             data = self._load()
             statuses = data.get("shopping_status_overrides")
@@ -527,6 +565,7 @@ class Stage2State:
                 self._save(data)
 
     def set_shopping_item_metadata(self, entry_id: int, patch: dict[str, Any]) -> dict[str, Any]:
+        """Merge reminder or editor metadata for one shopping entry."""
         with self._lock:
             data = self._load()
             key = str(entry_id)
@@ -542,6 +581,7 @@ class Stage2State:
             return deepcopy(current)
 
     def delete_shopping_item_metadata(self, entry_id: int) -> None:
+        """Remove metadata associated with a deleted shopping entry."""
         with self._lock:
             data = self._load()
             raw = data.get("shopping_item_metadata")
@@ -550,6 +590,7 @@ class Stage2State:
                 self._save(data)
 
     def get_shopping_item_metadata(self) -> dict[str, dict[str, Any]]:
+        """Return sanitized metadata records without mutable storage references."""
         with self._lock:
             data = self._load()
             raw = data.get("shopping_item_metadata", {})
@@ -562,6 +603,7 @@ class Stage2State:
             return sanitized
 
     def allocate_local_shopping_entry_id(self) -> int:
+        """Allocate the next negative ID reserved for a local shopping item."""
         with self._lock:
             data = self._load()
             next_id = int(data.get("next_local_shopping_entry_id", -1))
@@ -572,6 +614,7 @@ class Stage2State:
             return next_id
 
     def list_local_shopping_entries(self) -> list[dict[str, Any]]:
+        """Return all locally persisted shopping entries as defensive copies."""
         with self._lock:
             data = self._load()
             raw = data.get("local_shopping_entries", {})
@@ -584,6 +627,7 @@ class Stage2State:
             return items
 
     def get_local_shopping_entry(self, entry_id: int) -> dict[str, Any] | None:
+        """Return one local shopping entry, if the ID belongs to local storage."""
         with self._lock:
             data = self._load()
             raw = data.get("local_shopping_entries", {})
@@ -595,6 +639,7 @@ class Stage2State:
             return deepcopy(entry)
 
     def set_local_shopping_entry(self, entry_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create or replace a local shopping entry and persist the change."""
         with self._lock:
             data = self._load()
             if not isinstance(data.get("local_shopping_entries"), dict):
@@ -604,6 +649,7 @@ class Stage2State:
             return deepcopy(payload)
 
     def update_local_shopping_entry(self, entry_id: int, patch: dict[str, Any]) -> dict[str, Any] | None:
+        """Merge a local shopping patch, returning ``None`` for an unknown ID."""
         with self._lock:
             data = self._load()
             raw = data.get("local_shopping_entries", {})
@@ -618,6 +664,7 @@ class Stage2State:
             return deepcopy(current)
 
     def delete_local_shopping_entry(self, entry_id: int) -> dict[str, Any] | None:
+        """Delete and return one local shopping entry when it exists."""
         with self._lock:
             data = self._load()
             raw = data.get("local_shopping_entries", {})

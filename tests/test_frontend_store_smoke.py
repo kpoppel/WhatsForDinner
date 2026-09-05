@@ -9,6 +9,7 @@ import pytest
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for frontend store smoke tests")
 def test_store_commands_and_selectors_smoke() -> None:
+    """Verify store commands and selectors can load and execute in Node."""
     repo_root = Path(__file__).resolve().parents[1]
     commands_path = (repo_root / "app/static/js/store/commands.js").as_uri()
     selectors_path = (repo_root / "app/static/js/store/selectors.js").as_uri()
@@ -70,6 +71,7 @@ if (!Array.isArray(homeCache.entries) || homeCache.entries[0].day_index !== 0) {
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for frontend store smoke tests")
 def test_state_queue_create_changes_keep_distinct_entries() -> None:
+    """Verify queued creates retain distinct optimistic shopping entries."""
     repo_root = Path(__file__).resolve().parents[1]
     state_path = (repo_root / "app/static/js/store/index.js").as_uri()
 
@@ -137,6 +139,7 @@ if (uniqueIds.size !== 3) {{
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for frontend store smoke tests")
 def test_shopping_state_mutations_are_optimistic_and_persisted() -> None:
+    """Verify shopping mutations update both the model and local persistence."""
     repo_root = Path(__file__).resolve().parents[1]
     state_path = (repo_root / "app/static/js/store/index.js").as_uri()
 
@@ -208,6 +211,7 @@ if (Object.prototype.hasOwnProperty.call(persisted.itemsById, '41')) {{
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for frontend store smoke tests")
 def test_shopping_sync_batches_preserve_newer_and_rejected_changes() -> None:
+    """Verify sync batching preserves newer changes and rejection records."""
     repo_root = Path(__file__).resolve().parents[1]
     commands_path = (repo_root / "app/static/js/store/commands.js").as_uri()
     store_path = (repo_root / "app/static/js/store/index.js").as_uri()
@@ -265,6 +269,7 @@ if (store.shopping.rejectedChanges.length !== 0) {{
 
 
 def test_phase_zero_frontend_boundary_inventory_matches_source() -> None:
+    """Verify the baseline inventory still matches the implemented frontend boundaries."""
     repo_root = Path(__file__).resolve().parents[1]
 
     expected_direct_fetch_owners = {"app/static/js/api.js"}
@@ -342,6 +347,7 @@ def test_phase_zero_frontend_boundary_inventory_matches_source() -> None:
 
 
 def test_service_worker_requires_complete_shell_and_uses_network_first_navigation() -> None:
+    """Verify the PWA precache and navigation fallback policy remain explicit."""
     repo_root = Path(__file__).resolve().parents[1]
     source = (repo_root / "app/static/shopping-sw.js").read_text(encoding="utf-8")
 
@@ -354,6 +360,7 @@ def test_service_worker_requires_complete_shell_and_uses_network_first_navigatio
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for frontend coordinator tests")
 def test_phase_three_sync_coordinator_contract() -> None:
+    """Verify refresh and push coordination rejects stale asynchronous results."""
     repo_root = Path(__file__).resolve().parents[1]
     coordinator_path = (repo_root / "app/static/js/sync_coordinator.js").as_uri()
     script = f"""
@@ -450,6 +457,7 @@ def test_phase_three_sync_coordinator_contract() -> None:
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for frontend render tests")
 def test_phase_five_render_generation_contract() -> None:
+    """Verify render generations prevent delayed work from overwriting newer UI."""
     repo_root = Path(__file__).resolve().parents[1]
     render_path = (repo_root / "app/static/js/render.js").as_uri()
     script = f"""
@@ -503,6 +511,7 @@ if (!canonical || renderModule.getLastRenderMeta().source !== 'canonical' ||
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for render scheduler tests")
 def test_phase_five_render_scheduler_contract() -> None:
+    """Verify render scheduling coalesces requests and retains latest metadata."""
     repo_root = Path(__file__).resolve().parents[1]
     scheduler_path = (repo_root / "app/static/js/render_scheduler.js").as_uri()
     script = f"""
@@ -543,6 +552,7 @@ if (rendered.length !== 2 || scheduler.getRenderCount() !== 2) throw new Error('
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for cross-tab tests")
 def test_phase_five_cross_tab_store_notification_contract() -> None:
+    """Verify cross-tab storage changes notify the store observers."""
     repo_root = Path(__file__).resolve().parents[1]
     index_path = (repo_root / "app/static/js/store/index.js").as_uri()
     script = f"""
@@ -579,6 +589,7 @@ if (notifications.length !== 1 || notifications[0].source !== 'cross-tab' ||
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for frontend gateway tests")
 def test_phase_two_gateway_contract() -> None:
+    """Verify gateway methods map to the expected API paths and operations."""
     repo_root = Path(__file__).resolve().parents[1]
     api_path = (repo_root / "app/static/js/api.js").as_uri()
     script = f"""
@@ -663,6 +674,7 @@ if (metrics[0].operation !== 'health' || metrics[2].operation !== 'shopping.sync
 
 
 def test_settings_screen_does_not_capture_replaceable_store_collections() -> None:
+    """Verify settings rendering does not retain stale mutable store collections."""
     repo_root = Path(__file__).resolve().parents[1]
     source = (repo_root / "app/static/settings_tab.js").read_text(encoding="utf-8")
 
@@ -673,6 +685,7 @@ def test_settings_screen_does_not_capture_replaceable_store_collections() -> Non
 
 
 def test_meal_plan_canonical_responses_reject_stale_revisions() -> None:
+    """Verify meal-plan UI ignores canonical responses older than its revision."""
     repo_root = Path(__file__).resolve().parents[1]
     source = (repo_root / "app/static/meal_plans.js").read_text(encoding="utf-8")
 
@@ -684,6 +697,7 @@ def test_meal_plan_canonical_responses_reject_stale_revisions() -> None:
 
 
 def test_sync_keeps_rejections_separate_from_server_pending_projections() -> None:
+    """Verify rejected shopping mutations remain distinct from server projections."""
     repo_root = Path(__file__).resolve().parents[1]
     source = (repo_root / "app/static/js/sync.js").read_text(encoding="utf-8")
 
@@ -698,6 +712,7 @@ def test_sync_keeps_rejections_separate_from_server_pending_projections() -> Non
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for performance metrics tests")
 def test_phase_six_performance_metrics_contract() -> None:
+    """Verify frontend performance metrics retain bounded diagnostic behavior."""
     repo_root = Path(__file__).resolve().parents[1]
     metrics_path = (repo_root / "app/static/js/performance_metrics.js").as_uri()
     script = f"""
@@ -730,6 +745,7 @@ def test_phase_six_performance_metrics_contract() -> None:
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for frontend store smoke tests")
 def test_named_commands_reach_domain_gateway() -> None:
+    """Verify named commands delegate to the correct domain gateway methods."""
     repo_root = Path(__file__).resolve().parents[1]
     commands_path = (repo_root / "app/static/js/store/commands.js").as_uri()
     script = f"""
@@ -766,6 +782,7 @@ if (requestedPaths.join(',') !== '/api/v1/meal-plans/stored,/api/v1/config/user-
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for frontend store smoke tests")
 def test_phase_one_store_notifications_revisions_and_settings_contract() -> None:
+    """Verify store notifications carry domain, source, status, and revision."""
     repo_root = Path(__file__).resolve().parents[1]
     index_path = (repo_root / "app/static/js/store/index.js").as_uri()
     commands_path = (repo_root / "app/static/js/store/commands.js").as_uri()
@@ -833,6 +850,7 @@ unsubscribe();
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for frontend store smoke tests")
 def test_phase_one_metadata_rejected_state_and_online_write_contract() -> None:
+    """Verify metadata, rejected rows, and online-only write policy coexist."""
     repo_root = Path(__file__).resolve().parents[1]
     index_path = (repo_root / "app/static/js/store/index.js").as_uri()
     commands_path = (repo_root / "app/static/js/store/commands.js").as_uri()

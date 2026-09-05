@@ -12,6 +12,7 @@ def render_user_app(
     tandoor_base_url: str,
     performance_metrics_enabled: bool = False,
 ) -> HTMLResponse:
+    """Render the unified app shell with the configured API prefix."""
     """Return the app template with escaped runtime configuration values."""
 
     template = _TEMPLATE_PATH.read_text(encoding="utf-8")

@@ -78,16 +78,19 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   const NO_REPEAT_MAX = 365;
 
   function setStatus(message) {
+    /** Show a transient settings status message without owning persistence. */
     statusNode.textContent = message;
   }
 
   function setAppTab(tabName) {
+    /** Return navigation to the requested top-level app tab. */
     if (typeof window.WFD_setActiveTab === "function") {
       window.WFD_setActiveTab(tabName);
     }
   }
 
   function clampInteger(value, minValue, maxValue) {
+    /** Keep numeric settings inside their server contract bounds. */
     const parsed = Number(value);
     if (!Number.isInteger(parsed)) {
       return minValue;
@@ -102,6 +105,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function renderStepperValuesNow() {
+    /** Render current diner/rule values into their stepper controls. */
     const settings = selectSettings();
     dinersValueNode.textContent = String(settings.user.default_diners);
     const dayText = settings.rules.no_repeat_days === 1 ? "day" : "days";
@@ -109,6 +113,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function normalize24hTime(rawValue) {
+    /** Normalize user-entered notification time to the HH:MM contract. */
     const value = String(rawValue || "").trim();
     if (TIME_24H_RE.test(value)) {
       return value;
@@ -138,12 +143,14 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function selectedKeywordIds() {
+    /** Read checked keyword IDs from the settings checklist. */
     const values = Array.from(selectSettings().selectedKeywordIds);
     values.sort((left, right) => left - right);
     return values;
   }
 
   function renderSelectedKeywordsNow() {
+    /** Render the selected keyword summary from current controls. */
     const settings = selectSettings();
     const labels = [];
     for (const row of settings.keywordCatalog) {
@@ -161,6 +168,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function setSavingState(isSaving) {
+    /** Gate settings controls while the server save is in flight. */
     saveButton.disabled = isSaving;
     if (refreshButton instanceof HTMLButtonElement) {
       refreshButton.disabled = isSaving;
@@ -186,6 +194,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function keywordOptionNode(keywordId, label) {
+    /** Build one accessible keyword checkbox option. */
     const button = document.createElement("button");
     button.type = "button";
     button.className = "wf-keyword-option";
@@ -218,6 +227,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function renderKeywordChecklistNow() {
+    /** Replace keyword options with the current server catalog. */
     keywordsContainer.innerHTML = "";
     const keywordCatalog = selectSettings().keywordCatalog;
 
@@ -244,18 +254,22 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   });
 
   function renderStepperValues(options = {}) {
+    /** Schedule stepper rendering through the shared render path. */
     return settingsRenderScheduler.request({ source: "settings", force: true, ...options });
   }
 
   function renderSelectedKeywords(options = {}) {
+    /** Schedule selected-keyword summary rendering. */
     return settingsRenderScheduler.request({ source: "settings", force: true, ...options });
   }
 
   function renderKeywordChecklist(options = {}) {
+    /** Schedule keyword checklist rendering. */
     return settingsRenderScheduler.request({ source: "settings", force: true, ...options });
   }
 
   function assignKeywordOptions(payload) {
+    /** Validate and store keyword catalog data from the API response. */
     const nextCatalog = [];
 
     const data = payload.data;
@@ -294,6 +308,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   function applySelectedKeywords(payload) {
+    /** Apply canonical selected keyword IDs to the checklist controls. */
     const selectedIds = [];
     const payloadIds = payload.selected_keyword_ids;
     if (Array.isArray(payloadIds)) {
@@ -311,6 +326,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function loadSettings() {
+    /** Load canonical settings resources and render their controls. */
     const {
       user: userSettingsPayload,
       rules: rulesPayload,
@@ -357,6 +373,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function saveSettings() {
+    /** Validate, persist, and publish the current settings form values. */
     assertOnlineMutation("settings");
     const settings = selectSettings();
     const defaultDiners = clampInteger(settings.user.default_diners, DINERS_MIN, DINERS_MAX);
@@ -405,6 +422,7 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
   }
 
   async function runAction(action) {
+    /** Execute a settings action and surface failures in the settings status. */
     try {
       await action();
     } catch (error) {

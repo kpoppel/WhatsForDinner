@@ -1,4 +1,5 @@
 /** Register the PWA worker and reload once when a new worker takes control. */
+/** Register the app service worker and retain its navigation fallback boundary. */
 export function setupServiceWorker() {
   if (!("serviceWorker" in navigator)) {
     return;

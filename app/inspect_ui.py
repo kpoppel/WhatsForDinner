@@ -4,6 +4,7 @@ from fastapi.responses import HTMLResponse
 
 
 def render_inspector(api_prefix: str) -> HTMLResponse:
+    """Render the development inspector wired to the supplied API prefix."""
     """Return a standalone HTML response configured for the API prefix."""
 
     html = f"""<!doctype html>

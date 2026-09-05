@@ -25,6 +25,7 @@ import {
 import { readMealPlanCache } from "./selectors.js";
 import { gateway as gatewayApi } from "../api.js";
 
+/** Persist the selected meal-plan ID and mirror it in the store. */
 export function writeActiveMealPlanId(planId) {
   store.mealPlans.activePlanId = Number.isInteger(planId) ? planId : null;
   try {
@@ -38,6 +39,7 @@ export function writeActiveMealPlanId(planId) {
   }
 }
 
+/** Replace and persist the meal-plan cache owned by the store. */
 export function writeMealPlanCache(nextCache) {
   store.mealPlans.cache = nextCache;
   notifyStore("meal-plans", "cache", "cached");
@@ -48,6 +50,7 @@ export function writeMealPlanCache(nextCache) {
   }
 }
 
+/** Cache list summaries without discarding already-loaded plan details. */
 export function cachePlanListRows(plans) {
   const current = readMealPlanCache();
   writeMealPlanCache({
@@ -57,6 +60,7 @@ export function cachePlanListRows(plans) {
   });
 }
 
+/** Cache one validated plan detail by its stable numeric ID. */
 export function cachePlanDetail(plan) {
   const planId = Number(plan && plan.plan_id);
   if (!Number.isInteger(planId)) {
@@ -76,6 +80,7 @@ export function cachePlanDetail(plan) {
   });
 }
 
+/** Persist the plan projection used by the home tab. */
 export function writeHomeActivePlanCache(plan) {
   if (!plan || typeof plan !== "object") {
     return;
@@ -92,38 +97,47 @@ export function writeHomeActivePlanCache(plan) {
   }
 }
 
+/** Rehydrate shopping state through the store-owned persistence path. */
 export function loadShoppingCacheCommand() {
   loadShoppingCache();
 }
 
+/** Persist current shopping state after a command-level mutation. */
 export function persistShoppingModel() {
   persistShoppingCache();
 }
 
+/** Reapply queued overlays after canonical shopping hydration. */
 export function applyShoppingPendingChanges() {
   applyPendingChanges();
 }
 
+/** Normalize queued operations before they leave the browser. */
 export function compactShoppingPendingChanges() {
   compactPendingChanges();
 }
 
+/** Queue a shopping create and its optimistic projection. */
 export function createShoppingChange(payload) {
   queueCreateChange(payload);
 }
 
+/** Queue an entry patch and update its optimistic row. */
 export function updateShoppingChange(entryId, patch) {
   queueUpdateChange(entryId, patch);
 }
 
+/** Queue deletion and remove the entry from the optimistic model. */
 export function deleteShoppingChange(entryId) {
   queueDeleteChange(entryId);
 }
 
+/** Queue one of the contract-defined shopping statuses. */
 export function setShoppingStatus(entryId, status) {
   queueStatusChange(entryId, status);
 }
 
+/** Atomically take the compacted queue for a sync request. */
 export function takeShoppingPendingChanges() {
   compactPendingChanges();
   const outgoing = [...store.shopping.pendingChanges];
@@ -132,6 +146,7 @@ export function takeShoppingPendingChanges() {
   return outgoing;
 }
 
+/** Restore unsent changes after a failed request and reproject them. */
 export function restoreShoppingPendingChanges(changes) {
   store.shopping.pendingChanges = [...changes, ...store.shopping.pendingChanges];
   compactPendingChanges();
@@ -139,6 +154,7 @@ export function restoreShoppingPendingChanges(changes) {
   persistShoppingCache();
 }
 
+/** Replace resolved queue rows with server rejection records. */
 export function applyShoppingSyncResult(outgoing, rejected) {
   const rejectedRows = rejected instanceof Array ? rejected : [];
   const outgoingIds = new Set(outgoing.map((change) => queuedEntryId(change)));
@@ -150,6 +166,7 @@ export function applyShoppingSyncResult(outgoing, rejected) {
   persistShoppingCache();
 }
 
+/** Replace canonical shopping rows while retaining actionable rejections. */
 export function hydrateShoppingModel(sections, cursor) {
   const merged = {};
   for (const status of ["remaining", "skipped", "completed"]) {
@@ -170,25 +187,30 @@ export function hydrateShoppingModel(sections, cursor) {
   persistShoppingCache();
 }
 
+/** Publish browser/API connectivity changes to observers. */
 export function setConnectivityState(nextState) {
   store.connectivity = { ...store.connectivity, ...nextState };
   notifyStore("sync", "connectivity", "server");
 }
 
+/** Toggle a shopping section through the store command boundary. */
 export function toggleShoppingSection(section) {
   toggleShoppingSectionState(section);
 }
 
+/** Update synchronization status and notify the owning domain. */
 export function setSyncState(nextState) {
   store.sync = { ...store.sync, ...nextState };
   notifyStore("sync", nextState.source || "coordinator", nextState.status || store.sync.status);
 }
 
+/** Merge server settings into the observable settings slice. */
 export function setSettingsSlice(nextSettings) {
   store.settings = { ...store.settings, ...nextSettings };
   notifyStore("settings", "command", "server");
 }
 
+/** Reject mutations unless both browser and API connectivity are available. */
 export function assertOnlineMutation(domain) {
   const browserOnline = typeof navigator === "undefined" || navigator.onLine !== false;
   if (!browserOnline || !store.shopping.apiReachable) {
@@ -196,36 +218,43 @@ export function assertOnlineMutation(domain) {
   }
 }
 
+/** Apply an optimistic user-setting field update. */
 export function setSettingsUserValue(field, value) {
   store.settings.user = { ...store.settings.user, [field]: value };
   notifyStore("settings", "command", "optimistic");
 }
 
+/** Apply an optimistic meal-plan rule update. */
 export function setSettingsRuleValue(field, value) {
   store.settings.rules = { ...store.settings.rules, [field]: value };
   notifyStore("settings", "command", "optimistic");
 }
 
+/** Replace the server-provided keyword catalog. */
 export function setKeywordCatalog(rows) {
   store.settings.keywordCatalog = Array.isArray(rows) ? rows : [];
   notifyStore("settings", "command", "server");
 }
 
+/** Replace selected keyword IDs while preserving Set semantics for consumers. */
 export function setSelectedKeywordIds(ids) {
   store.settings.selectedKeywordIds = new Set(Array.isArray(ids) ? ids : []);
   notifyStore("settings", "command", "optimistic");
 }
 
+/** Set the plan selected by the meal-plan view. */
 export function setMealPlanSelection(planId) {
   store.mealPlans.selectedPlanId = Number.isInteger(planId) ? planId : null;
   notifyStore("meal-plans", "command", "optimistic");
 }
 
+/** Publish the currently opened meal-plan detail. */
 export function setMealPlanDetail(plan) {
   store.mealPlans.selectedPlan = plan && typeof plan === "object" ? plan : null;
   notifyStore("meal-plans", "command", "server");
 }
 
+/** Accept only monotonic revisions so stale responses cannot regress state. */
 export function setRevision(revision, source = "server") {
   if (!Number.isInteger(revision) || revision < store.sync.revision) {
     return false;
@@ -236,10 +265,12 @@ export function setRevision(revision, source = "server") {
   return true;
 }
 
+/** Test whether an incoming response is current enough to apply. */
 export function acceptsRevision(revision) {
   return !Number.isInteger(revision) || revision >= store.sync.revision;
 }
 
+/** Publish unresolved backend projections for retry UI and coordination. */
 export function setPendingProjections(projections, source = "server") {
   store.sync.pendingProjections = Array.isArray(projections) ? projections : [];
   persistShoppingCache();
@@ -312,6 +343,7 @@ export const settingsCommands = {
   },
 };
 
+/** Load settings resources and publish their canonical server values. */
 export async function loadSettingsResources() {
   const [user, rules, keywords, selectedKeywords] = await Promise.all([
     settingsCommands.user(),
@@ -322,6 +354,7 @@ export async function loadSettingsResources() {
   return { user, rules, keywords, selectedKeywords };
 }
 
+/** Persist settings resources online and update the local slices on success. */
 export async function saveSettingsResources(user, rules, keywordIds) {
   await settingsCommands.updateUser(user);
   await settingsCommands.updateRules(rules);

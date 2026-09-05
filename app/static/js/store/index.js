@@ -56,6 +56,11 @@ export const store = {
 const subscribers = new Set();
 let crossTabSyncInstalled = false;
 
+/**
+ * Subscribe a UI module to store notifications.
+ * The returned disposer is idempotent because Set.delete is harmless when
+ * the listener was already removed.
+ */
 export function subscribe(listener) {
   if (typeof listener !== "function") {
     return () => {};
@@ -64,6 +69,7 @@ export function subscribe(listener) {
   return () => subscribers.delete(listener);
 }
 
+/** Install the one storage listener that rehydrates changes from other tabs. */
 export function installCrossTabSync() {
   if (crossTabSyncInstalled || typeof window === "undefined") {
     return;
@@ -78,6 +84,7 @@ export function installCrossTabSync() {
   });
 }
 
+/** Publish domain metadata and notify all observers after a store mutation. */
 export function notifyStore(domain, source, status, revision = store.sync.revision) {
   const target = domain === "shopping"
     ? store.shopping
@@ -93,6 +100,7 @@ export function notifyStore(domain, source, status, revision = store.sync.revisi
   }
 }
 
+/** Store the latest API probe result used by online-only mutations. */
 export function updateApiReachability(value) {
   const reachable = Boolean(value);
   store.shopping.apiReachable = reachable;
@@ -100,12 +108,14 @@ export function updateApiReachability(value) {
   notifyStore("sync", "connectivity", "server");
 }
 
+/** Toggle a section preference without affecting shopping data. */
 export function toggleShoppingSectionState(section) {
   store.shopping.collapsedSections[section] = !store.shopping.collapsedSections[section];
 }
 
 export const SHOPPING_STATUSES = new Set(["remaining", "skipped", "completed"]);
 
+/** Extract the stable entry ID from either a queued create or mutation. */
 export function queuedEntryId(change) {
   if (!change || typeof change !== "object") {
     return null;
@@ -122,6 +132,11 @@ function mergeCreatePayload(basePayload, patch) {
   return { ...base, ...delta };
 }
 
+/**
+ * Collapse queued operations per entry while preserving first-touch order.
+ * Create/update merges, create/delete cancels, and later updates replace
+ * earlier deletes so sync receives the smallest valid operation set.
+ */
 export function compactPendingChanges() {
   const shopping = store.shopping;
   const order = [];
@@ -254,6 +269,7 @@ function applyShoppingChange(change, applyDelete) {
   }
 }
 
+/** Reapply optimistic and rejected overlays on top of canonical rows. */
 export function applyPendingChanges() {
   for (const change of store.shopping.pendingChanges) {
     applyShoppingChange(change, true);
@@ -263,6 +279,7 @@ export function applyPendingChanges() {
   }
 }
 
+/** Persist the shopping slice and sync metadata for reload/offline recovery. */
 export function persistShoppingCache() {
   try {
     localStorage.setItem("wfd.shopping-mode.v1", JSON.stringify({
@@ -275,6 +292,7 @@ export function persistShoppingCache() {
   }
 }
 
+/** Rehydrate cached shopping state, compact its queue, and rebuild overlays. */
 export function loadShoppingCache() {
   try {
     const raw = localStorage.getItem("wfd.shopping-mode.v1");
@@ -312,6 +330,7 @@ export function loadShoppingCache() {
   persistShoppingCache();
 }
 
+/** Queue a validated status update through the shared mutation path. */
 export function queueStatusChange(entryId, status) {
   const id = shoppingItemId(entryId);
   if (id !== null && SHOPPING_STATUSES.has(status)) {
@@ -319,6 +338,7 @@ export function queueStatusChange(entryId, status) {
   }
 }
 
+/** Queue deletion and remove the row optimistically from the visible model. */
 export function queueDeleteChange(entryId) {
   const shopping = store.shopping;
   const id = shoppingItemId(entryId);
@@ -334,6 +354,7 @@ export function queueDeleteChange(entryId) {
   notifyStore("shopping", "command", "optimistic");
 }
 
+/** Queue a patch and apply it immediately to the optimistic row. */
 export function queueUpdateChange(entryId, patch) {
   const shopping = store.shopping;
   const id = shoppingItemId(entryId);
@@ -352,6 +373,7 @@ export function queueUpdateChange(entryId, patch) {
   notifyStore("shopping", "command", "optimistic");
 }
 
+/** Queue a local create and project it immediately into the shopping model. */
 export function queueCreateChange(payload) {
   const shopping = store.shopping;
   if (!payload || typeof payload !== "object") {

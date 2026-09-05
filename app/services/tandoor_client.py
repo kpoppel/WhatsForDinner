@@ -30,16 +30,19 @@ class TandoorClient:
         self._http_client: httpx.AsyncClient | None = None
 
     async def close(self) -> None:
+        """Close the shared HTTP client during application shutdown."""
         if self._http_client is not None:
             await self._http_client.aclose()
             self._http_client = None
 
     def _client(self) -> httpx.AsyncClient:
+        """Lazily create and then reuse the pooled upstream HTTP client."""
         if self._http_client is None:
             self._http_client = httpx.AsyncClient(timeout=self.timeout)
         return self._http_client
 
     def _headers(self) -> dict[str, str]:
+        """Build authenticated JSON headers without exposing the token value."""
         headers = {"Accept": "application/json"}
         if self.api_token:
             token = self.api_token.strip()
@@ -51,6 +54,7 @@ class TandoorClient:
         return headers
 
     def _record_timing(self, method: str, path: str, started_at: float, status: object, error: Exception | None = None) -> None:
+        """Emit optional upstream timing telemetry without affecting requests."""
         if not settings.performance_metrics_enabled:
             return
         logging.getLogger("wfd.tandoor").info(
@@ -69,6 +73,7 @@ class TandoorClient:
         params: dict[str, Any] | None = None,
         json: dict[str, Any] | None = None,
     ) -> Any:
+        """Execute one upstream request and normalize HTTP failures to TandoorError."""
         url = f"{self.base_url}{path}"
         started_at = perf_counter()
         status: object = "exception"
@@ -100,6 +105,7 @@ class TandoorClient:
             raise TandoorError(f"Unable to reach Tandoor at {self.base_url}.") from exc
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        """Issue a GET through the shared request/error-normalization path."""
         return await self._request("GET", path, params=params)
 
     async def list_recipes(
@@ -109,6 +115,7 @@ class TandoorClient:
         page: int | None = None,
         keyword_ids: list[int] | None = None,
     ) -> Any:
+        """List recipes using Tandoor pagination, search, and keyword filters."""
         params: dict[str, Any] = {"page_size": limit}
         if page is not None:
             params["page"] = page
@@ -119,16 +126,20 @@ class TandoorClient:
         return await self._get("/api/recipe/", params=params)
 
     async def get_recipe(self, recipe_id: int) -> Any:
+        """Fetch one complete recipe payload from Tandoor."""
         return await self._get(f"/api/recipe/{recipe_id}/")
 
     async def list_tags(self) -> Any:
+        """Fetch the keyword catalog used by recipe filtering."""
         return await self._get("/api/keyword/")
 
     async def list_meal_types(self, limit: int = 50) -> Any:
+        """Fetch available upstream meal types for generated plans."""
         return await self._get("/api/meal-type/", params={"page_size": limit})
 
     @staticmethod
     def normalize_recipe(recipe: dict[str, Any]) -> dict[str, Any]:
+        """Convert variant Tandoor recipe shapes into the app's stable recipe contract."""
         ingredients: list[dict[str, Any]] = []
 
         # Some Tandoor payloads expose ingredients under steps[].ingredients.
@@ -190,32 +201,41 @@ class TandoorClient:
         }
 
     async def list_meal_plans(self, limit: int = 50) -> Any:
+        """List upstream meal-plan rows for reconciliation."""
         return await self._get("/api/meal-plan/", params={"page_size": limit})
 
     async def create_meal_plan(self, payload: dict[str, Any]) -> Any:
+        """Create one upstream meal-plan row."""
         return await self._request("POST", "/api/meal-plan/", json=payload)
 
     async def update_meal_plan(self, meal_id: int, payload: dict[str, Any]) -> Any:
+        """Patch one upstream meal-plan row by its Tandoor ID."""
         return await self._request("PATCH", f"/api/meal-plan/{meal_id}/", json=payload)
 
     async def delete_meal_plan(self, meal_id: int) -> Any:
+        """Delete one upstream meal-plan row."""
         return await self._request("DELETE", f"/api/meal-plan/{meal_id}/")
 
     async def list_shopping_entries(self, limit: int = 100) -> Any:
+        """List upstream shopping entries for canonical hydration."""
         return await self._get("/api/shopping-list-entry/", params={"page_size": limit})
 
     async def create_shopping_entry(self, payload: dict[str, Any]) -> Any:
+        """Create one upstream shopping entry."""
         return await self._request("POST", "/api/shopping-list-entry/", json=payload)
 
     async def update_shopping_entry(self, entry_id: int, payload: dict[str, Any]) -> Any:
+        """Patch one upstream shopping entry by ID."""
         return await self._request(
             "PATCH", f"/api/shopping-list-entry/{entry_id}/", json=payload
         )
 
     async def delete_shopping_entry(self, entry_id: int) -> Any:
+        """Delete one upstream shopping entry by ID."""
         return await self._request("DELETE", f"/api/shopping-list-entry/{entry_id}/")
 
     async def create_shopping_list_from_recipe(self, payload: dict[str, Any]) -> Any:
+        """Activate a recipe in Tandoor's shopping-list workflow."""
         return await self._request("POST", "/api/shopping-list-recipe/", json=payload)
 
     async def bulk_create_shopping_list_recipe_entries(
@@ -223,6 +243,7 @@ class TandoorClient:
         shopping_recipe_id: int,
         payload: dict[str, Any],
     ) -> Any:
+        """Bulk-create shopping entries for an activated recipe."""
         return await self._request(
             "POST",
             f"/api/shopping-list-recipe/{shopping_recipe_id}/bulk_create_entries/",

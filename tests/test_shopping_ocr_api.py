@@ -8,6 +8,7 @@ client = TestClient(app)
 
 
 def test_shopping_list_ocr_requires_configured_api_key(monkeypatch) -> None:
+    """Verify OCR is unavailable when its provider credential is absent."""
     monkeypatch.setattr("app.config.settings.google_llm_api_key", "")
 
     response = client.post(
@@ -19,6 +20,7 @@ def test_shopping_list_ocr_requires_configured_api_key(monkeypatch) -> None:
 
 
 def test_shopping_list_ocr_rejects_non_image_upload(monkeypatch) -> None:
+    """Verify the route rejects uploads whose MIME type is not an image."""
     monkeypatch.setattr("app.config.settings.google_llm_api_key", "test-key")
 
     response = client.post(
@@ -30,6 +32,7 @@ def test_shopping_list_ocr_rejects_non_image_upload(monkeypatch) -> None:
 
 
 def test_shopping_list_ocr_returns_parsed_items(monkeypatch) -> None:
+    """Verify successful OCR returns the normalized item response contract."""
     monkeypatch.setattr("app.config.settings.google_llm_api_key", "test-key")
 
     class FakeOcrClient:
@@ -48,6 +51,7 @@ def test_shopping_list_ocr_returns_parsed_items(monkeypatch) -> None:
 
 
 def test_shopping_list_ocr_returns_502_on_ocr_error(monkeypatch) -> None:
+    """Verify provider failures are translated into HTTP 502 responses."""
     monkeypatch.setattr("app.config.settings.google_llm_api_key", "test-key")
 
     from app.services.ocr_client import OcrError

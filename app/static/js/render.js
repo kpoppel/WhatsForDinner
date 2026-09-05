@@ -48,6 +48,7 @@ const renderScheduler = createRenderScheduler({
   getRevision: () => selectSyncState().revision,
 });
 
+/** Format numeric quantities without exposing floating-point noise in the UI. */
 function formatAmount(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
@@ -62,6 +63,7 @@ function formatAmount(value) {
     .replace(/(\.\d*?)0+$/, "$1");
 }
 
+/** Combine an amount and unit while preserving non-numeric source text. */
 function amountLine(amount, unit) {
   const amountText = formatAmount(amount);
   const unitText = String(unit || "").trim();
@@ -71,6 +73,11 @@ function amountLine(amount, unit) {
   return unitText ? `${amountText} ${unitText}` : amountText;
 }
 
+/**
+ * Merge rows for the same food while keeping separate unit totals.
+ * The returned rows retain all source entry IDs so mutations can address every
+ * underlying shopping entry represented by one visible card.
+ */
 function aggregateByFood(items) {
   const groups = new Map();
 
@@ -140,10 +147,12 @@ function aggregateByFood(items) {
   return merged.sort((a, b) => String(a.name).localeCompare(String(b.name)));
 }
 
+/** Register the card factory used by this renderer to avoid a module cycle. */
 export function initRender(createCardFn) {
   _createCard = createCardFn;
 }
 
+/** Update network, pending-change, and reconciliation indicators in the shell. */
 export function updateStatusBadges() {
   const network = document.getElementById("shop-mode-network");
   const pending = document.getElementById("shop-mode-pending");
@@ -180,16 +189,19 @@ export function updateStatusBadges() {
   );
 }
 
+/** Return shopping rows for a status in stable alphabetical display order. */
 export function sortedByStatus(status) {
   return selectShoppingItems()
     .filter((item) => item && item.status === status)
     .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 }
 
+/** Mark a card so a gesture-generated click is ignored once. */
 export function suppressNextCardClick(card) {
   card.dataset.suppressNextClick = "1";
 }
 
+/** Consume and clear a previously suppressed card click marker. */
 export function consumeSuppressedCardClick(card) {
   if (card.dataset.suppressNextClick === "1") {
     card.dataset.suppressNextClick = "0";
@@ -198,6 +210,7 @@ export function consumeSuppressedCardClick(card) {
   return false;
 }
 
+/** Build an accessible section heading with its current item count. */
 export function titleWithCount(label, count, collapsed) {
   if (typeof collapsed === "boolean") {
     return `${label} (${count}) ${collapsed ? "▸" : "▾"}`;
@@ -205,6 +218,7 @@ export function titleWithCount(label, count, collapsed) {
   return `${label} (${count})`;
 }
 
+/** Render a section heading from its configured DOM target and store state. */
 export function updateSectionTitle(key, count) {
   const config = SECTION_CONFIG[key];
   if (!config) {
@@ -223,6 +237,7 @@ export function updateSectionTitle(key, count) {
   }
 }
 
+/** Apply the persisted collapsed state to one collapsible shopping section. */
 export function applyCollapsedSectionState(key) {
   const config = SECTION_CONFIG[key];
   if (!config || !config.collapsible) {
@@ -235,6 +250,7 @@ export function applyCollapsedSectionState(key) {
   container.hidden = !!selectShoppingCollapsedSections()[key];
 }
 
+/** Toggle a collapsible section and immediately update its local presentation. */
 export function toggleCollapsedSection(key) {
   const config = SECTION_CONFIG[key];
   if (!config || !config.collapsible) {
@@ -245,6 +261,7 @@ export function toggleCollapsedSection(key) {
   updateSectionTitle(key, sortedByStatus(key).length);
 }
 
+/** Install mouse and keyboard handlers for a configured collapsible section. */
 export function wireCollapsibleSection(key) {
   const config = SECTION_CONFIG[key];
   if (!config || !config.collapsible) {
@@ -266,6 +283,7 @@ export function wireCollapsibleSection(key) {
   applyCollapsedSectionState(key);
 }
 
+/** Replace one section's DOM contents with sorted, optionally grouped cards. */
 export function renderSection(containerId, items, mode, groupByCategory = false) {
   const container = document.getElementById(containerId);
   container.innerHTML = "";
@@ -304,6 +322,11 @@ export function renderSection(containerId, items, mode, groupByCategory = false)
   return mergedItems.length;
 }
 
+/**
+ * Perform a revision-aware DOM render.
+ * Older generations and revisions are ignored so delayed work cannot overwrite
+ * a newer server response or optimistic state.
+ */
 function renderNow(options = {}) {
   const renderStartedAt = performance.now();
   const syncState = selectSyncState();
@@ -358,18 +381,22 @@ function renderNow(options = {}) {
   return true;
 }
 
+/** Return timing and source metadata from the most recent completed render. */
 export function getLastRenderMeta() {
   return lastRenderMeta;
 }
 
+/** Render immediately, primarily for callers that already own scheduling. */
 export function render(options = {}) {
   return renderNow(options);
 }
 
+/** Queue a render through the scheduler so bursts collapse into one frame. */
 export function requestRender(options = {}) {
   return renderScheduler.request(options);
 }
 
+/** Return the number of renders performed by the scheduler. */
 export function getRenderCount() {
   return renderScheduler.getRenderCount();
 }

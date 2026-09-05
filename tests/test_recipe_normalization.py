@@ -4,6 +4,7 @@ from app.services.tandoor_client import TandoorClient
 
 
 def test_normalize_recipe_uses_step_ingredients_when_present() -> None:
+    """Verify nested step ingredients take precedence over top-level duplicates."""
     recipe = {
         "id": 53,
         "name": "Cremet citronsauce til pasta",

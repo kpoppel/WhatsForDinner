@@ -63,6 +63,7 @@ if (
   initShopEditor();
 }
 
+/** Initialize editor controls, cache hydration, and event bindings. */
 function initShopEditor() {
   bindSegmentControls();
   bindToolbarControls();
@@ -72,19 +73,23 @@ function initShopEditor() {
   renderEditor({ source: "initial", force: true });
 }
 
+/** Publish a user-visible editor status message. */
 function setStatus(message) {
   statusNode.textContent = message;
 }
 
+/** Notify the app shell and sibling views after editor mutations. */
 function publishDataChanged() {
   window.dispatchEvent(new CustomEvent("wfd:data-changed", { detail: { source: "shop-editor" } }));
 }
 
+/** Return the current grouping mode selected by the editor. */
 function activeView() {
   const value = localStorage.getItem(VIEW_KEY);
   return value === "recipe" ? "recipe" : SEGMENT_DEFAULT;
 }
 
+/** Change grouping mode and rerender without changing canonical data. */
 function setActiveView(next) {
   localStorage.setItem(VIEW_KEY, next);
   for (const button of segmentButtons) {
@@ -95,6 +100,7 @@ function setActiveView(next) {
   renderEditor({ source: "local-view", force: true });
 }
 
+/** Bind grouping controls to the editor view state. */
 function bindSegmentControls() {
   setActiveView(activeView());
   for (const button of segmentButtons) {
@@ -105,6 +111,7 @@ function bindSegmentControls() {
   }
 }
 
+/** Bind add, OCR, refresh, and clear actions in the editor toolbar. */
 function bindToolbarControls() {
   addButton.addEventListener("click", () => {
     openAddModal();
@@ -129,6 +136,7 @@ function bindToolbarControls() {
   });
 }
 
+/** Return distinct store-group labels available in canonical rows. */
 function serverStoreGroupNames() {
   const categories = new Set(["Other"]);
   for (const item of selectShoppingItems()) {
@@ -143,6 +151,7 @@ function serverStoreGroupNames() {
   return Array.from(categories).sort((a, b) => a.localeCompare(b));
 }
 
+/** Populate a category select while retaining its current value when valid. */
 function populateCategorySelect(selectId, selectedValue) {
   const select = document.getElementById(selectId);
   if (!(select instanceof HTMLSelectElement)) {
@@ -163,6 +172,7 @@ function populateCategorySelect(selectId, selectedValue) {
   }
 }
 
+/** Connect shell tab changes to editor visibility and refresh behavior. */
 function bindTabActivation() {
   const shopButton = document.querySelector('.wf-nav-btn[data-tab="shop-editor"]');
   if (shopButton) {
@@ -184,6 +194,7 @@ function bindTabActivation() {
   });
 }
 
+/** Bind modal open/close and backdrop interactions for editor dialogs. */
 function bindModalControls() {
   document.getElementById("wf-add-cancel")?.addEventListener("click", closeAddModal);
   document.getElementById("wf-add-save")?.addEventListener("click", () => {
@@ -221,12 +232,14 @@ function bindModalControls() {
   });
 }
 
+/** Read visible shopping rows from the shared store projection. */
 function allItems() {
   return selectShoppingItems()
     .filter((row) => row && row.id !== undefined && row.id !== null)
     .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
 }
 
+/** Format aggregate quantities without floating-point display noise. */
 function formatMergedAmount(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
@@ -241,6 +254,7 @@ function formatMergedAmount(value) {
     .replace(/(\.\d*?)0+$/, "$1");
 }
 
+/** Combine an amount and unit for an editor row. */
 function amountLine(amount, unit) {
   const amountText = formatMergedAmount(amount);
   const unitText = String(unit || "").trim();
@@ -250,6 +264,7 @@ function amountLine(amount, unit) {
   return unitText ? `${amountText} ${unitText}` : amountText;
 }
 
+/** Resolve normalized recipe identity and label for an item. */
 function recipeInfo(item) {
   const raw = item && typeof item.recipe === "object" ? item.recipe : null;
   const recipeId = Number.isInteger(raw?.id) ? raw.id : null;
@@ -262,6 +277,7 @@ function recipeInfo(item) {
   };
 }
 
+/** Return the stable recipe grouping key used by recipe view. */
 function recipeGroup(item) {
   const recipe = recipeInfo(item);
   if (recipe.id !== null) {
@@ -279,6 +295,7 @@ function recipeGroup(item) {
   };
 }
 
+/** Resolve a display store-group name from a normalized item. */
 function storeGroupName(item) {
   const group = item?.store_group;
   if (group && typeof group === "object") {
@@ -290,6 +307,7 @@ function storeGroupName(item) {
   return "General";
 }
 
+/** Merge same-food rows for store view while retaining source entry IDs. */
 function aggregateStoreItems(items) {
   const buckets = new Map();
 
@@ -351,6 +369,7 @@ function aggregateStoreItems(items) {
   return merged.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
 }
 
+/** Select the grouping key for the active editor view. */
 function groupKey(item, view) {
   if (view === "recipe") {
     return recipeGroup(item);
@@ -371,6 +390,7 @@ function groupKey(item, view) {
   };
 }
 
+/** Build editor groups according to the active view mode. */
 function groupedItems() {
   const view = activeView();
   const groups = new Map();
@@ -397,6 +417,7 @@ function groupedItems() {
     .map(([label, items]) => [label, items]);
 }
 
+/** Reflect whether any visible item has a due reminder. */
 function updateDueBanner() {
   const due = allItems().filter((item) => item.reminder_enabled && item.reminder_due);
   if (due.length === 0) {
@@ -408,6 +429,7 @@ function updateDueBanner() {
   dueBannerNode.textContent = `${due.length} reminder${due.length === 1 ? "" : "s"} due today.`;
 }
 
+/** Render canonical and optimistic rows into the editor DOM. */
 function renderEditorNow() {
   listNode.innerHTML = "";
   updateDueBanner();
@@ -437,14 +459,17 @@ function renderEditorNow() {
   }
 }
 
+/** Schedule an editor render through the shared store notification path. */
 function renderEditor(options = {}) {
   return editorRenderScheduler.request({ source: "editor", force: options.force !== false, ...options });
 }
 
+/** Mark a row click as consumed by a preceding gesture. */
 function suppressNextRowClick(row) {
   row.dataset.suppressNextClick = "1";
 }
 
+/** Consume a gesture-suppressed row click marker. */
 function consumeSuppressedRowClick(row) {
   if (row.dataset.suppressNextClick === "1") {
     row.dataset.suppressNextClick = "0";
@@ -453,6 +478,7 @@ function consumeSuppressedRowClick(row) {
   return false;
 }
 
+/** Queue deletion for all source IDs represented by an editor row. */
 async function deleteEditorEntries(entryIds) {
   const ids = Array.from(new Set(entryIds.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value !== 0)));
   if (ids.length === 0) {
@@ -475,6 +501,7 @@ async function deleteEditorEntries(entryIds) {
   publishDataChanged();
 }
 
+/** Attach swipe-to-delete behavior while suppressing synthetic clicks. */
 function attachSwipeRightDeleteGesture(row, entryIds) {
   let startX = 0;
   let startY = 0;
@@ -529,6 +556,7 @@ function attachSwipeRightDeleteGesture(row, entryIds) {
   });
 }
 
+/** Build the quantity label shown in an editor row. */
 function itemAmountLabel(item) {
   const amount = Number(item?.amount ?? 0);
   const safeAmount = Number.isFinite(amount) ? amount : 0;
@@ -536,6 +564,7 @@ function itemAmountLabel(item) {
   return `${formatAmount(safeAmount)}${unit ? ` ${unit}` : ""}`.trim();
 }
 
+/** Open the picker used to choose one source row from a merged group. */
 function openMergedItemPicker(groupedItem, entryIds) {
   const items = Array.from(new Set(entryIds))
     .map((entryId) => selectShoppingItemById(entryId))
@@ -583,11 +612,13 @@ function openMergedItemPicker(groupedItem, entryIds) {
   mergePickModal.hidden = false;
 }
 
+/** Close the merged-row source picker and clear its transient state. */
 function closeMergePickModal() {
   mergePickModal.hidden = true;
   mergePickList.innerHTML = "";
 }
 
+/** Build one editable row and bind its mutation controls. */
 function createEditorRow(item) {
   const row = document.createElement("article");
   row.className = "wf-editor-item";
@@ -719,6 +750,7 @@ function createEditorRow(item) {
   return row;
 }
 
+/** Validate and queue a numeric amount update for one entry. */
 async function adjustAmount(entryId, nextAmount) {
   const rounded = Math.round(nextAmount * 2) / 2;
   const isLocalAdHoc = Number(entryId) < 0;
@@ -756,6 +788,7 @@ function deriveReminderDate(item) {
   return null;
 }
 
+/** Toggle reminder metadata and queue the resulting entry patch. */
 async function toggleReminder(item) {
   if (!item.reminder_enabled) {
     const derived = deriveReminderDate(item);
@@ -787,6 +820,7 @@ async function toggleReminder(item) {
   publishDataChanged();
 }
 
+/** Open and initialize the manual add-item dialog. */
 function openAddModal() {
   addModal.hidden = false;
   const categories = serverStoreGroupNames();
@@ -799,10 +833,12 @@ function openAddModal() {
   setChecked("wf-add-reminder-enabled", false);
 }
 
+/** Close the manual add-item dialog. */
 function closeAddModal() {
   addModal.hidden = true;
 }
 
+/** Validate the add form, queue its create, and sync when possible. */
 async function saveAddModal() {
   const name = getInputValue("wf-add-name").trim();
   if (!name) {
@@ -850,23 +886,27 @@ async function saveAddModal() {
 
 let pendingOcrFile = null;
 
+/** Open the OCR review dialog in its initial state. */
 function openOcrModal() {
   ocrModal.hidden = false;
   showOcrLoadingState();
 }
 
+/** Close the OCR review dialog and reset transient review state. */
 function closeOcrModal() {
   ocrModal.hidden = true;
   pendingOcrFile = null;
   ocrList.innerHTML = "";
 }
 
+/** Show progress while the OCR request is running. */
 function showOcrLoadingState() {
   ocrLoadingNode.hidden = false;
   ocrErrorNode.hidden = true;
   ocrResultsNode.hidden = true;
 }
 
+/** Show an actionable OCR failure without losing the dialog context. */
 function showOcrErrorState(message) {
   ocrLoadingNode.hidden = true;
   ocrErrorNode.hidden = false;
@@ -874,6 +914,7 @@ function showOcrErrorState(message) {
   ocrErrorMessageNode.textContent = message;
 }
 
+/** Render editable OCR rows for user review before creating entries. */
 function showOcrResultsState(items) {
   ocrLoadingNode.hidden = true;
   ocrErrorNode.hidden = true;
@@ -913,6 +954,7 @@ function createOcrReviewRow(text) {
   return row;
 }
 
+/** Upload an image for OCR and populate the review model with results. */
 async function submitOcrPhoto(file) {
   pendingOcrFile = file;
   showOcrLoadingState();
@@ -936,6 +978,7 @@ async function submitOcrPhoto(file) {
   showOcrResultsState(items);
 }
 
+/** Queue reviewed OCR rows as ad-hoc shopping entries. */
 async function saveOcrReviewModal() {
   const category = getInputValue("wf-ocr-category").trim() || "Other";
   const names = Array.from(ocrList.querySelectorAll("input"))
@@ -998,6 +1041,7 @@ function closeEditModal() {
   editModal.hidden = true;
 }
 
+/** Validate and queue edits from the active item modal. */
 async function saveEditModal() {
   const entryId = Number(getInputValue("wf-edit-entry-id"));
   if (!Number.isInteger(entryId) || entryId === 0) {
@@ -1036,6 +1080,7 @@ async function saveEditModal() {
   publishDataChanged();
 }
 
+/** Delete the item currently open in the edit modal. */
 async function deleteFromEditModal() {
   const entryId = Number(getInputValue("wf-edit-entry-id"));
   if (!Number.isInteger(entryId) || entryId === 0) {
@@ -1055,6 +1100,7 @@ async function deleteFromEditModal() {
   publishDataChanged();
 }
 
+/** Queue deletion for every currently visible shopping item. */
 async function clearAllItems() {
   const allItems = selectShoppingItems().filter((item) => item && item.id !== undefined && item.id !== null);
   if (allItems.length === 0) {
@@ -1080,6 +1126,7 @@ async function clearAllItems() {
   publishDataChanged();
 }
 
+/** Apply an optimistic patch and flush it through the sync workflow. */
 async function queueAndSyncUpdate(entryId, patch) {
   updateShoppingChange(entryId, patch);
   persistShoppingModel();

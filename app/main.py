@@ -26,6 +26,7 @@ logger = logging.getLogger("wfd.api")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    """Own shared upstream resources for the FastAPI process lifetime."""
     yield
     await tandoor_client.close()
 
@@ -43,6 +44,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
+    """Attach a correlation ID and timing headers to every HTTP response."""
     correlation_id = request.headers.get("X-Correlation-ID") or str(uuid4())
     request.state.correlation_id = correlation_id
     started_at = perf_counter()
@@ -78,6 +80,7 @@ async def correlation_id_middleware(request: Request, call_next):
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Return JSON-safe validation details and log their request context."""
     correlation_id = getattr(request.state, "correlation_id", "unknown")
     logger.warning(
         "event=request_validation_failed method=%s path=%s correlation_id=%s errors=%s",
@@ -91,11 +94,13 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
 
 @app.get(f"{settings.api_v1_prefix}/openapi.json", include_in_schema=False)
 async def versioned_openapi_schema() -> dict:
+    """Serve the API schema under the versioned documentation prefix."""
     return app.openapi()
 
 
 @app.get(f"{settings.api_v1_prefix}/docs", include_in_schema=False)
 async def versioned_swagger_docs() -> object:
+    """Serve Swagger UI configured for the versioned schema URL."""
     return get_swagger_ui_html(
         openapi_url=f"{settings.api_v1_prefix}/openapi.json",
         title=f"{settings.app_name} API - Swagger UI",
@@ -104,6 +109,7 @@ async def versioned_swagger_docs() -> object:
 
 @app.get(f"{settings.api_v1_prefix}/redoc", include_in_schema=False)
 async def versioned_redoc_docs() -> object:
+    """Serve ReDoc configured for the versioned schema URL."""
     return get_redoc_html(
         openapi_url=f"{settings.api_v1_prefix}/openapi.json",
         title=f"{settings.app_name} API - ReDoc",
@@ -112,6 +118,7 @@ async def versioned_redoc_docs() -> object:
 
 @app.get("/app", include_in_schema=False)
 async def user_app() -> object:
+    """Render the unified application shell."""
     return render_user_app(
         settings.api_v1_prefix,
         settings.tandoor_base_url,
@@ -121,11 +128,13 @@ async def user_app() -> object:
 
 @app.get("/inspect", include_in_schema=False)
 async def inspect() -> object:
+    """Render the development inspection page."""
     return render_inspector(settings.api_v1_prefix)
 
 
 @app.get("/shopping-sw.js", include_in_schema=False)
 async def shopping_service_worker() -> FileResponse:
+    """Serve the PWA service worker with its required scope header."""
     return FileResponse(
         "app/static/shopping-sw.js",
         media_type="application/javascript",
@@ -135,6 +144,7 @@ async def shopping_service_worker() -> FileResponse:
 
 @app.get("/shopping.webmanifest", include_in_schema=False)
 async def shopping_webmanifest() -> FileResponse:
+    """Serve the application web manifest from static assets."""
     return FileResponse(
         "app/static/shopping.webmanifest",
         media_type="application/manifest+json",

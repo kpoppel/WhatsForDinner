@@ -51,6 +51,7 @@ class ShoppingService:
         extract_results: Callable[[Any], list[dict[str, Any]]],
         build_shopping_view: Callable[[list[dict[str, Any]]], dict[str, Any]],
     ) -> dict[str, Any]:
+        """Load Tandoor entries, merge local overlays, and return a canonical view."""
         try:
             data = await self._client.list_shopping_entries(limit=limit)
         except TandoorError as exc:
@@ -74,6 +75,7 @@ class ShoppingService:
         status_to_tandoor_fields: Callable[[str], dict[str, Any]],
         operation_name: str,
     ) -> dict[str, Any]:
+        """Create either a local ad-hoc item or a Tandoor-backed shopping entry."""
         request_payload = dict(payload)
         reminder_patch, has_reminder_patch = extract_reminder_patch(request_payload)
         is_ad_hoc = bool(request_payload.pop("ad_hoc", False))
@@ -128,6 +130,7 @@ class ShoppingService:
         effective_status: Callable[[dict[str, Any], dict[str, str]], str],
         operation_name: str,
     ) -> dict[str, Any]:
+        """Apply a validated patch to local storage or Tandoor and record the event."""
         request_payload = dict(payload)
         reminder_patch, has_reminder_patch = extract_reminder_patch(request_payload)
 
@@ -233,6 +236,7 @@ class ShoppingService:
         ensure_tandoor_writes_enabled: Callable[[str], None],
         operation_name: str,
     ) -> dict[str, Any]:
+        """Delete a local item or upstream entry and clear its derived overlays."""
         deleted_local = self._state.delete_local_shopping_entry(entry_id)
         if deleted_local is not None:
             self._state.delete_shopping_status(entry_id)
@@ -263,6 +267,7 @@ class ShoppingService:
         extract_results: Callable[[Any], list[dict[str, Any]]],
         build_shopping_view: Callable[[list[dict[str, Any]]], dict[str, Any]],
     ) -> dict[str, Any]:
+        """Serialize offline mutations, classify rejections, and rehydrate canonical data."""
         async with self._sync_lock:
             applied: list[dict[str, Any]] = []
             rejected: list[dict[str, Any]] = []
@@ -377,6 +382,7 @@ class ShoppingService:
         extract_results: Callable[[Any], list[dict[str, Any]]],
         build_shopping_view: Callable[[list[dict[str, Any]]], dict[str, Any]],
     ) -> dict[str, Any]:
+        """Retry a failed canonical read and clear its projection marker on success."""
         pending = self._state.pending_projection(operation_id)
         if (
             pending is None
