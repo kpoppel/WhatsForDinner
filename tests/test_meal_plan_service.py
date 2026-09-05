@@ -1301,17 +1301,89 @@ def test_sync_from_tandoor_keeps_unmarked_rows_unfiled(tmp_path) -> None:
     second = asyncio.run(service.sync_from_tandoor())
 
     plan_ids = sorted(int(plan["plan_id"]) for plan in plans)
-    assert first["changed_plan_ids"] == []
+    assert first["changed_plan_ids"] == plan_ids
     assert second["changed_plan_ids"] == []
     first_plan = state.get_meal_plan(plan_ids[0])
     second_plan = state.get_meal_plan(plan_ids[1])
-    assert first_plan["entries"][0]["recipe"] is None
-    assert second_plan["entries"][0]["recipe"] is None
+    assert first_plan["entries"] == []
+    assert second_plan["entries"] == []
 
     client.meal_plan_rows[77]["recipe"] = {"id": 44, "name": "Updated salad"}
     changed = asyncio.run(service.sync_from_tandoor())
     assert changed["changed_plan_ids"] == []
     assert client.meal_plan_rows[77]["recipe"]["id"] == 44
+
+
+def test_sync_from_tandoor_adopts_legacy_marker_with_unique_entry_owner(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+    client = FakeMealClient()
+    service = MealPlanService(state, client)
+    plan = state.create_meal_plan(
+        {
+            "start_date": "2026-08-10",
+            "length_days": 1,
+            "diners": 2,
+            "entries": [{
+                "entry_id": 42,
+                "day_index": 0,
+                "date": "2026-08-10",
+                "mode": "planned",
+                "recipe": None,
+                "extra_recipes": [],
+                "servings": 2,
+            }],
+        }
+    )
+    client.meal_plan_rows[77] = {
+        "id": 77,
+        "recipe": {"id": 33, "name": "Salad"},
+        "from_date": "2026-08-10T18:00:00Z",
+        "servings": 4,
+        "note": "wfd-instance:entry:42:primary:recipe:33",
+    }
+
+    result = asyncio.run(service.sync_from_tandoor())
+
+    synchronized = state.get_meal_plan(plan["plan_id"])
+    assert result["changed_plan_ids"] == [plan["plan_id"]]
+    assert synchronized is not None
+    assert synchronized["entries"][0]["recipe"]["id"] == 33
+    assert synchronized["entries"][0]["servings"] == 4
+
+
+def test_sync_from_tandoor_keeps_ambiguous_legacy_marker_unfiled(tmp_path) -> None:
+    state = Stage2State(str(tmp_path))
+    client = FakeMealClient()
+    service = MealPlanService(state, client)
+    for _ in range(2):
+        state.create_meal_plan(
+            {
+                "start_date": "2026-08-10",
+                "length_days": 1,
+                "diners": 2,
+                "entries": [{
+                    "entry_id": 42,
+                    "day_index": 0,
+                    "date": "2026-08-10",
+                    "mode": "planned",
+                    "recipe": None,
+                    "extra_recipes": [],
+                    "servings": 2,
+                }],
+            }
+        )
+    client.meal_plan_rows[77] = {
+        "id": 77,
+        "recipe": {"id": 33, "name": "Salad"},
+        "from_date": "2026-08-10T18:00:00Z",
+        "servings": 4,
+        "note": "wfd-instance:entry:42:primary:recipe:33",
+    }
+
+    result = asyncio.run(service.sync_from_tandoor())
+
+    assert result["changed_plan_ids"] == [1, 2]
+    assert all(plan["entries"] == [] for plan in state.list_meal_plans())
 
 
 def test_sync_from_tandoor_rebuilds_stale_shopping_rows(tmp_path) -> None:

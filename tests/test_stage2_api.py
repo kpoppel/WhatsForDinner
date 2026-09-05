@@ -685,6 +685,7 @@ def test_stage2_meal_plan_generate_and_entry_ops(monkeypatch, tmp_path) -> None:
     plan = gen_res.json()["data"]
     assert plan["plan_id"] >= 1
     assert len(plan["entries"]) == 4
+    assert plan["entry_count"] == len(plan["entries"])
 
     plan_id = plan["plan_id"]
     entry_id = plan["entries"][0]["entry_id"]

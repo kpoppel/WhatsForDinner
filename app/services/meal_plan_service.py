@@ -410,13 +410,15 @@ class MealPlanService:
             if not isinstance(entry_id, int):
                 continue
 
-            mode = str(entry.get("mode") or "planned")
-            if mode not in {"leftover", "takeout", "empty"}:
-                continue
-
             primary_recipe = entry.get("recipe")
             has_primary_recipe = isinstance(primary_recipe, dict) and isinstance(primary_recipe.get("id"), int)
             if has_primary_recipe:
+                continue
+
+            mode = str(entry.get("mode") or "planned")
+            if mode == "planned":
+                mode = "empty"
+            if mode not in {"leftover", "takeout", "empty"}:
                 continue
 
             raw_servings = entry.get("servings")
@@ -571,6 +573,14 @@ class MealPlanService:
             return None
         return match.group(1), match.group(2)
 
+    def _parse_legacy_tandoor_instance_marker(self, row: dict[str, Any]) -> str | None:
+        """Return a legacy instance marker only while migrating existing server projections."""
+        note = row.get("note")
+        if not isinstance(note, str):
+            return None
+        match = re.fullmatch(r"wfd-instance:(entry:\d+:(?:primary:recipe:\d+|extra:\d+:recipe:\d+|mode:(?:leftover|takeout|empty)))", note)
+        return match.group(1) if match is not None else None
+
     def _entry_id_from_instance_key(self, instance_key: str) -> int | None:
         """Extract the server entry identity from an immutable instance marker."""
         match = re.match(r"entry:(\d+):", instance_key)
@@ -634,20 +644,48 @@ class MealPlanService:
         except TandoorError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+        local_plans = self._state.list_meal_plans()
+        entry_owner_plan_ids: dict[int, set[int]] = {}
+        for plan in local_plans:
+            plan_id = plan.get("plan_id")
+            entries = plan.get("entries")
+            if not isinstance(plan_id, int) or not isinstance(entries, list):
+                continue
+            for entry in entries:
+                entry_id = entry.get("entry_id") if isinstance(entry, dict) else None
+                if isinstance(entry_id, int):
+                    entry_owner_plan_ids.setdefault(entry_id, set()).add(plan_id)
+
+        plan_token_by_id: dict[int, str] = {}
+        for plan in local_plans:
+            plan_id = plan.get("plan_id")
+            if isinstance(plan_id, int):
+                plan_token_by_id[plan_id] = self._ensure_plan_token(plan_id, plan)
+
         rows_by_plan_token: dict[str, list[tuple[str, dict[str, Any]]]] = {}
         for row in self._extract_results(payload):
             marker = self._parse_tandoor_plan_marker(row)
-            if marker is None:
+            if marker is not None:
+                plan_token, instance_key = marker
+                rows_by_plan_token.setdefault(plan_token, []).append((instance_key, row))
                 continue
-            plan_token, instance_key = marker
-            rows_by_plan_token.setdefault(plan_token, []).append((instance_key, row))
+
+            instance_key = self._parse_legacy_tandoor_instance_marker(row)
+            entry_id = self._entry_id_from_instance_key(instance_key) if instance_key else None
+            owner_ids = entry_owner_plan_ids.get(entry_id, set()) if isinstance(entry_id, int) else set()
+            if len(owner_ids) != 1:
+                continue
+            plan_id = next(iter(owner_ids))
+            plan_token = plan_token_by_id.get(plan_id)
+            if isinstance(plan_token, str):
+                rows_by_plan_token.setdefault(plan_token, []).append((instance_key, row))
 
         changed_plan_ids: list[int] = []
-        for plan in self._state.list_meal_plans():
+        for plan in local_plans:
             plan_id = plan.get("plan_id")
             if not isinstance(plan_id, int):
                 continue
-            plan_token = self._ensure_plan_token(plan_id, plan)
+            plan_token = plan_token_by_id[plan_id]
             entries = plan.get("entries")
             if not isinstance(entries, list):
                 entries = []
@@ -701,15 +739,6 @@ class MealPlanService:
                     "shopping_recipe_id": None,
                     "shopping_activated": False,
                 }
-            for entry_id, previous_entry in previous_entries.items():
-                if entry_id in rebuilt_entries:
-                    continue
-                if isinstance(previous_entry.get("recipe"), dict):
-                    continue
-                extra_recipes = previous_entry.get("extra_recipes")
-                if isinstance(extra_recipes, list) and extra_recipes:
-                    continue
-                rebuilt_entries[entry_id] = dict(previous_entry)
             next_entries = sorted(rebuilt_entries.values(), key=lambda entry: (entry["day_index"], entry["entry_id"]))
             if entries != next_entries:
                 self._state.update_meal_plan(plan_id, {"entries": next_entries})
@@ -1369,7 +1398,11 @@ class MealPlanService:
         plan = self._state.get_meal_plan(plan_id)
         if plan is None:
             raise HTTPException(status_code=404, detail="Meal plan is absent from the canonical projection.")
-        return self._response("tandoor-projection", self._enrich_plan_recipe_urls(plan))
+        response_plan = self._enrich_plan_recipe_urls(plan)
+        entries = response_plan.get("entries") if isinstance(response_plan, dict) else None
+        if isinstance(response_plan, dict):
+            response_plan["entry_count"] = len(entries) if isinstance(entries, list) else 0
+        return self._response("tandoor-projection", response_plan)
 
     async def generate_plan(
         self,
@@ -1676,6 +1709,9 @@ class MealPlanService:
             ):
                 if key in payload:
                     entry[key] = payload[key]
+
+            if "mode" not in payload and isinstance(payload.get("recipe"), dict):
+                entry["mode"] = "planned"
 
             next_mode = str(entry.get("mode") or "planned")
             if next_mode in {"leftover", "takeout", "empty"}:
@@ -2070,7 +2106,11 @@ class MealPlanService:
                         desired_row["shopping_activated"] = False
                         row_changed = True
 
-                    if row_changed or mode == "regenerate_missing":
+                    if (
+                        row_changed
+                        or not isinstance(desired_row.get("shopping_recipe_id"), int)
+                        or mode == "regenerate_missing"
+                    ):
                         await self._remove_instance_shopping_entries(
                             desired_row.get("shopping_recipe_id")
                             if isinstance(previous_row, dict)
