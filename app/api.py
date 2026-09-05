@@ -792,6 +792,15 @@ async def list_stored_meal_plans() -> dict:
     }
 
 
+@router.post("/meal-plans/sync")
+async def sync_meal_plans() -> dict:
+    """Pull Tandoor meal-plan changes into local plan projections."""
+    return await _meal_plan_service().sync_from_tandoor(
+        ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
+        build_shopping_view=_build_shopping_view,
+    )
+
+
 @router.get("/meal-plans/{plan_id}")
 async def get_meal_plan_stage2(plan_id: int) -> dict:
     """Return one local meal plan with enriched recipe links."""

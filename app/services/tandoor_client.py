@@ -202,7 +202,24 @@ class TandoorClient:
 
     async def list_meal_plans(self, limit: int = 50) -> Any:
         """List upstream meal-plan rows for reconciliation."""
-        return await self._get("/api/meal-plan/", params={"page_size": limit})
+        rows: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            payload = await self._get(
+                "/api/meal-plan/",
+                params={"page_size": limit, "page": page},
+            )
+            if isinstance(payload, dict):
+                results = payload.get("results")
+                if isinstance(results, list):
+                    rows.extend(row for row in results if isinstance(row, dict))
+                if not payload.get("next"):
+                    return {"results": rows}
+                page += 1
+                continue
+            if isinstance(payload, list):
+                rows.extend(row for row in payload if isinstance(row, dict))
+            return {"results": rows}
 
     async def create_meal_plan(self, payload: dict[str, Any]) -> Any:
         """Create one upstream meal-plan row."""

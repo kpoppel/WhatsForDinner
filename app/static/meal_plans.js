@@ -1212,6 +1212,15 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
     let plans = [];
     let listFromApi = false;
 
+    if (!isMealPlanOfflineReadOnly()) {
+      const syncPayload = await mealPlanCommands.sync();
+      assertRequiredFields(syncPayload, ["revision", "changed_plan_ids"], "Meal plan sync response");
+      setRevision(syncPayload.revision, "meal-plan-sync");
+      if (syncPayload.changed_plan_ids instanceof Array && syncPayload.changed_plan_ids.length > 0) {
+        publishDataChanged();
+      }
+    }
+
     try {
       const listPayload = await mealPlanCommands.list();
       assertRequiredFields(listPayload, ["data"], "Meal plan list response");
@@ -1308,6 +1317,20 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
     setStatus(`Loaded meal plan ${planDateRangeLabel(mealPlanState.selectedPlan)}.`);
   }
 
+  async function refreshSelectedPlanFromTandoor(planId) {
+    /** Pull upstream meal changes and replace the selected local plan projection. */
+    const syncPayload = await mealPlanCommands.sync();
+    assertRequiredFields(syncPayload, ["revision", "changed_plan_ids"], "Meal plan sync response");
+    setRevision(syncPayload.revision, "meal-plan-sync");
+
+    const planPayload = await mealPlanCommands.get(planId);
+    assertRequiredFields(planPayload, ["data"], "Meal plan detail response");
+    applyCanonicalPlanResponse(planPayload);
+    if (syncPayload.changed_plan_ids instanceof Array && syncPayload.changed_plan_ids.length > 0) {
+      publishDataChanged();
+    }
+  }
+
   async function generateShoppingList(mode = "sync") {
     /** Generate shopping rows for the active plan when online. */
     assertMealPlanWriteAllowed("generate a shopping list from meal plans");
@@ -1373,6 +1396,11 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
       generateShoppingLongPressTimer = 0;
       setGenerateShoppingLongPressActive(true);
       void runAction(async () => {
+        const planId = mealPlanState.selectedPlanId;
+        if (!Number.isInteger(planId)) {
+          throw new Error("Select a meal plan first.");
+        }
+        await refreshSelectedPlanFromTandoor(planId);
         await generateShoppingList("regenerate_missing");
       });
     }, GENERATE_SHOPPING_LONG_PRESS_MS);
@@ -2218,12 +2246,12 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
     });
   });
 
-  const mealPlansNavButton = document.querySelector('.wf-nav-btn[data-tab="meal-plans"]');
-  if (mealPlansNavButton) {
-    mealPlansNavButton.addEventListener("click", () => {
+  window.addEventListener("wfd:tab-activated", (event) => {
+    const detail = event instanceof CustomEvent ? event.detail : null;
+    if (detail && detail.tab === "meal-plans") {
       void runAction(refreshPlans);
-    });
-  }
+    }
+  });
 
   async function runAction(action) {
     /** Execute a plan action and surface failures in the plan status area. */
@@ -2237,5 +2265,5 @@ import { createRenderScheduler } from "./js/render_scheduler.js";
 
   setAppTab("meal-plans");
   updateMealPlanActionAvailability();
-  //setStatus("Choose a meal plan to edit.");
+  void runAction(refreshPlans);
 })();

@@ -287,6 +287,9 @@ export const mealPlanCommands = {
   list() {
     return gatewayApi.mealPlans.list();
   },
+  sync() {
+    return gatewayApi.mealPlans.sync();
+  },
   get(planId) {
     return gatewayApi.mealPlans.get(planId);
   },

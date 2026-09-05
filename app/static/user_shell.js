@@ -123,6 +123,7 @@ import { health } from "./js/api.js";
     }
 
     titleNode.textContent = TAB_META[nextTab].title;
+    window.dispatchEvent(new CustomEvent("wfd:tab-activated", { detail: { tab: nextTab } }));
 
     const isShoppingMode = nextTab === "shopping-mode";
     const isMealPlanDetail = nextTab === "meal-plan-detail";

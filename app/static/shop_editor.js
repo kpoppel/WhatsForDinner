@@ -190,6 +190,13 @@ function bindTabActivation() {
     if (source === "shop-editor") {
       return;
     }
+    if (source === "meal-plans") {
+      run(async () => {
+        await refresh();
+        renderEditor({ source: "meal-plan-sync", force: true });
+      });
+      return;
+    }
     renderEditor({ source: "store-change", force: true });
   });
 }

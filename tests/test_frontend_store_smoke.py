@@ -696,6 +696,17 @@ def test_meal_plan_canonical_responses_reject_stale_revisions() -> None:
     assert "if (requestId !== latestPlanOpenRequest) {\n      return;\n    }" in source
 
 
+def test_long_press_shopping_regeneration_refreshes_tandoor_plan_first() -> None:
+    """Verify regeneration hydrates Tandoor meal changes before rebuilding shopping rows."""
+    repo_root = Path(__file__).resolve().parents[1]
+    source = (repo_root / "app/static/meal_plans.js").read_text(encoding="utf-8")
+
+    refresh_start = source.index("async function refreshSelectedPlanFromTandoor")
+    regenerate_start = source.index('await generateShoppingList("regenerate_missing");')
+    assert "const syncPayload = await mealPlanCommands.sync();" in source[refresh_start:regenerate_start]
+    assert "await refreshSelectedPlanFromTandoor(planId);" in source[refresh_start:regenerate_start]
+
+
 def test_sync_keeps_rejections_separate_from_server_pending_projections() -> None:
     """Verify rejected shopping mutations remain distinct from server projections."""
     repo_root = Path(__file__).resolve().parents[1]
@@ -762,8 +773,9 @@ globalThis.fetch = async (path) => {{
 }};
 const commands = await import({commands_path!r});
 await commands.mealPlanCommands.list();
+await commands.mealPlanCommands.sync();
 await commands.settingsCommands.user();
-if (requestedPaths.join(',') !== '/api/v1/meal-plans/stored,/api/v1/config/user-settings') {{
+if (requestedPaths.join(',') !== '/api/v1/meal-plans/stored,/api/v1/meal-plans/sync,/api/v1/config/user-settings') {{
   throw new Error(`Named command gateway contract failed: ${{requestedPaths.join(',')}}`);
 }}
 """

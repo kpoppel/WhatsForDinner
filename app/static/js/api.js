@@ -129,6 +129,9 @@ export const gateway = {
     list() {
       return api("/meal-plans/stored", {}, "mealPlans.list");
     },
+    sync() {
+      return api("/meal-plans/sync", { method: "POST" }, "mealPlans.sync");
+    },
     get(planId) {
       return api(`/meal-plans/${planId}`, {}, "mealPlans.get");
     },
