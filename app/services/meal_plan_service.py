@@ -555,6 +555,7 @@ class MealPlanService:
         plan_payload: dict[str, Any],
         ensure_tandoor_writes_enabled,
         operation_name: str,
+        previous_sync: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         ensure_tandoor_writes_enabled(operation_name)
 
@@ -565,30 +566,27 @@ class MealPlanService:
         desired_sync = self._desired_meal_plan_row_sync(plan_payload, entries)
         remote_rows = await self._list_remote_meal_plan_rows()
 
-        previous_sync: dict[str, dict[str, Any]] = {}
-        raw_previous_sync = self._state.get_meal_plan_tandoor_sync(plan_id)
+        normalized_previous_sync: dict[str, dict[str, Any]] = {}
+        raw_previous_sync = previous_sync
+        if raw_previous_sync is None:
+            raw_previous_sync = self._state.get_meal_plan_tandoor_sync(plan_id)
         for key, value in raw_previous_sync.items():
             if not isinstance(value, dict):
                 continue
-            previous_sync[str(key)] = self._normalize_instance_sync_ids(value)
+            normalized_previous_sync[str(key)] = self._normalize_instance_sync_ids(value)
 
-        retained_removed_sync: dict[str, dict[str, Any]] = {}
-        for instance_key in sorted(previous_sync.keys()):
+        for instance_key in sorted(normalized_previous_sync.keys()):
             if instance_key in desired_sync:
                 continue
-            previous_row = previous_sync[instance_key]
+            previous_row = normalized_previous_sync[instance_key]
 
             await self._delete_meal_plan_row_if_present(previous_row.get("meal_plan_row_id"))
-            retained_removed_sync[instance_key] = {
-                "meal_plan_row_id": None,
-                "shopping_recipe_id": None,
-            }
 
-        next_sync: dict[str, dict[str, Any]] = dict(retained_removed_sync)
+        next_sync: dict[str, dict[str, Any]] = {}
 
         for instance_key in sorted(desired_sync.keys()):
             desired_row = dict(desired_sync[instance_key])
-            previous_row = previous_sync.get(instance_key)
+            previous_row = normalized_previous_sync.get(instance_key)
 
             if isinstance(previous_row, dict):
                 previous_row_id = previous_row.get("meal_plan_row_id")
@@ -762,6 +760,7 @@ class MealPlanService:
             current = self._state.get_meal_plan(plan_id)
             if current is None:
                 raise HTTPException(status_code=404, detail="Meal plan not found.")
+            previous_sync = self._state.get_meal_plan_tandoor_sync(plan_id)
 
             mutable: dict[str, Any] = {}
             start_date_override: str | None = None
@@ -805,6 +804,7 @@ class MealPlanService:
                         plan_payload=updated,
                         ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
                         operation_name="meal_plan_patch",
+                        previous_sync=previous_sync,
                     )
                 except TandoorError as exc:
                     raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -817,6 +817,7 @@ class MealPlanService:
             plan = self._state.get_meal_plan(plan_id)
             if plan is None:
                 raise HTTPException(status_code=404, detail="Meal plan not found.")
+            previous_sync = self._state.get_meal_plan_tandoor_sync(plan_id)
 
             entries = plan.get("entries")
             if not isinstance(entries, list):
@@ -866,6 +867,7 @@ class MealPlanService:
                         plan_payload=updated,
                         ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
                         operation_name="meal_plan_add_entry",
+                        previous_sync=previous_sync,
                     )
                 except TandoorError as exc:
                     raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -884,6 +886,7 @@ class MealPlanService:
             plan = self._state.get_meal_plan(plan_id)
             if plan is None:
                 raise HTTPException(status_code=404, detail="Meal plan not found.")
+            previous_sync = self._state.get_meal_plan_tandoor_sync(plan_id)
 
             entry = self._find_entry(plan, entry_id)
             if entry is None:
@@ -963,6 +966,7 @@ class MealPlanService:
                         plan_payload=updated,
                         ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
                         operation_name="meal_plan_patch_entry",
+                        previous_sync=previous_sync,
                     )
                 except TandoorError as exc:
                     raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -975,6 +979,7 @@ class MealPlanService:
             plan = self._state.get_meal_plan(plan_id)
             if plan is None:
                 raise HTTPException(status_code=404, detail="Meal plan not found.")
+            previous_sync = self._state.get_meal_plan_tandoor_sync(plan_id)
 
             entries = plan.get("entries")
             if not isinstance(entries, list):
@@ -1001,6 +1006,7 @@ class MealPlanService:
                         plan_payload=updated,
                         ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
                         operation_name="meal_plan_delete_entry",
+                        previous_sync=previous_sync,
                     )
                 except TandoorError as exc:
                     raise HTTPException(status_code=502, detail=str(exc)) from exc

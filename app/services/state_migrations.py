@@ -231,6 +231,87 @@ def _migrate_v13_to_v14(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v14_to_v15(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    meal_plans = next_payload.get("meal_plans")
+    if not isinstance(meal_plans, dict):
+        next_payload["schema_version"] = 15
+        return next_payload
+
+    for plan in meal_plans.values():
+        if not isinstance(plan, dict):
+            continue
+        entries = plan.get("entries")
+        legacy_sync = plan.pop("tandoor_sync", None)
+        if not isinstance(entries, list) or not isinstance(legacy_sync, dict):
+            continue
+        instances = legacy_sync.get("instances")
+        if not isinstance(instances, dict):
+            continue
+
+        entries_by_id = {
+            entry.get("entry_id"): entry
+            for entry in entries
+            if isinstance(entry, dict) and isinstance(entry.get("entry_id"), int)
+        }
+        for instance_key, sync in instances.items():
+            if not isinstance(instance_key, str) or not isinstance(sync, dict):
+                continue
+            meal_plan_row_id = sync.get("meal_plan_row_id")
+            shopping_recipe_id = sync.get("shopping_recipe_id")
+            if not isinstance(meal_plan_row_id, int) or meal_plan_row_id < 1:
+                continue
+            embedded_sync = {
+                "meal_plan_row_id": meal_plan_row_id,
+                "shopping_recipe_id": shopping_recipe_id
+                if isinstance(shopping_recipe_id, int) and shopping_recipe_id > 0
+                else None,
+            }
+            parts = instance_key.split(":")
+            if len(parts) < 4 or parts[0] != "entry":
+                continue
+            try:
+                entry = entries_by_id.get(int(parts[1]))
+            except ValueError:
+                continue
+            if not isinstance(entry, dict):
+                continue
+            if (
+                len(parts) == 4
+                and parts[2] == "mode"
+                and parts[3] in {"leftover", "takeout", "empty"}
+                and entry.get("mode") == parts[3]
+                and not isinstance(entry.get("recipe"), dict)
+            ):
+                entry["tandoor_sync"] = embedded_sync
+                continue
+            if len(parts) == 5 and parts[2] == "primary" and parts[3] == "recipe":
+                try:
+                    recipe_id = int(parts[4])
+                except ValueError:
+                    continue
+                recipe = entry.get("recipe")
+                if isinstance(recipe, dict) and recipe.get("id") == recipe_id:
+                    recipe["tandoor_sync"] = embedded_sync
+                continue
+            if len(parts) == 6 and parts[2] == "extra" and parts[4] == "recipe":
+                try:
+                    slot_index = int(parts[3])
+                    recipe_id = int(parts[5])
+                except ValueError:
+                    continue
+                extra_recipes = entry.get("extra_recipes")
+                if not isinstance(extra_recipes, list) or slot_index < 0 or slot_index >= len(extra_recipes):
+                    continue
+                extra_recipe = extra_recipes[slot_index]
+                recipe = extra_recipe.get("recipe") if isinstance(extra_recipe, dict) else None
+                if isinstance(recipe, dict) and recipe.get("id") == recipe_id:
+                    recipe["tandoor_sync"] = embedded_sync
+
+    next_payload["schema_version"] = 15
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(raw)
 
@@ -289,6 +370,10 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     if schema_version == 13:
         payload = _migrate_v13_to_v14(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 14:
+        payload = _migrate_v14_to_v15(payload)
         schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:

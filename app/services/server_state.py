@@ -128,7 +128,7 @@ class ServerState:
     def selected_keywords(self) -> list[int]:
         with self._lock:
             data = self._load()
-            return [int(v) for v in data.get("selected_keyword_ids", [])]
+            return data["selected_keyword_ids"]
 
     def set_selected_keywords(self, keyword_ids: list[int]) -> list[int]:
         with self._lock:
@@ -140,13 +140,7 @@ class ServerState:
     def meal_plan_rules(self) -> dict[str, int]:
         with self._lock:
             data = self._load()
-            rules = data.get("meal_plan_rules")
-            if not isinstance(rules, dict):
-                return {"no_repeat_days": 30}
-            value = rules.get("no_repeat_days")
-            if not isinstance(value, int):
-                value = 30
-            return {"no_repeat_days": value}
+            return data["meal_plan_rules"]
 
     def set_meal_plan_rules(self, no_repeat_days: int) -> dict[str, int]:
         with self._lock:
@@ -159,19 +153,7 @@ class ServerState:
     def user_settings(self) -> dict[str, Any]:
         with self._lock:
             data = self._load()
-            raw = data.get("user_settings")
-            if not isinstance(raw, dict):
-                raise StateSchemaError("Invalid state: user_settings must be an object.")
-
-            default_diners = raw.get("default_diners")
-            default_notification_time = raw.get("default_notification_time")
-            if not isinstance(default_diners, int) or not isinstance(default_notification_time, str):
-                raise StateSchemaError("Invalid state: user_settings fields are not valid.")
-
-            return {
-                "default_diners": default_diners,
-                "default_notification_time": default_notification_time,
-            }
+            return data["user_settings"]
 
     def set_user_settings(self, default_diners: int, default_notification_time: str) -> dict[str, Any]:
         with self._lock:
@@ -276,15 +258,12 @@ class ServerState:
         with self._lock:
             data = self._load()
             plan = data["meal_plans"].get(str(plan_id))
-            return deepcopy(plan) if isinstance(plan, dict) else None
+            return deepcopy(plan) if plan is not None else None
 
     def list_meal_plans(self) -> list[dict[str, Any]]:
         with self._lock:
             data = self._load()
-            values: list[dict[str, Any]] = []
-            for _, plan in data.get("meal_plans", {}).items():
-                if isinstance(plan, dict):
-                    values.append(deepcopy(plan))
+            values = [deepcopy(plan) for plan in data["meal_plans"].values()]
 
             values.sort(key=lambda row: int(row.get("plan_id", 0)), reverse=True)
             return values
@@ -294,7 +273,7 @@ class ServerState:
             data = self._load()
             key = str(plan_id)
             current = data["meal_plans"].get(key)
-            if not isinstance(current, dict):
+            if current is None:
                 return None
             current.update(payload)
             data["meal_plans"][key] = current
@@ -306,10 +285,20 @@ class ServerState:
         with self._lock:
             data = self._load()
             removed = data["meal_plans"].pop(str(plan_id), None)
-            if not isinstance(removed, dict):
+            if removed is None:
                 return None
             self._save(data)
             return deepcopy(removed)
+
+    def _tandoor_sync_owner(self, plan: dict[str, Any], instance_key: str) -> dict[str, Any] | None:
+        parts = instance_key.split(":")
+        entry_id = int(parts[1])
+        entry = next(row for row in plan["entries"] if row["entry_id"] == entry_id)
+        if len(parts) == 4:
+            return entry
+        if len(parts) == 5:
+            return entry["recipe"]
+        return entry["extra_recipes"][int(parts[3])]["recipe"]
 
     def get_meal_plan_tandoor_sync(self, plan_id: int) -> dict[str, dict[str, Any]]:
         with self._lock:
@@ -317,16 +306,18 @@ class ServerState:
             plan = data["meal_plans"].get(str(plan_id))
             if not isinstance(plan, dict):
                 return {}
-            plan_sync = plan.get("tandoor_sync")
-            if not isinstance(plan_sync, dict):
-                return {}
-            instances = plan_sync.get("instances")
-            if not isinstance(instances, dict):
-                return {}
             sanitized: dict[str, dict[str, Any]] = {}
-            for key, value in instances.items():
-                if isinstance(value, dict):
-                    sanitized[str(key)] = deepcopy(value)
+            for entry in plan["entries"]:
+                entry_id = entry["entry_id"]
+                recipe = entry["recipe"]
+                if recipe is not None and "tandoor_sync" in recipe:
+                    sanitized[f"entry:{entry_id}:primary:recipe:{recipe['id']}"] = deepcopy(recipe["tandoor_sync"])
+                for index, extra_recipe in enumerate(entry["extra_recipes"]):
+                    recipe = extra_recipe["recipe"]
+                    if "tandoor_sync" in recipe:
+                        sanitized[f"entry:{entry_id}:extra:{index}:recipe:{recipe['id']}"] = deepcopy(recipe["tandoor_sync"])
+                if "tandoor_sync" in entry:
+                    sanitized[f"entry:{entry_id}:mode:{entry['mode']}"] = deepcopy(entry["tandoor_sync"])
             return sanitized
 
     def set_meal_plan_tandoor_sync(self, plan_id: int, instances: dict[str, dict[str, Any]]) -> None:
@@ -335,11 +326,16 @@ class ServerState:
             plan = data["meal_plans"].get(str(plan_id))
             if not isinstance(plan, dict):
                 return
-            sanitized: dict[str, dict[str, Any]] = {}
+            for entry in plan["entries"]:
+                entry.pop("tandoor_sync", None)
+                recipe = entry["recipe"]
+                if recipe is not None:
+                    recipe.pop("tandoor_sync", None)
+                for extra_recipe in entry["extra_recipes"]:
+                    extra_recipe["recipe"].pop("tandoor_sync", None)
             for key, value in instances.items():
-                if isinstance(value, dict):
-                    sanitized[str(key)] = deepcopy(value)
-            plan["tandoor_sync"] = {"instances": sanitized}
+                owner = self._tandoor_sync_owner(plan, str(key))
+                owner["tandoor_sync"] = deepcopy(value)
             self._save(data)
 
     def allocate_entry_id(self) -> int:
@@ -363,45 +359,29 @@ class ServerState:
     def get_shopping_statuses(self) -> dict[str, str]:
         with self._lock:
             data = self._load()
-            raw = data.get("shopping_status_overrides", {})
-            if not isinstance(raw, dict):
-                return {}
-            return {str(k): str(v) for k, v in raw.items()}
+            return data["shopping_status_overrides"]
 
     def set_shopping_item_metadata(self, entry_id: int, patch: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             data = self._load()
             key = str(entry_id)
-            raw = data.get("shopping_item_metadata", {})
-            current = raw.get(key, {}) if isinstance(raw, dict) else {}
-            if not isinstance(current, dict):
-                current = {}
+            metadata = data["shopping_item_metadata"]
+            current = metadata.get(key, {})
             current.update(patch)
-            if not isinstance(data.get("shopping_item_metadata"), dict):
-                data["shopping_item_metadata"] = {}
-            data["shopping_item_metadata"][key] = current
+            metadata[key] = current
             self._save(data)
             return deepcopy(current)
 
     def delete_shopping_item_metadata(self, entry_id: int) -> None:
         with self._lock:
             data = self._load()
-            raw = data.get("shopping_item_metadata")
-            if isinstance(raw, dict):
-                raw.pop(str(entry_id), None)
-                self._save(data)
+            data["shopping_item_metadata"].pop(str(entry_id), None)
+            self._save(data)
 
     def get_shopping_item_metadata(self) -> dict[str, dict[str, Any]]:
         with self._lock:
             data = self._load()
-            raw = data.get("shopping_item_metadata", {})
-            if not isinstance(raw, dict):
-                return {}
-            sanitized: dict[str, dict[str, Any]] = {}
-            for key, value in raw.items():
-                if isinstance(value, dict):
-                    sanitized[str(key)] = deepcopy(value)
-            return sanitized
+            return deepcopy(data["shopping_item_metadata"])
 
     def allocate_local_shopping_entry_id(self) -> int:
         with self._lock:
@@ -416,14 +396,7 @@ class ServerState:
     def list_local_shopping_entries(self) -> list[dict[str, Any]]:
         with self._lock:
             data = self._load()
-            raw = data.get("local_shopping_entries", {})
-            if not isinstance(raw, dict):
-                return []
-            items: list[dict[str, Any]] = []
-            for _, value in raw.items():
-                if isinstance(value, dict):
-                    items.append(deepcopy(value))
-            return items
+            return list(deepcopy(data["local_shopping_entries"]).values())
 
     def get_local_shopping_entry(self, entry_id: int) -> dict[str, Any] | None:
         with self._lock:

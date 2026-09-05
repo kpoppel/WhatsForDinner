@@ -297,8 +297,22 @@ def test_patch_plan_rebases_dates_and_length(tmp_path) -> None:
             "length_days": 2,
             "diners": 2,
             "entries": [
-                {"entry_id": 1, "day_index": 0, "date": "2026-08-10", "mode": "planned", "recipe": None},
-                {"entry_id": 2, "day_index": 1, "date": "2026-08-11", "mode": "planned", "recipe": None},
+                    {
+                        "entry_id": 1,
+                        "day_index": 0,
+                        "date": "2026-08-10",
+                        "mode": "planned",
+                        "recipe": None,
+                        "extra_recipes": [],
+                    },
+                    {
+                        "entry_id": 2,
+                        "day_index": 1,
+                        "date": "2026-08-11",
+                        "mode": "planned",
+                        "recipe": None,
+                        "extra_recipes": [],
+                    },
             ],
             "keyword_ids": [],
             "constraints": {"leftover_days": [], "takeout_days": [], "empty_days": []},
@@ -330,6 +344,7 @@ def test_generate_shopping_from_plan_aggregates_success_and_failure(tmp_path) ->
                     "date": "2026-08-10",
                     "mode": "planned",
                     "recipe": {"id": 11, "title": "Roast Veg"},
+                        "extra_recipes": [],
                     "servings": 3,
                 },
                 {
@@ -338,6 +353,7 @@ def test_generate_shopping_from_plan_aggregates_success_and_failure(tmp_path) ->
                     "date": "2026-08-11",
                     "mode": "planned",
                     "recipe": {"id": 12, "title": "Rice Bowl"},
+                        "extra_recipes": [],
                     "servings": 3,
                 },
             ],
@@ -477,7 +493,13 @@ def test_generate_shopping_from_plan_is_idempotent_and_syncs_add_remove(tmp_path
     entries[0]["extra_recipes"] = [
         {"purpose": "shopping_only", "recipe": {"id": 13, "title": "Pantry"}}
     ]
-    state.update_meal_plan(plan["plan_id"], {"entries": entries})
+    asyncio.run(
+        service.patch_plan(
+            plan["plan_id"],
+            {"entries": entries},
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+        )
+    )
 
     client.updated_shopping_calls.clear()
     third = asyncio.run(
@@ -495,7 +517,13 @@ def test_generate_shopping_from_plan_is_idempotent_and_syncs_add_remove(tmp_path
     assert isinstance(updated_plan, dict)
     entries = updated_plan.get("entries") if isinstance(updated_plan.get("entries"), list) else []
     entries[0]["extra_recipes"] = []
-    state.update_meal_plan(plan["plan_id"], {"entries": entries})
+    asyncio.run(
+        service.patch_plan(
+            plan["plan_id"],
+            {"entries": entries},
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+        )
+    )
 
     client.updated_shopping_calls.clear()
     fourth = asyncio.run(
@@ -1053,6 +1081,55 @@ def test_patch_entry_move_updates_tracked_tandoor_row_in_place(tmp_path) -> None
     assert set(client.meal_plan_rows) == {original_row_id, 2}
 
 
+def test_patch_entry_removes_obsolete_tandoor_sync_record(tmp_path) -> None:
+    state = ServerState(str(tmp_path))
+    client = FakeMealClient()
+    service = MealPlanService(state, client)
+
+    plan = state.create_meal_plan(
+        {
+            "start_date": "2026-08-10",
+            "length_days": 1,
+            "diners": 2,
+            "entries": [
+                {
+                    "entry_id": 1,
+                    "day_index": 0,
+                    "date": "2026-08-10",
+                    "mode": "leftover",
+                    "recipe": None,
+                    "extra_recipes": [],
+                    "servings": 2,
+                }
+            ],
+            "keyword_ids": [],
+            "constraints": {"leftover_days": [], "takeout_days": [], "empty_days": []},
+            "no_repeat_days": 30,
+        }
+    )
+    plan_id = int(plan["plan_id"])
+
+    asyncio.run(
+        service.patch_plan(
+            plan_id,
+            {"entries": plan["entries"]},
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+        )
+    )
+
+    asyncio.run(
+        service.patch_entry(
+            plan_id,
+            1,
+            {"mode": "planned", "recipe": None},
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+        )
+    )
+
+    assert client.meal_plan_rows == {}
+    assert state.get_meal_plan_tandoor_sync(plan_id) == {}
+
+
 def test_generate_shopping_sync_preserves_mode_only_rows(tmp_path) -> None:
     state = ServerState(str(tmp_path))
     client = FakeMealClient()
@@ -1124,7 +1201,14 @@ def test_delete_plan_removes_tracked_shopping_before_meal_rows(tmp_path) -> None
             "start_date": "2026-08-10",
             "length_days": 1,
             "diners": 2,
-            "entries": [],
+            "entries": [
+                {
+                    "entry_id": 1,
+                    "mode": "planned",
+                    "recipe": {"id": 11, "title": "Roast Veg"},
+                    "extra_recipes": [],
+                }
+            ],
             "keyword_ids": [],
             "constraints": {"leftover_days": [], "takeout_days": [], "empty_days": []},
             "no_repeat_days": 30,
@@ -1161,7 +1245,14 @@ def test_delete_plan_aborts_when_shopping_cleanup_fails(tmp_path) -> None:
             "start_date": "2026-08-10",
             "length_days": 1,
             "diners": 2,
-            "entries": [],
+            "entries": [
+                {
+                    "entry_id": 1,
+                    "mode": "planned",
+                    "recipe": {"id": 11, "title": "Roast Veg"},
+                    "extra_recipes": [],
+                }
+            ],
             "keyword_ids": [],
             "constraints": {"leftover_days": [], "takeout_days": [], "empty_days": []},
             "no_repeat_days": 30,
@@ -1199,7 +1290,14 @@ def test_delete_plan_treats_missing_shopping_entries_as_already_removed(tmp_path
             "start_date": "2026-08-10",
             "length_days": 1,
             "diners": 2,
-            "entries": [],
+            "entries": [
+                {
+                    "entry_id": 1,
+                    "mode": "planned",
+                    "recipe": {"id": 11, "title": "Roast Veg"},
+                    "extra_recipes": [],
+                }
+            ],
             "keyword_ids": [],
             "constraints": {"leftover_days": [], "takeout_days": [], "empty_days": []},
             "no_repeat_days": 30,
