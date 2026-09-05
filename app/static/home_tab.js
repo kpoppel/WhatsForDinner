@@ -3,7 +3,12 @@ import {
   writeHomeActivePlanCache,
   writeMealPlanCache,
 } from "./js/store/commands.js";
-import { requestHomeData as api } from "./js/commands/home.js";
+import {
+  loadMealPlan,
+  loadShoppingList,
+  loadStoredMealPlans,
+  searchHomeRecipes,
+} from "./js/commands/home.js";
 import {
   readActiveMealPlanId,
   readHomeActivePlanCache,
@@ -285,7 +290,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       return null;
     }
 
-    const payload = await api(`/recipes?search=${encodeURIComponent(query)}&limit=20`);
+    const payload = await searchHomeRecipes(query);
     const data = payload && typeof payload === "object" ? payload.data : null;
     const rows = data && Array.isArray(data.results) ? data.results : [];
     if (rows.length === 0) {
@@ -505,7 +510,7 @@ import { assertRequiredFields } from "./js/contracts.js";
   }
 
   async function fetchActivePlan() {
-    const listPayload = await api("/meal-plans/stored");
+    const listPayload = await loadStoredMealPlans();
     assertRequiredFields(listPayload, ["data"], "Meal plan list response");
     const rows = listPayload.data;
     if (!Array.isArray(rows) || rows.length === 0) {
@@ -532,7 +537,7 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     lastSelectedPlanId = planId;
     writeActiveMealPlanId(planId);
-    const detailPayload = await api(`/meal-plans/${planId}`);
+    const detailPayload = await loadMealPlan(planId);
     assertRequiredFields(detailPayload, ["data"], "Meal plan detail response");
     const plan = detailPayload.data;
     if (!plan || typeof plan !== "object") {
@@ -608,7 +613,7 @@ import { assertRequiredFields } from "./js/contracts.js";
 
       let reminderTexts = [];
       try {
-        const shoppingPayload = await api("/shopping-list/view?limit=400");
+        const shoppingPayload = await loadShoppingList(400);
         assertRequiredFields(shoppingPayload, ["data"], "Shopping view response");
         reminderTexts = shoppingReminderTexts(shoppingPayload);
       } catch {

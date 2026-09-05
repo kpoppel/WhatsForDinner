@@ -1,4 +1,4 @@
-import { requestSettings as api } from "./js/commands/settings.js";
+import { loadSettingsData, saveSettingsData } from "./js/commands/settings.js";
 import { assertRequiredFields } from "./js/contracts.js";
 
 (() => {
@@ -270,10 +270,12 @@ import { assertRequiredFields } from "./js/contracts.js";
   }
 
   async function loadSettings() {
-    const userSettingsPayload = await api("/config/user-settings");
-    const rulesPayload = await api("/config/meal-plan-rules");
-    const keywordsPayload = await api("/config/keywords");
-    const selectedPayload = await api("/config/keywords/selected");
+    const {
+      userSettings: userSettingsPayload,
+      mealPlanRules: rulesPayload,
+      keywords: keywordsPayload,
+      selectedKeywords: selectedPayload,
+    } = await loadSettingsData();
 
     assertRequiredFields(userSettingsPayload, ["data"], "User settings response");
     assertRequiredFields(rulesPayload, ["data"], "Meal plan rules response");
@@ -331,22 +333,11 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     setSavingState(true);
     try {
-      await api("/config/user-settings", {
-        method: "PUT",
-        body: JSON.stringify({
-          default_diners: defaultDiners,
-          default_notification_time: reminderTime,
-        }),
-      });
-
-      await api("/config/meal-plan-rules", {
-        method: "PUT",
-        body: JSON.stringify({ no_repeat_days: noRepeatDays }),
-      });
-
-      await api("/config/keywords/selected", {
-        method: "PUT",
-        body: JSON.stringify({ keyword_ids: selectedKeywordIds() }),
+      await saveSettingsData({
+        defaultDiners,
+        defaultReminderTime: reminderTime,
+        noRepeatDays,
+        keywordIds: selectedKeywordIds(),
       });
 
       renderSelectedKeywords();
