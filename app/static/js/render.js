@@ -1,4 +1,10 @@
-import { state } from "./state.js";
+import { toggleShoppingSectionCollapsed } from "./commands/shopping-ui.js";
+import {
+  pendingShoppingChangeCount,
+  shoppingApiReachable,
+  shoppingItemsByStatus,
+  shoppingSectionCollapsed,
+} from "./selectors/shopping.js";
 import { escapeAttr } from "./utils.js";
 
 const DEBUG_MODE = false;
@@ -126,7 +132,8 @@ export function updateStatusBadges() {
   const network = document.getElementById("shop-mode-network");
   const pending = document.getElementById("shop-mode-pending");
   const pendingCount = document.getElementById("shop-mode-pending-count");
-  const online = state.apiReachable && navigator.onLine !== false;
+  const pendingChangeCount = pendingShoppingChangeCount();
+  const online = shoppingApiReachable() && navigator.onLine !== false;
 
   network.classList.toggle("is-online", online);
   network.classList.toggle("is-offline", !online);
@@ -134,18 +141,16 @@ export function updateStatusBadges() {
   network.setAttribute("title", online ? "Online" : "Offline");
 
   if (pendingCount) {
-    pendingCount.textContent = String(state.pendingChanges.length);
+    pendingCount.textContent = String(pendingChangeCount);
   } else {
-    pending.textContent = `o ${state.pendingChanges.length}`;
+    pending.textContent = `o ${pendingChangeCount}`;
   }
-  pending.setAttribute("aria-label", `Pending sync: ${state.pendingChanges.length}`);
-  pending.setAttribute("title", `Pending sync: ${state.pendingChanges.length}`);
+  pending.setAttribute("aria-label", `Pending sync: ${pendingChangeCount}`);
+  pending.setAttribute("title", `Pending sync: ${pendingChangeCount}`);
 }
 
 export function sortedByStatus(status) {
-  return Object.values(state.itemsById)
-    .filter((item) => item && item.status === status)
-    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  return shoppingItemsByStatus(status);
 }
 
 export function suppressNextCardClick(card) {
@@ -177,7 +182,7 @@ export function updateSectionTitle(key, count) {
     return;
   }
   if (config.collapsible) {
-    const collapsed = !!state.collapsedSections[key];
+    const collapsed = shoppingSectionCollapsed(key);
     title.textContent = titleWithCount(config.label, count, collapsed);
     title.setAttribute("aria-expanded", String(!collapsed));
   } else {
@@ -194,7 +199,7 @@ export function applyCollapsedSectionState(key) {
   if (!container) {
     return;
   }
-  container.hidden = !!state.collapsedSections[key];
+  container.hidden = shoppingSectionCollapsed(key);
 }
 
 export function toggleCollapsedSection(key) {
@@ -202,7 +207,7 @@ export function toggleCollapsedSection(key) {
   if (!config || !config.collapsible) {
     return;
   }
-  state.collapsedSections[key] = !state.collapsedSections[key];
+  toggleShoppingSectionCollapsed(key);
   applyCollapsedSectionState(key);
   updateSectionTitle(key, sortedByStatus(key).length);
 }

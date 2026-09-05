@@ -1,4 +1,6 @@
-import { api, isOnline, setApiReachable, browserOnline } from "./api.js";
+import { api } from "./api.js";
+import { setApiReachable } from "./commands/connectivity.js";
+import { browserOnline, isOnline } from "./selectors/connectivity.js";
 import { state, persistCache, applyPendingChanges, queueStatusChange, queueDeleteChange, compactPendingChanges, SHOPPING_STATUSES } from "./state.js";
 import { render, updateStatusBadges } from "./render.js";
 

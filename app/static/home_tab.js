@@ -1,9 +1,9 @@
 import {
-  api,
   writeActiveMealPlanId,
   writeHomeActivePlanCache,
   writeMealPlanCache,
 } from "./js/store/commands.js";
+import { requestHomeData as api } from "./js/commands/home.js";
 import {
   readActiveMealPlanId,
   readHomeActivePlanCache,

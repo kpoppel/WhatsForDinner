@@ -1,3 +1,5 @@
+import { probeApiReachability } from "./js/commands/connectivity.js";
+
 (() => {
   const TAB_META = {
     home: { title: "Today's Dinner" },
@@ -74,12 +76,7 @@
       return;
     }
 
-    try {
-      const response = await fetch(`${window.WFD_API_PREFIX}/health`, { cache: "no-store" });
-      apiReachable = response.ok;
-    } catch {
-      apiReachable = false;
-    }
+    apiReachable = await probeApiReachability();
 
     applyOnlineAwareControls();
     if (!wasOnline && isOnline()) {

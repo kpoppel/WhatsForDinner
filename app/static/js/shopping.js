@@ -1,6 +1,13 @@
 import { render, wireCollapsibleSection, initRender } from "./render.js";
-import { isOnline } from "./api.js";
-import { run, refresh, setStatus, deleteEntry, setStatusMany, deleteEntries, refreshAndSyncIfNeeded } from "./sync.js";
+import { isOnline } from "./selectors/connectivity.js";
+import {
+  deleteShoppingEntries as deleteEntries,
+  deleteShoppingEntry as deleteEntry,
+  refreshShoppingAndSync as refreshAndSyncIfNeeded,
+  runShoppingAction as run,
+  setShoppingStatus as setStatus,
+  setShoppingStatusMany as setStatusMany,
+} from "./commands/shopping.js";
 import { initGestures, createCard } from "./gestures.js";
 import { setupPullToRefresh } from "./ptr.js";
 import { setupServiceWorker } from "./sw-setup.js";

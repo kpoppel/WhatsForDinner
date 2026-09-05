@@ -1,9 +1,9 @@
 import {
-  api as storeApi,
   cachePlanDetail,
   cachePlanListRows,
   writeActiveMealPlanId,
 } from "./js/store/commands.js";
+import { requestMealPlan as storeApi } from "./js/commands/meal-plans.js";
 import { readMealPlanCache } from "./js/store/selectors.js";
 import { assertRequiredFields } from "./js/contracts.js";
 
@@ -220,7 +220,14 @@ import { assertRequiredFields } from "./js/contracts.js";
   }
 
   async function api(path, options) {
-    return await storeApi(path, options, reportApiReachable);
+    try {
+      const payload = await storeApi(path, options);
+      reportApiReachable(true);
+      return payload;
+    } catch (error) {
+      reportApiReachable(false);
+      throw error;
+    }
   }
 
   function parseIsoDate(text) {

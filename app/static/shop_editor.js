@@ -1,6 +1,14 @@
-import { state, persistCache, queueCreateChange, queueDeleteChange, queueUpdateChange } from "./js/state.js";
-import { refresh, run, syncPending } from "./js/sync.js";
-import { isOnline, apiUpload } from "./js/api.js";
+import {
+  createShoppingItem,
+  deleteShoppingItem,
+  refreshShopping as refresh,
+  runShoppingAction as run,
+  syncShopping as syncPending,
+  updateShoppingItem,
+  uploadShoppingOcr,
+} from "./js/commands/shopping.js";
+import { isOnline } from "./js/selectors/connectivity.js";
+import { shoppingItem, shoppingItemIds, shoppingItems } from "./js/selectors/shopping.js";
 
 const VIEW_KEY = "wfd.shop-editor.view.v1";
 const SEGMENT_DEFAULT = "store";
@@ -110,7 +118,7 @@ function bindToolbarControls() {
 
 function serverStoreGroupNames() {
   const categories = new Set(["Other"]);
-  for (const item of Object.values(state.itemsById)) {
+  for (const item of shoppingItems()) {
     if (!item) {
       continue;
     }
@@ -201,8 +209,7 @@ function bindModalControls() {
 }
 
 function allItems() {
-  return Object.values(state.itemsById)
-    .filter((row) => row && row.id !== undefined && row.id !== null)
+  return shoppingItems()
     .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
 }
 
@@ -435,7 +442,7 @@ async function deleteEditorEntries(entryIds) {
   }
 
   for (const entryId of ids) {
-    queueDeleteChange(entryId);
+    deleteShoppingItem(entryId);
   }
   renderEditor();
 
@@ -513,7 +520,7 @@ function itemAmountLabel(item) {
 
 function openMergedItemPicker(groupedItem, entryIds) {
   const items = Array.from(new Set(entryIds))
-    .map((entryId) => state.itemsById[String(entryId)])
+    .map((entryId) => shoppingItem(entryId))
     .filter((item) => item && item.id !== undefined && item.id !== null)
     .sort((a, b) => {
       const recipeA = recipeInfo(a).name;
@@ -595,7 +602,7 @@ function createEditorRow(item) {
   if (isGrouped) {
     const groupedRecipeNames = Array.from(new Set(
       entryIds
-        .map((entryId) => recipeInfo(state.itemsById[String(entryId)]).name)
+        .map((entryId) => recipeInfo(shoppingItem(entryId)).name)
         .filter((name) => String(name || "").trim().length > 0)
     )).sort((a, b) => a.localeCompare(b));
     const firstRecipeName = groupedRecipeNames[0] || recipe.name;
@@ -797,7 +804,7 @@ async function saveAddModal() {
     reminder_text: reminderEnabled ? reminderText : "",
   };
 
-  queueCreateChange(payload);
+  createShoppingItem(payload);
   renderEditor();
 
   if (isOnline()) {
@@ -886,7 +893,7 @@ async function submitOcrPhoto(file) {
   try {
     const formData = new FormData();
     formData.append("image", file);
-    response = await apiUpload("/shopping-list/ocr", formData);
+    response = await uploadShoppingOcr(formData);
   } catch (error) {
     showOcrErrorState("Could not read the photo. Check your connection and try again.");
     return;
@@ -927,7 +934,7 @@ async function saveOcrReviewModal() {
       reminder_date: null,
       reminder_text: "",
     };
-    queueCreateChange(payload);
+    createShoppingItem(payload);
     tempId -= 1;
   }
   renderEditor();
@@ -1008,7 +1015,7 @@ async function deleteFromEditModal() {
     throw new Error("Invalid shopping item.");
   }
 
-  queueDeleteChange(entryId);
+  deleteShoppingItem(entryId);
   renderEditor();
 
   if (isOnline()) {
@@ -1022,18 +1029,18 @@ async function deleteFromEditModal() {
 }
 
 async function clearAllItems() {
-  const allItems = Object.values(state.itemsById).filter((item) => item && item.id !== undefined && item.id !== null);
-  if (allItems.length === 0) {
+  const currentItems = shoppingItems();
+  if (currentItems.length === 0) {
     setStatus("No items to clear.");
     return;
   }
 
-  if (!window.confirm(`Clear all ${allItems.length} item(s) from the shopping list? This action will also remove them from Tandoor.`)) {
+  if (!window.confirm(`Clear all ${currentItems.length} item(s) from the shopping list? This action will also remove them from Tandoor.`)) {
     return;
   }
 
-  for (const item of allItems) {
-    queueDeleteChange(item.id);
+  for (const item of currentItems) {
+    deleteShoppingItem(item.id);
   }
   renderEditor();
 
@@ -1047,8 +1054,7 @@ async function clearAllItems() {
 }
 
 async function queueAndSyncUpdate(entryId, patch) {
-  queueUpdateChange(entryId, patch);
-  persistCache();
+  updateShoppingItem(entryId, patch);
 
   if (!isOnline()) {
     setStatus("Offline: change queued and will sync when online.");
@@ -1059,7 +1065,7 @@ async function queueAndSyncUpdate(entryId, patch) {
 }
 
 function nextTempId() {
-  const ids = Object.keys(state.itemsById)
+  const ids = shoppingItemIds()
     .map((key) => Number(key))
     .filter((id) => Number.isInteger(id) && id < 0);
   if (ids.length === 0) {

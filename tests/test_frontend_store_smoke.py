@@ -10,6 +10,7 @@ def test_store_commands_and_selectors_smoke() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     commands_path = (repo_root / "app/static/js/store/commands.js").as_uri()
     selectors_path = (repo_root / "app/static/js/store/selectors.js").as_uri()
+    api_path = (repo_root / "app/static/js/api.js").as_uri()
 
     script = f"""
 class LocalStorageMock {{
@@ -24,6 +25,7 @@ globalThis.window = {{ WFD_API_PREFIX: '/api/v1' }};
 
 const commands = await import({commands_path!r});
 const selectors = await import({selectors_path!r});
+const apiClient = await import({api_path!r});
 
 commands.cachePlanListRows([{{ plan_id: 1, start_date: '2026-08-20' }}]);
 let cache = selectors.readMealPlanCache();
@@ -53,23 +55,49 @@ if (!Array.isArray(homeCache.entries) || homeCache.entries[0].day_index !== 0) {
   throw new Error('readHomeActivePlanCache did not apply sorter');
 }}
 
-let reportFlag = null;
-globalThis.fetch = async () => ({{ ok: true, json: async () => ({{ source: 'ok' }}) }});
-const okPayload = await commands.api('/health', null, (value) => {{ reportFlag = value; }});
-if (!okPayload || okPayload.source !== 'ok' || reportFlag !== true) {{
+let request = null;
+globalThis.fetch = async (url, options) => {{
+  request = {{ url, options }};
+  return {{ ok: true, json: async () => ({{ source: 'ok' }}) }};
+}};
+const okPayload = await apiClient.api('/health');
+if (!okPayload || okPayload.source !== 'ok') {{
   throw new Error('api success path smoke failed');
+}}
+if (request.url !== '/api/v1/health' || request.options.headers['Content-Type'] !== 'application/json') {{
+  throw new Error('api request construction smoke failed');
 }}
 
 globalThis.fetch = async () => ({{ ok: false, json: async () => ({{ detail: 'boom' }}) }});
-reportFlag = null;
 let failed = false;
 try {{
-  await commands.api('/health', null, (value) => {{ reportFlag = value; }});
+  await apiClient.api('/health');
 }} catch (error) {{
   failed = String(error).includes('boom');
 }}
-if (!failed || reportFlag !== false) {{
+if (!failed) {{
   throw new Error('api error path smoke failed');
+}}
+
+let uploadRequest = null;
+const formData = {{ source: 'camera' }};
+globalThis.fetch = async (url, options) => {{
+  uploadRequest = {{ url, options }};
+  return {{ ok: true, json: async () => ({{ rows: [] }}) }};
+}};
+await apiClient.apiUpload('/shopping-list/ocr', formData);
+if (uploadRequest.url !== '/api/v1/shopping-list/ocr' || uploadRequest.options.body !== formData) {{
+  throw new Error('api upload request construction smoke failed');
+}}
+
+let healthRequest = null;
+globalThis.fetch = async (url, options) => {{
+  healthRequest = {{ url, options }};
+  return {{ ok: true, json: async () => ({{ status: 'ok' }}) }};
+}};
+await apiClient.health();
+if (healthRequest.url !== '/api/v1/health' || healthRequest.options.cache !== 'no-store') {{
+  throw new Error('health request construction smoke failed');
 }}
 """
 
@@ -82,6 +110,51 @@ if (!failed || reportFlag !== false) {{
     )
 
     assert run.returncode == 0, f"Node smoke test failed\nSTDOUT:\n{run.stdout}\nSTDERR:\n{run.stderr}"
+
+
+def test_application_fetches_are_isolated_to_api_layer() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    static_root = repo_root / "app/static"
+    allowed_paths = {
+        static_root / "js/api.js",
+        static_root / "shopping-sw.js",
+    }
+
+    fetch_users = []
+    for source_path in static_root.rglob("*.js"):
+        if "fetch(" in source_path.read_text(encoding="utf-8"):
+            fetch_users.append(source_path)
+
+    assert set(fetch_users) == allowed_paths
+
+
+def test_ui_modules_do_not_import_api_or_shopping_state() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    static_root = repo_root / "app/static"
+    ui_paths = [
+        static_root / "home_tab.js",
+        static_root / "meal_plans.js",
+        static_root / "settings_tab.js",
+        static_root / "shop_editor.js",
+        static_root / "user_shell.js",
+        static_root / "js/gestures.js",
+        static_root / "js/render.js",
+        static_root / "js/shopping.js",
+    ]
+    prohibited_imports = (
+        'from "./js/api.js"',
+        'from "./js/state.js"',
+        'from "./api.js"',
+        'from "./state.js"',
+    )
+
+    violations = []
+    for source_path in ui_paths:
+        source = source_path.read_text(encoding="utf-8")
+        if any(import_text in source for import_text in prohibited_imports):
+            violations.append(str(source_path.relative_to(repo_root)))
+
+    assert not violations, f"UI modules bypass command/selector boundaries: {violations}"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for frontend store smoke tests")

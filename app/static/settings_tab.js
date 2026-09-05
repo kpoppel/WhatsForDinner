@@ -1,4 +1,4 @@
-import { api } from "./js/store/commands.js";
+import { requestSettings as api } from "./js/commands/settings.js";
 import { assertRequiredFields } from "./js/contracts.js";
 
 (() => {

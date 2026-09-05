@@ -5,8 +5,6 @@ import {
 } from "./schema.js";
 import { readMealPlanCache } from "./selectors.js";
 
-const apiPrefix = window.WFD_API_PREFIX;
-
 export function writeActiveMealPlanId(planId) {
   try {
     if (!Number.isInteger(planId)) {
@@ -66,37 +64,5 @@ export function writeHomeActivePlanCache(plan) {
     }));
   } catch {
     // Ignore localStorage failures.
-  }
-}
-
-export async function api(path, options, reportApiReachable) {
-  let opts = {};
-  if (options && typeof options === "object") {
-    opts = options;
-  }
-
-  try {
-    const response = await fetch(`${apiPrefix}${path}`, {
-      headers: { "Content-Type": "application/json" },
-      ...opts,
-    });
-
-    const payload = await response.json();
-    if (!response.ok) {
-      if (typeof payload.detail === "string") {
-        throw new Error(payload.detail);
-      }
-      throw new Error(JSON.stringify(payload));
-    }
-
-    if (typeof reportApiReachable === "function") {
-      reportApiReachable(true);
-    }
-    return payload;
-  } catch (error) {
-    if (typeof reportApiReachable === "function") {
-      reportApiReachable(false);
-    }
-    throw error;
   }
 }
