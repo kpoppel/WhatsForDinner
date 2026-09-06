@@ -1,10 +1,27 @@
+import { setShoppingApiReachable, state } from "./state.js";
+
 const apiPrefix = window.WFD_API_PREFIX;
 
+function publishApiReachability(value) {
+  const previous = state.apiReachable;
+  setShoppingApiReachable(value);
+  if (previous !== Boolean(value) && typeof window.dispatchEvent === "function") {
+    window.dispatchEvent(new CustomEvent("wfd:api-reachability-changed"));
+  }
+}
+
 export async function api(path, options = {}) {
-  const response = await fetch(`${apiPrefix}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+  let response;
+  try {
+    response = await fetch(`${apiPrefix}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+  } catch (error) {
+    publishApiReachability(false);
+    throw error;
+  }
+  publishApiReachability(true);
   const data = await response.json();
   if (!response.ok) {
     if (typeof data.detail === "string") {
@@ -16,10 +33,17 @@ export async function api(path, options = {}) {
 }
 
 export async function apiUpload(path, formData) {
-  const response = await fetch(`${apiPrefix}${path}`, {
-    method: "POST",
-    body: formData,
-  });
+  let response;
+  try {
+    response = await fetch(`${apiPrefix}${path}`, {
+      method: "POST",
+      body: formData,
+    });
+  } catch (error) {
+    publishApiReachability(false);
+    throw error;
+  }
+  publishApiReachability(true);
   const data = await response.json();
   if (!response.ok) {
     if (typeof data.detail === "string") {

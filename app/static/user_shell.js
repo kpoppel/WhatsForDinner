@@ -26,6 +26,12 @@ import { apiReachable, browserOnline, isOnline } from "./js/selectors/connectivi
   }
 
   let activeTab = "home";
+  const REACHABILITY_INITIAL_DELAY_MS = 6000;
+  const REACHABILITY_HEALTHY_DELAY_MS = 300000;
+  const REACHABILITY_MAX_DELAY_MS = 300000;
+  let reachabilityDelayMs = REACHABILITY_INITIAL_DELAY_MS;
+  let reachabilityTimer = null;
+  let reachabilityGeneration = 0;
 
   function applyOnlineAwareControls() {
     const online = isOnline();
@@ -69,15 +75,37 @@ import { apiReachable, browserOnline, isOnline } from "./js/selectors/connectivi
     if (!browserOnline()) {
       setApiReachable(false);
       applyOnlineAwareControls();
-      return;
+      return false;
     }
 
-    await probeApiReachability();
+    const reachable = await probeApiReachability();
 
     applyOnlineAwareControls();
     if (!wasOnline && isOnline()) {
       window.dispatchEvent(new CustomEvent("wfd:connection-restored"));
     }
+    return reachable;
+  }
+
+  function scheduleReachabilityCheck(delayMs) {
+    if (reachabilityTimer !== null) {
+      window.clearTimeout(reachabilityTimer);
+    }
+    reachabilityGeneration += 1;
+    const generation = reachabilityGeneration;
+    reachabilityTimer = window.setTimeout(async () => {
+      if (generation !== reachabilityGeneration) {
+        return;
+      }
+      const reachable = await refreshApiReachability();
+      if (generation !== reachabilityGeneration) {
+        return;
+      }
+      reachabilityDelayMs = reachable
+        ? REACHABILITY_HEALTHY_DELAY_MS
+        : Math.min(reachabilityDelayMs * 2, REACHABILITY_MAX_DELAY_MS);
+      scheduleReachabilityCheck(reachabilityDelayMs);
+    }, delayMs);
   }
 
   function setActiveTab(nextTab) {
@@ -148,18 +176,29 @@ import { apiReachable, browserOnline, isOnline } from "./js/selectors/connectivi
   window.WFD_setActiveTab = setActiveTab;
 
   window.addEventListener("online", () => {
-    void refreshApiReachability();
+    reachabilityDelayMs = REACHABILITY_INITIAL_DELAY_MS;
+    scheduleReachabilityCheck(0);
   });
 
   window.addEventListener("offline", () => {
+    if (reachabilityTimer !== null) {
+      window.clearTimeout(reachabilityTimer);
+      reachabilityTimer = null;
+    }
     setApiReachable(false);
     applyOnlineAwareControls();
   });
 
+  window.addEventListener("wfd:api-reachability-changed", () => {
+    applyOnlineAwareControls();
+  });
+
+  window.addEventListener("wfd:manual-connection-check", () => {
+    reachabilityDelayMs = REACHABILITY_INITIAL_DELAY_MS;
+    scheduleReachabilityCheck(0);
+  });
+
   setActiveTab(activeTab);
   applyOnlineAwareControls();
-  void refreshApiReachability();
-  setInterval(() => {
-    void refreshApiReachability();
-  }, 6000);
+  scheduleReachabilityCheck(0);
 })();

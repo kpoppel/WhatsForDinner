@@ -143,20 +143,52 @@ def test_service_worker_precaches_client_build_assets() -> None:
     source = (repo_root / "app/static/shopping-sw.js").read_text(encoding="utf-8"); assert "__WFD_BUILD_ID__" in source; assert "__WFD_CLIENT_ASSETS__" in source
 
 
-def test_service_worker_uses_cached_shell_only_after_navigation_failure() -> None:
+def test_service_worker_uses_cached_shell_for_slow_or_non_ok_navigation() -> None:
   repo_root = Path(__file__).resolve().parents[1]
   source = (repo_root / "app/static/shopping-sw.js").read_text(encoding="utf-8")
 
-  assert "const response = await fetch(request);" in source
+  assert "fetch(request, { signal: AbortSignal.timeout(NAVIGATION_TIMEOUT_MS) })" in source
+  assert "if (response.ok)" in source
   assert "const cachedShell = await caches.match(fallbackPath);" in source
-  assert source.index("const response = await fetch(request);") < source.index("const cachedShell = await caches.match(fallbackPath);")
 
 
-def test_shell_periodically_probes_connectivity_while_online() -> None:
+def test_shell_backoffs_connectivity_probes_and_allows_manual_retry() -> None:
   repo_root = Path(__file__).resolve().parents[1]
   source = (repo_root / "app/static/user_shell.js").read_text(encoding="utf-8")
 
-  assert "setInterval(() => {\n    void refreshApiReachability();\n  }, 6000);" in source
+  assert "const REACHABILITY_HEALTHY_DELAY_MS = 300000;" in source
+  assert "const REACHABILITY_MAX_DELAY_MS = 300000;" in source
+  assert "Math.min(reachabilityDelayMs * 2, REACHABILITY_MAX_DELAY_MS)" in source
+  assert "let reachabilityGeneration = 0;" in source
+  assert "if (generation !== reachabilityGeneration)" in source
+  assert 'window.addEventListener("wfd:manual-connection-check"' in source
+  assert 'window.addEventListener("wfd:api-reachability-changed"' in source
+
+
+def test_api_layer_owns_reachability_reporting() -> None:
+  repo_root = Path(__file__).resolve().parents[1]
+  static_root = repo_root / "app/static"
+  api_source = (static_root / "js/api.js").read_text(encoding="utf-8")
+
+  assert "publishApiReachability(false)" in api_source
+  assert "publishApiReachability(true)" in api_source
+  for command_path in [
+    static_root / "js/commands/home.js",
+    static_root / "js/commands/meal-plans.js",
+    static_root / "js/commands/settings.js",
+    static_root / "js/commands/shopping.js",
+  ]:
+    assert "setApiReachable" not in command_path.read_text(encoding="utf-8")
+
+
+def test_meal_plans_render_cache_before_server_refresh() -> None:
+  repo_root = Path(__file__).resolve().parents[1]
+  source = (repo_root / "app/static/meal_plans.js").read_text(encoding="utf-8")
+
+  cache_start = source.index("async function refreshPlans()")
+  request_start = source.index("const listPayload = await loadStoredMealPlans()", cache_start)
+  assert source.index("readMealPlanCache().list", cache_start) < request_start
+  assert source.index("renderPlanList(cachedPlans)", cache_start) < request_start
 
 
 def test_shopping_status_badge_reacts_to_connectivity_updates() -> None:

@@ -1,5 +1,4 @@
 import { apiUpload } from "../api.js";
-import { setApiReachable } from "./connectivity.js";
 import { queueCreateChange, queueDeleteChange, queueUpdateChange } from "../state.js";
 import {
   deleteEntries,
@@ -25,14 +24,7 @@ export function updateShoppingItem(entryId, patch) {
 }
 
 export async function uploadShoppingOcr(formData) {
-  try {
-    const payload = await apiUpload("/shopping-list/ocr", formData);
-    setApiReachable(true);
-    return payload;
-  } catch (error) {
-    setApiReachable(false);
-    throw error;
-  }
+  return await apiUpload("/shopping-list/ocr", formData);
 }
 
 export const runShoppingAction = run;

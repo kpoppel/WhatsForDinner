@@ -624,7 +624,7 @@ import { assertRequiredFields } from "./js/contracts.js";
       renderToday(todayEntry, reminderTexts);
       renderUpcoming(entries);
 
-      if (navigator.onLine === false) {
+      if (!isOnline()) {
         todayMeta.innerHTML += '<span> • Offline cache</span>';
       }
     } catch {

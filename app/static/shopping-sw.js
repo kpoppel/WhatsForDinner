@@ -1,5 +1,6 @@
 const CACHE_NAME = "wfd-shopping-pwa-__WFD_BUILD_ID__";
 const APP_FALLBACK_PATH = "/app";
+const NAVIGATION_TIMEOUT_MS = 3000;
 const APP_SHELL = [
   "/app",
   ...__WFD_CLIENT_ASSETS__,
@@ -46,10 +47,15 @@ self.addEventListener("fetch", (event) => {
       (async () => {
         const fallbackPath = APP_FALLBACK_PATH;
         try {
-          const response = await fetch(request);
+          const response = await fetch(request, { signal: AbortSignal.timeout(NAVIGATION_TIMEOUT_MS) });
           if (response.ok) {
             const cache = await caches.open(CACHE_NAME);
             await cache.put(fallbackPath, response.clone());
+            return response;
+          }
+          const cachedShell = await caches.match(fallbackPath);
+          if (cachedShell) {
+            return cachedShell;
           }
           return response;
         } catch {
@@ -61,25 +67,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  const isAppRoute = url.pathname === "/app" || url.pathname === "/app/";
   const isStaticAsset = url.pathname.startsWith("/static/") || url.pathname === "/shopping.webmanifest";
-
-  if (isAppRoute) {
-    const cachePath = "/app";
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(cachePath, copy));
-          return response;
-        })
-        .catch(async () => {
-          const cached = await caches.match(cachePath);
-          return cached || Response.error();
-        })
-    );
-    return;
-  }
 
   if (isStaticAsset) {
     event.respondWith(

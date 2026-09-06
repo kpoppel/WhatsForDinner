@@ -50,7 +50,7 @@ function getPtrIndicator() {
   return _ptrIndicator;
 }
 
-export function setupPullToRefresh({ isOnline, run, refreshAndSyncIfNeeded }) {
+export function setupPullToRefresh({ run, refreshAndSyncIfNeeded }) {
   document.addEventListener("touchstart", (e) => {
     _ptrStartY = e.touches[0].pageY;
     _ptrDragging = false;
@@ -64,10 +64,6 @@ export function setupPullToRefresh({ isOnline, run, refreshAndSyncIfNeeded }) {
     }
 
     if (!areContainersAtTop(_ptrScrollContainers)) {
-      return;
-    }
-
-    if (!isOnline()) {
       return;
     }
 
@@ -90,6 +86,7 @@ export function setupPullToRefresh({ isOnline, run, refreshAndSyncIfNeeded }) {
     _ptrIndicator.style.display = "none";
     _ptrDragging = false;
     if (wasReady) {
+      window.dispatchEvent(new CustomEvent("wfd:manual-connection-check"));
       run(() => refreshAndSyncIfNeeded());
     }
     _ptrScrollContainers = [];

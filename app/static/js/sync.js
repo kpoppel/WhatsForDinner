@@ -68,13 +68,11 @@ export async function refreshAndSyncIfNeeded() {
 export async function refresh() {
   try {
     const payload = await api("/shopping-list/view");
-    setApiReachable(true);
     hydrateShoppingFromServer(payload);
     render();
     show(payload);
     return payload;
   } catch (error) {
-    setApiReachable(false);
     throw error;
   }
 }
@@ -112,7 +110,6 @@ async function syncPendingNow(showPayload) {
     method: "POST",
     body: JSON.stringify({ changes: outgoing }),
   });
-  setApiReachable(true);
   const rejectedChanges = reconcileShoppingSync(payload, outgoing);
   if (rejectedChanges.length > 0) {
     notifySyncFailure();

@@ -1,5 +1,4 @@
 import { render, wireCollapsibleSection, initRender, updateStatusBadges } from "./render.js";
-import { isOnline } from "./selectors/connectivity.js";
 import {
   deleteShoppingEntries as deleteEntries,
   deleteShoppingEntry as deleteEntry,
@@ -33,7 +32,7 @@ window.addEventListener("wfd:online-state", () => {
 if (["/app", "/app/"].includes(window.location.pathname)) {
   setupServiceWorker();
 }
-setupPullToRefresh({ isOnline, run, refreshAndSyncIfNeeded });
+setupPullToRefresh({ run, refreshAndSyncIfNeeded });
 wireCollapsibleSection("skipped");
 wireCollapsibleSection("completed");
 render();

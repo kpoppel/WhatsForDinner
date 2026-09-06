@@ -8,10 +8,8 @@ export function setApiReachable(value) {
 export async function probeApiReachability() {
   try {
     await health();
-    setApiReachable(true);
     return true;
   } catch {
-    setApiReachable(false);
     return false;
   }
 }
