@@ -436,6 +436,7 @@ import {
     const limit = Math.min(4, upcoming.length);
     for (let index = 0; index < limit; index += 1) {
       const entry = upcoming[index];
+      const planId = lastSelectedPlanId;
       const parsedDate = parseIsoDate(String(entry.date));
       const day = parsedDate === null ? "-" : new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(parsedDate);
       const dateNumber = parsedDate === null ? "-" : String(parsedDate.getDate());
@@ -459,7 +460,15 @@ import {
         <span class="wf-day-arrow">❯</span>
       `;
       card.addEventListener("click", () => {
-        setTab("meal-plans");
+        if (!Number.isInteger(planId)) {
+          return;
+        }
+
+        window.dispatchEvent(new CustomEvent("wfd:open-meal-plan", {
+          detail: {
+            planId,
+          },
+        }));
       });
       upcomingList.appendChild(card);
     }

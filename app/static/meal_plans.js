@@ -2090,6 +2090,22 @@ import { readMealPlanCache } from "./js/store/selectors.js";
     });
   });
 
+  window.addEventListener("wfd:open-meal-plan", (event) => {
+    const detail = event instanceof CustomEvent ? event.detail : null;
+    if (!detail || typeof detail !== "object") {
+      return;
+    }
+
+    const planId = Number(detail.planId);
+    if (!Number.isInteger(planId)) {
+      return;
+    }
+
+    void runAction(async () => {
+      await openPlanEditor(planId);
+    });
+  });
+
   async function runAction(action) {
     const queuedAction = mealPlanActionQueue.then(action);
     mealPlanActionQueue = queuedAction.catch(() => {});
