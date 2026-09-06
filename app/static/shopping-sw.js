@@ -41,26 +41,21 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.mode === "navigate") {
-    // Cache-first for navigate: serve shell immediately offline, update cache in background.
+    // Network-first for navigate: use the current shell online and cached shell offline.
     event.respondWith(
       (async () => {
         const fallbackPath = APP_FALLBACK_PATH;
-        const cachedShell = await caches.match(fallbackPath);
-        const networkFetch = fetch(request)
-          .then(async (response) => {
-            if (response && response.ok) {
-              const cache = await caches.open(CACHE_NAME);
-              await cache.put(fallbackPath, response.clone());
-            }
-            return response;
-          })
-          .catch(() => null);
-        if (cachedShell) {
-          networkFetch.catch(() => {});
-          return cachedShell;
+        try {
+          const response = await fetch(request);
+          if (response.ok) {
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(fallbackPath, response.clone());
+          }
+          return response;
+        } catch {
+          const cachedShell = await caches.match(fallbackPath);
+          return cachedShell || Response.error();
         }
-        const networkResponse = await networkFetch;
-        return networkResponse || Response.error();
       })()
     );
     return;

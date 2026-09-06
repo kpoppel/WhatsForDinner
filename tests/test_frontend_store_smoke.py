@@ -100,7 +100,11 @@ globalThis.fetch = async (url, options) => {{
   return {{ ok: true, json: async () => ({{ status: 'ok' }}) }};
 }};
 await apiClient.health();
-if (healthRequest.url !== '/api/v1/health' || healthRequest.options.cache !== 'no-store') {{
+if (
+  healthRequest.url !== '/api/v1/health'
+  || healthRequest.options.cache !== 'no-store'
+  || !(healthRequest.options.signal instanceof AbortSignal)
+) {{
   throw new Error('health request construction smoke failed');
 }}
 """
@@ -137,6 +141,15 @@ def test_application_fetches_are_isolated_to_api_layer() -> None:
 def test_service_worker_precaches_client_build_assets() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     source = (repo_root / "app/static/shopping-sw.js").read_text(encoding="utf-8"); assert "__WFD_BUILD_ID__" in source; assert "__WFD_CLIENT_ASSETS__" in source
+
+
+def test_service_worker_uses_cached_shell_only_after_navigation_failure() -> None:
+  repo_root = Path(__file__).resolve().parents[1]
+  source = (repo_root / "app/static/shopping-sw.js").read_text(encoding="utf-8")
+
+  assert "const response = await fetch(request);" in source
+  assert "const cachedShell = await caches.match(fallbackPath);" in source
+  assert source.index("const response = await fetch(request);") < source.index("const cachedShell = await caches.match(fallbackPath);")
 
 
 def test_shell_periodically_probes_connectivity_while_online() -> None:

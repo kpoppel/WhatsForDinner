@@ -31,5 +31,5 @@ export async function apiUpload(path, formData) {
 }
 
 export async function health() {
-  return await api("/health", { cache: "no-store" });
+  return await api("/health", { cache: "no-store", signal: AbortSignal.timeout(5000) });
 }
