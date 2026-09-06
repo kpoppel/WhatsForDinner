@@ -66,7 +66,6 @@ function attachSwipeTracking(card, onSwipe) {
       target.style.setProperty("--swipe-progress", progress);
       target.style.setProperty("--swipe-delete-right-progress", progress);
       target.style.setProperty("--swipe-skip-progress", progress);
-      target.style.setProperty("--swipe-delete-progress", progress);
       target.style.setProperty("--wf-editor-delete-progress", progress);
     }
     if (event.cancelable) {
@@ -87,7 +86,6 @@ function attachSwipeTracking(card, onSwipe) {
       target.style.setProperty("--swipe-progress", "0");
       target.style.setProperty("--swipe-delete-right-progress", "0");
       target.style.setProperty("--swipe-skip-progress", "0");
-      target.style.setProperty("--swipe-delete-progress", "0");
       target.style.setProperty("--wf-editor-delete-progress", "0");
     }
     if (direction) {
@@ -234,7 +232,7 @@ export function createCard(item, mode) {
       <div class="shop-item-amount muted">${amountMarkup}</div>
     </div>
   `;
-  for (const hint of card.querySelectorAll(".shop-swipe-delete-right-hint, .shop-swipe-skip-hint, .shop-swipe-delete-hint")) {
+  for (const hint of card.querySelectorAll(".shop-swipe-delete-right-hint, .shop-swipe-skip-hint")) {
     cardShell.appendChild(hint);
   }
 
