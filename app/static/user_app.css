@@ -1279,6 +1279,7 @@ body {
   position: relative;
   overflow: hidden;
   border-radius: 12px;
+  background: #e87474;
 }
 
 .wf-editor-item-shell .wf-editor-item {

@@ -213,6 +213,7 @@
       overflow: hidden;
       margin-bottom: 0.4rem;
       border-radius: 10px;
+      background: #e87474;
     }
     .shop-card-shell:last-child { margin-bottom: 0; }
     .shop-card-shell .shop-card { margin-bottom: 0; }

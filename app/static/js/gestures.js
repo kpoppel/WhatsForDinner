@@ -26,6 +26,7 @@ const SWIPE_THRESHOLD = 80;
 const SWIPE_DISTANCE = 140;
 
 function attachSwipeTracking(card, onSwipe) {
+  const actionShell = card.parentElement;
   let startX = 0;
   let startY = 0;
   let deltaX = 0;
@@ -58,11 +59,16 @@ function attachSwipeTracking(card, onSwipe) {
     card.classList.toggle("swiping", clamped < -20);
     card.classList.toggle("swiping-delete-right", clamped > 20);
     const progress = String(Math.min(Math.abs(clamped) / SWIPE_DISTANCE, 1));
-    card.style.setProperty("--swipe-progress", progress);
-    card.style.setProperty("--swipe-delete-right-progress", progress);
-    card.style.setProperty("--swipe-skip-progress", progress);
-    card.style.setProperty("--swipe-delete-progress", progress);
-    card.style.setProperty("--wf-editor-delete-progress", progress);
+    for (const target of [card, actionShell]) {
+      if (!target) {
+        continue;
+      }
+      target.style.setProperty("--swipe-progress", progress);
+      target.style.setProperty("--swipe-delete-right-progress", progress);
+      target.style.setProperty("--swipe-skip-progress", progress);
+      target.style.setProperty("--swipe-delete-progress", progress);
+      target.style.setProperty("--wf-editor-delete-progress", progress);
+    }
     if (event.cancelable) {
       event.preventDefault();
     }
@@ -74,11 +80,16 @@ function attachSwipeTracking(card, onSwipe) {
       : null;
     card.style.transform = "";
     card.classList.remove("swiping", "swiping-delete-right");
-    card.style.setProperty("--swipe-progress", "0");
-    card.style.setProperty("--swipe-delete-right-progress", "0");
-    card.style.setProperty("--swipe-skip-progress", "0");
-    card.style.setProperty("--swipe-delete-progress", "0");
-    card.style.setProperty("--wf-editor-delete-progress", "0");
+    for (const target of [card, actionShell]) {
+      if (!target) {
+        continue;
+      }
+      target.style.setProperty("--swipe-progress", "0");
+      target.style.setProperty("--swipe-delete-right-progress", "0");
+      target.style.setProperty("--swipe-skip-progress", "0");
+      target.style.setProperty("--swipe-delete-progress", "0");
+      target.style.setProperty("--wf-editor-delete-progress", "0");
+    }
     if (direction) {
       suppressNextCardClick(card);
       onSwipe(direction);
