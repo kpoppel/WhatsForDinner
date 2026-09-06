@@ -11,3 +11,7 @@ export function isOnline() {
 export function apiReachable() {
   return state.apiReachable;
 }
+
+export function syncing() {
+  return state.syncing;
+}

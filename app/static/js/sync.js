@@ -15,6 +15,15 @@ import { render, updateStatusBadges } from "./render.js";
 
 const DEBUG_MODE = false;
 let pendingSync = Promise.resolve();
+let syncActivityCount = 0;
+
+function setSyncing(syncing) {
+  syncActivityCount += syncing ? 1 : -1;
+  state.syncing = syncActivityCount > 0;
+  window.dispatchEvent(new CustomEvent("wfd:sync-state", {
+    detail: { syncing: state.syncing },
+  }));
+}
 
 export function show(data) {
   if (!DEBUG_MODE) {
@@ -51,14 +60,23 @@ export async function run(action) {
 }
 
 export async function refreshAndSyncIfNeeded() {
+  setSyncing(true);
   if (!browserOnline()) {
-    setApiReachable(false);
-    updateStatusBadges();
-    return;
+    try {
+      setApiReachable(false);
+      updateStatusBadges();
+      return;
+    } finally {
+      setSyncing(false);
+    }
   }
-  await refresh();
-  if (state.pendingChanges.length > 0) {
-    await syncPending(false);
+  try {
+    await refresh();
+    if (state.pendingChanges.length > 0) {
+      await syncPending(false);
+    }
+  } finally {
+    setSyncing(false);
   }
 }
 
@@ -75,7 +93,10 @@ export async function refresh() {
 }
 
 export function syncPending(showPayload = true) {
-  const nextSync = pendingSync.then(() => syncPendingNow(showPayload));
+  const nextSync = pendingSync.then(() => {
+    setSyncing(true);
+    return syncPendingNow(showPayload).finally(() => setSyncing(false));
+  });
   pendingSync = nextSync.catch(() => {});
   return nextSync.catch(async (error) => {
     try {
@@ -108,6 +129,7 @@ async function syncPendingNow(showPayload) {
     body: JSON.stringify({ changes: outgoing }),
   });
   const rejectedChanges = reconcileShoppingSync(payload, outgoing);
+  const dataChanged = rejectedChanges.length > 0 || payload.applied.length > 0;
   if (rejectedChanges.length > 0) {
     notifySyncFailure();
   }
@@ -118,12 +140,17 @@ async function syncPendingNow(showPayload) {
       render();
     }
   } else {
-    render();
+    updateStatusBadges();
+    if (dataChanged) {
+      render();
+    }
   }
   if (showPayload) {
     show(payload);
   }
-  publishDataChanged();
+  if (dataChanged) {
+    publishDataChanged();
+  }
   return payload;
 }
 

@@ -1,5 +1,5 @@
 import { probeApiReachability, setApiReachable } from "./js/commands/connectivity.js";
-import { apiReachable, browserOnline, isOnline } from "./js/selectors/connectivity.js";
+import { apiReachable, browserOnline, isOnline, syncing } from "./js/selectors/connectivity.js";
 
 (() => {
   const TAB_META = {
@@ -20,6 +20,9 @@ import { apiReachable, browserOnline, isOnline } from "./js/selectors/connectivi
   const navButtons = Array.from(document.querySelectorAll(".wf-nav-btn"));
   const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
   const onlineAwareControls = Array.from(document.querySelectorAll("[data-online-behavior]"));
+  const networkStatus = document.getElementById("shop-mode-network");
+  const networkDot = networkStatus ? networkStatus.querySelector(".status-dot") : null;
+  const networkLabel = document.getElementById("shop-mode-network-label");
 
   if (!shell || !bottomNav || !titleNode || !settingsButton || !exitButton || navButtons.length === 0 || tabPanels.length === 0) {
     return;
@@ -32,10 +35,24 @@ import { apiReachable, browserOnline, isOnline } from "./js/selectors/connectivi
   let reachabilityDelayMs = REACHABILITY_INITIAL_DELAY_MS;
   let reachabilityTimer = null;
   let reachabilityGeneration = 0;
+  function applyNetworkStatus() {
+    if (!networkStatus || !networkDot || !networkLabel) {
+      return;
+    }
+    const online = isOnline();
+    networkDot.classList.toggle("is-online", online && !syncing());
+    networkDot.classList.toggle("is-offline", !online && !syncing());
+    networkDot.classList.toggle("is-syncing", syncing());
+    const label = syncing() ? "Syncing..." : online ? "Online" : "Offline";
+    networkLabel.textContent = label;
+    networkStatus.setAttribute("aria-label", label);
+    networkStatus.setAttribute("title", label);
+  }
 
   function applyOnlineAwareControls() {
     const online = isOnline();
     shell.classList.toggle("wf-is-offline", !online);
+    applyNetworkStatus();
 
     for (const control of onlineAwareControls) {
       const behavior = String(control.getAttribute("data-online-behavior") || "disable").trim().toLowerCase();
@@ -195,6 +212,13 @@ import { apiReachable, browserOnline, isOnline } from "./js/selectors/connectivi
 
   window.addEventListener("wfd:api-reachability-changed", () => {
     applyOnlineAwareControls();
+  });
+
+  window.addEventListener("wfd:sync-state", (event) => {
+    if (!(event instanceof CustomEvent)) {
+      return;
+    }
+    applyNetworkStatus();
   });
 
   window.addEventListener("wfd:manual-connection-check", () => {

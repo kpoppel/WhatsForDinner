@@ -2119,7 +2119,6 @@ import { readMealPlanCache } from "./js/store/selectors.js";
     }
   }
 
-  setAppTab("meal-plans");
   updateMealPlanActionAvailability();
   void runAction(refreshPlans);
 })();

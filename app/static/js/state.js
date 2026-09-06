@@ -9,6 +9,7 @@ export const state = {
   pendingChanges: [],
   serverCursor: 0,
   apiReachable: true,
+  syncing: false,
   collapsedSections: {
     skipped: true,
     completed: true,

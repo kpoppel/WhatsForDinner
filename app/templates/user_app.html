@@ -17,7 +17,10 @@
       </div>
       <div class="wf-header-actions">
         <button id="toggle-instructions" class="wf-icon-btn wf-shop-control" type="button" aria-label="Shopping mode instructions" hidden>?</button>
-        <span id="shop-mode-network" class="status-dot is-offline wf-shop-control" role="status" aria-label="Offline" title="Offline" hidden></span>
+        <span id="shop-mode-network" class="wf-network-status" role="status" aria-live="polite" aria-label="Offline" title="Offline">
+          <span class="status-dot is-offline" aria-hidden="true"></span>
+          <span id="shop-mode-network-label">Offline</span>
+        </span>
         <span id="shop-mode-pending" class="badge pending-sync wf-shop-control" role="status" aria-label="Pending sync: 0" title="Pending sync: 0" hidden><span class="pending-sync-icon" aria-hidden="true">⟳</span><span id="shop-mode-pending-count">0</span></span>
         <button id="wf-settings-btn" class="wf-icon-btn" type="button" aria-label="Settings">⚙️</button>
       </div>

@@ -121,6 +121,30 @@ body {
   display: none !important;
 }
 
+.wf-network-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--wf-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.wf-network-status .status-dot {
+  flex: 0 0 auto;
+}
+
+.wf-network-status .status-dot.is-syncing {
+  background: #d28b2e;
+  border-color: #ad6f1d;
+  animation: wf-sync-pulse 900ms ease-in-out infinite alternate;
+}
+
+@keyframes wf-sync-pulse {
+  from { opacity: 0.45; }
+  to { opacity: 1; }
+}
+
 .wf-content {
   flex: 1;
   overflow-y: auto;

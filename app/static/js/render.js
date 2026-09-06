@@ -5,6 +5,7 @@ import {
   shoppingItemsByStatus,
   shoppingSectionCollapsed,
 } from "./selectors/shopping.js";
+import { syncing } from "./selectors/connectivity.js";
 import { escapeAttr } from "./utils.js";
 
 const DEBUG_MODE = false;
@@ -130,15 +131,26 @@ export function initRender(createCardFn) {
 
 export function updateStatusBadges() {
   const network = document.getElementById("shop-mode-network");
+  const networkDot = network && typeof network.querySelector === "function"
+    ? network.querySelector(".status-dot")
+    : null;
   const pending = document.getElementById("shop-mode-pending");
   const pendingCount = document.getElementById("shop-mode-pending-count");
   const pendingChangeCount = pendingShoppingChangeCount();
   const online = shoppingApiReachable() && navigator.onLine !== false;
 
-  network.classList.toggle("is-online", online);
-  network.classList.toggle("is-offline", !online);
-  network.setAttribute("aria-label", online ? "Online" : "Offline");
-  network.setAttribute("title", online ? "Online" : "Offline");
+  if (network && networkDot) {
+    networkDot.classList.toggle("is-online", online);
+    networkDot.classList.toggle("is-offline", !online);
+    if (!syncing()) {
+      network.setAttribute("aria-label", online ? "Online" : "Offline");
+      network.setAttribute("title", online ? "Online" : "Offline");
+      const networkLabel = document.getElementById("shop-mode-network-label");
+      if (networkLabel) {
+        networkLabel.textContent = online ? "Online" : "Offline";
+      }
+    }
+  }
 
   if (pendingCount) {
     pendingCount.textContent = String(pendingChangeCount);
