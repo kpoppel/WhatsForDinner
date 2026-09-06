@@ -363,6 +363,21 @@ def _migrate_v17_to_v18(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v18_to_v19(payload: dict[str, Any]) -> dict[str, Any]:
+    next_payload = deepcopy(payload)
+    meal_plans = next_payload.get("meal_plans", {})
+    pending_syncs = next_payload.get("pending_meal_plan_syncs", {})
+    if isinstance(meal_plans, dict) and isinstance(pending_syncs, dict):
+        for plan_id, pending_sync in pending_syncs.items():
+            plan = meal_plans.get(str(plan_id))
+            entries = plan.get("entries", []) if isinstance(plan, dict) else []
+            if isinstance(pending_sync, dict) and isinstance(entries, list):
+                pending_sync["affected_day_start"] = 0
+                pending_sync["affected_day_end"] = max(len(entries) - 1, 0)
+    next_payload["schema_version"] = 19
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(raw)
 
@@ -437,6 +452,10 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     if schema_version == 17:
         payload = _migrate_v17_to_v18(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 18:
+        payload = _migrate_v18_to_v19(payload)
         schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:

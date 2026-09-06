@@ -369,17 +369,28 @@ class ServerState:
             data["pending_meal_plan_changes"].pop(f"{plan_id}:{entry_id}", None)
             self._save(data)
 
-    def queue_meal_plan_sync(self, plan_id: int, previous_sync: dict[str, dict[str, Any]]) -> None:
-        """Persist a full-plan sync request, coalescing rapid reorders per plan."""
+    def queue_meal_plan_sync(
+        self,
+        plan_id: int,
+        previous_sync: dict[str, dict[str, Any]],
+        affected_day_start: int,
+        affected_day_end: int,
+    ) -> None:
+        """Persist a reordered day range, coalescing rapid reorders per plan."""
         with self._lock:
             data = self._load()
             key = str(plan_id)
             existing = data["pending_meal_plan_syncs"].get(key)
             revision = existing["revision"] + 1 if isinstance(existing, dict) else 1
+            if isinstance(existing, dict):
+                affected_day_start = min(affected_day_start, existing["affected_day_start"])
+                affected_day_end = max(affected_day_end, existing["affected_day_end"])
             data["pending_meal_plan_syncs"][key] = {
                 "plan_id": plan_id,
                 "previous_sync": existing["previous_sync"] if isinstance(existing, dict) else previous_sync,
                 "revision": revision,
+                "affected_day_start": affected_day_start,
+                "affected_day_end": affected_day_end,
             }
             self._save(data)
 

@@ -1055,7 +1055,10 @@ def test_patch_entry_move_updates_tracked_tandoor_row_in_place(tmp_path) -> None
     )
 
     assert client.updated_meal_plan_calls == []
-    assert state.pending_meal_plan_sync(plan_id) is not None
+    pending_sync = state.pending_meal_plan_sync(plan_id)
+    assert pending_sync is not None
+    assert pending_sync["affected_day_start"] == 0
+    assert pending_sync["affected_day_end"] == 1
     asyncio.run(service.sync_pending_plan(plan_id, ensure_writes_enabled))
 
     assert [meal_id for meal_id, _ in client.updated_meal_plan_calls] == [original_row_id, 2]
@@ -1064,9 +1067,10 @@ def test_patch_entry_move_updates_tracked_tandoor_row_in_place(tmp_path) -> None
     assert set(client.meal_plan_rows) == {original_row_id, 2}
 
     async def list_meal_plans_should_not_run(limit=50):
-        raise AssertionError("A targeted entry sync must not list all meal-plan rows.")
+        raise AssertionError("A reorder sync must not list all meal-plan rows.")
 
     client.list_meal_plans = list_meal_plans_should_not_run
+
     client.updated_meal_plan_calls.clear()
     asyncio.run(
         service.patch_entry(

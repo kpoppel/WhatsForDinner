@@ -629,7 +629,7 @@ class MealPlanService:
             self._state.clear_pending_meal_plan_change(plan_id, entry_id)
 
     async def sync_pending_plan(self, plan_id: int, ensure_tandoor_writes_enabled) -> None:
-        """Apply the latest queued full-plan synchronization after reordering."""
+        """Apply the latest queued reordered-day synchronization."""
         pending_sync = self._state.pending_meal_plan_sync(plan_id)
         if pending_sync is None:
             return
@@ -640,13 +640,32 @@ class MealPlanService:
             if plan is None:
                 self._state.clear_pending_meal_plan_sync(plan_id, pending_sync["revision"])
                 return
-            await self._sync_tandoor_meal_plan_rows(
-                plan_id=plan_id,
-                plan_payload=plan,
-                ensure_tandoor_writes_enabled=ensure_tandoor_writes_enabled,
-                operation_name="meal_plan_reorder_sync",
-                previous_sync=pending_sync["previous_sync"],
-            )
+            affected_entries = [
+                entry
+                for entry in plan.get("entries", [])
+                if isinstance(entry, dict)
+                and pending_sync["affected_day_start"] <= int(entry.get("day_index", -1)) <= pending_sync["affected_day_end"]
+            ]
+            previous_sync = pending_sync["previous_sync"]
+            desired_sync = self._desired_meal_plan_row_sync(plan, affected_entries)
+
+            ensure_tandoor_writes_enabled("meal_plan_reorder_sync")
+            next_sync: dict[str, dict[str, Any]] = {}
+            for instance_key in sorted(desired_sync):
+                desired_row = desired_sync[instance_key]
+                previous_row = previous_sync.get(instance_key)
+                if not isinstance(previous_row, dict) or not isinstance(previous_row.get("meal_plan_row_id"), int):
+                    raise RuntimeError(f"Missing tracked Tandoor row for reordered meal plan entry: {instance_key}")
+                row_id = previous_row["meal_plan_row_id"]
+                await self._update_meal_plan_row_for_instance(row_id, desired_row)
+                desired_row["meal_plan_row_id"] = row_id
+                desired_row["shopping_recipe_id"] = None
+                next_sync[instance_key] = desired_row
+
+            current_sync = self._state.get_meal_plan_tandoor_sync(plan_id)
+            retained_sync = {key: value for key, value in current_sync.items() if key not in next_sync}
+            retained_sync.update(next_sync)
+            self._state.set_meal_plan_tandoor_sync(plan_id, self._serialize_instance_sync(retained_sync))
             self._state.clear_pending_meal_plan_sync(plan_id, pending_sync["revision"])
 
     async def _delete_all_tandoor_meal_plan_rows(
@@ -995,7 +1014,12 @@ class MealPlanService:
                 if target_day_index is None:
                     self._state.queue_meal_plan_entry_sync(plan_id, entry_id, previous_sync)
                 else:
-                    self._state.queue_meal_plan_sync(plan_id, previous_sync)
+                    self._state.queue_meal_plan_sync(
+                        plan_id,
+                        previous_sync,
+                        min(from_index, target_index),
+                        max(from_index, target_index),
+                    )
             elif ensure_tandoor_writes_enabled is not None and isinstance(updated, dict):
                 try:
                     await self._sync_tandoor_meal_plan_rows(
