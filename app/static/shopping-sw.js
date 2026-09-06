@@ -76,9 +76,13 @@ self.addEventListener("fetch", (event) => {
         const cacheKey = url.pathname;
         const cached = await cache.match(cacheKey);
         try {
-          const response = await fetch(request);
+          const response = await fetch(request, { signal: AbortSignal.timeout(NAVIGATION_TIMEOUT_MS) });
           if (response && response.ok) {
             await cache.put(cacheKey, response.clone());
+            return response;
+          }
+          if (cached) {
+            return cached;
           }
           return response;
         } catch {

@@ -150,6 +150,7 @@ def test_service_worker_uses_cached_shell_for_slow_or_non_ok_navigation() -> Non
   assert "fetch(request, { signal: AbortSignal.timeout(NAVIGATION_TIMEOUT_MS) })" in source
   assert "if (response.ok)" in source
   assert "const cachedShell = await caches.match(fallbackPath);" in source
+  assert source.count("fetch(request, { signal: AbortSignal.timeout(NAVIGATION_TIMEOUT_MS) })") == 2
 
 
 def test_shell_backoffs_connectivity_probes_and_allows_manual_retry() -> None:
