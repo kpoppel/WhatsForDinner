@@ -1,5 +1,4 @@
 import { loadSettingsData, saveSettingsData } from "./js/commands/settings.js";
-import { assertRequiredFields } from "./js/contracts.js";
 
 (() => {
   const panel = document.getElementById("wf-tab-settings");
@@ -277,10 +276,6 @@ import { assertRequiredFields } from "./js/contracts.js";
       selectedKeywords: selectedPayload,
     } = await loadSettingsData();
 
-    assertRequiredFields(userSettingsPayload, ["data"], "User settings response");
-    assertRequiredFields(rulesPayload, ["data"], "Meal plan rules response");
-    assertRequiredFields(keywordsPayload, ["data"], "Keyword catalog response");
-    assertRequiredFields(selectedPayload, ["selected_keyword_ids"], "Selected keywords response");
 
     const settingsData = userSettingsPayload.data;
     if (settingsData && typeof settingsData === "object") {

@@ -167,11 +167,7 @@ export function compactPendingChanges() {
 }
 
 export function persistCache() {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(state));
-  } catch {
-    // Ignore write failures.
-  }
+  localStorage.setItem(CACHE_KEY, JSON.stringify(state));
 }
 
 export function applyPendingChanges() {
@@ -241,27 +237,12 @@ export function applyPendingChanges() {
 }
 
 export function loadCache() {
-  try {
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) {
-      return;
-    }
+  const raw = localStorage.getItem(CACHE_KEY);
+  if (raw !== null) {
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") {
-      if (parsed.itemsById && typeof parsed.itemsById === "object") {
-        state.itemsById = parsed.itemsById;
-      }
-      if (Array.isArray(parsed.pendingChanges)) {
-        state.pendingChanges = parsed.pendingChanges;
-      }
-      if (Number.isInteger(parsed.serverCursor)) {
-        state.serverCursor = parsed.serverCursor;
-      }
-    }
-  } catch {
-    state.itemsById = {};
-    state.pendingChanges = [];
-    state.serverCursor = 0;
+    state.itemsById = parsed.itemsById;
+    state.pendingChanges = parsed.pendingChanges;
+    state.serverCursor = parsed.serverCursor;
   }
   compactPendingChanges();
   applyPendingChanges();

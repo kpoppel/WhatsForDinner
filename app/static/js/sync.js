@@ -35,9 +35,6 @@ function notifySyncFailure() {
 }
 
 function normalizeEntryIds(entryIds) {
-  if (!Array.isArray(entryIds)) {
-    return [];
-  }
   return Array.from(new Set(
     entryIds
       .map((value) => Number(value))

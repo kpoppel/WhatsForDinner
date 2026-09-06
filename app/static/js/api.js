@@ -5,7 +5,7 @@ const apiPrefix = window.WFD_API_PREFIX;
 function publishApiReachability(value) {
   const previous = state.apiReachable;
   setShoppingApiReachable(value);
-  if (previous !== Boolean(value) && typeof window.dispatchEvent === "function") {
+  if (previous !== Boolean(value)) {
     window.dispatchEvent(new CustomEvent("wfd:api-reachability-changed"));
   }
 }
@@ -24,10 +24,7 @@ export async function api(path, options = {}) {
   publishApiReachability(true);
   const data = await response.json();
   if (!response.ok) {
-    if (typeof data.detail === "string") {
-      throw new Error(data.detail);
-    }
-    throw new Error(JSON.stringify(data));
+    throw new Error(data.detail || JSON.stringify(data));
   }
   return data;
 }
@@ -46,10 +43,7 @@ export async function apiUpload(path, formData) {
   publishApiReachability(true);
   const data = await response.json();
   if (!response.ok) {
-    if (typeof data.detail === "string") {
-      throw new Error(data.detail);
-    }
-    throw new Error(JSON.stringify(data));
+    throw new Error(data.detail || JSON.stringify(data));
   }
   return data;
 }

@@ -15,7 +15,6 @@ import {
   readHomeActivePlanCache,
   readMealPlanCache,
 } from "./js/store/selectors.js";
-import { assertRequiredFields } from "./js/contracts.js";
 
 (() => {
   const tandoorBaseUrl = typeof window.WFD_TANDOOR_BASE_URL === "string"
@@ -511,7 +510,6 @@ import { assertRequiredFields } from "./js/contracts.js";
 
   async function fetchActivePlan() {
     const listPayload = await loadStoredMealPlans();
-    assertRequiredFields(listPayload, ["data"], "Meal plan list response");
     const rows = listPayload.data;
     if (!Array.isArray(rows) || rows.length === 0) {
       const cache = readMealPlanCache();
@@ -538,7 +536,6 @@ import { assertRequiredFields } from "./js/contracts.js";
     lastSelectedPlanId = planId;
     writeActiveMealPlanId(planId);
     const detailPayload = await loadMealPlan(planId);
-    assertRequiredFields(detailPayload, ["data"], "Meal plan detail response");
     const plan = detailPayload.data;
     if (!plan || typeof plan !== "object") {
       return { plan: null, entries: [] };
@@ -614,7 +611,6 @@ import { assertRequiredFields } from "./js/contracts.js";
       let reminderTexts = [];
       try {
         const shoppingPayload = await loadShoppingList(400);
-        assertRequiredFields(shoppingPayload, ["data"], "Shopping view response");
         reminderTexts = shoppingReminderTexts(shoppingPayload);
       } catch {
         reminderTexts = [];

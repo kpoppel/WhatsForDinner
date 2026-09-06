@@ -18,7 +18,6 @@ import {
 } from "./js/commands/meal-plans.js";
 import { isOnline } from "./js/selectors/connectivity.js";
 import { readMealPlanCache } from "./js/store/selectors.js";
-import { assertRequiredFields } from "./js/contracts.js";
 
 (() => {
   const changeStartDateButton = document.getElementById("wf-plan-change-start-btn");
@@ -1107,7 +1106,6 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     try {
       const listPayload = await loadStoredMealPlans();
-      assertRequiredFields(listPayload, ["data"], "Meal plan list response");
       const rawPlans = Array.isArray(listPayload.data) ? listPayload.data : [];
       plans = sortPlansMostRecentFirst(rawPlans);
       cachePlanListRows(plans);
@@ -1144,7 +1142,6 @@ import { assertRequiredFields } from "./js/contracts.js";
     if (Number.isInteger(firstPlanId) && !planPreviewTitlesById.has(firstPlanId)) {
       try {
         const activePayload = await loadMealPlan(firstPlanId);
-        assertRequiredFields(activePayload, ["data"], "Meal plan detail response");
         cachePlanPreview(activePayload.data);
         cachePlanDetail(activePayload.data);
       } catch {
@@ -1184,7 +1181,6 @@ import { assertRequiredFields } from "./js/contracts.js";
     let planData = null;
     try {
       const payload = await loadMealPlan(selectedPlanId);
-      assertRequiredFields(payload, ["data"], "Meal plan detail response");
       planData = payload.data;
     } catch {
       planData = cachedPlanDetail(selectedPlanId);
@@ -1224,7 +1220,6 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     try {
       const payload = await loadMealPlan(planId);
-      assertRequiredFields(payload, ["data"], "Meal plan detail response");
       planData = payload.data;
     } catch {
       if (!planData) {
@@ -1269,7 +1264,6 @@ import { assertRequiredFields } from "./js/contracts.js";
 
     try {
       const payload = await generateMealPlanShoppingList(selectedPlanId, mode);
-      assertRequiredFields(payload, ["data"], "Meal plan shopping response");
 
       const data = payload.data;
       const createdCount = Number.isInteger(Number(data.created_count))

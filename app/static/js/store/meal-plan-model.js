@@ -7,54 +7,18 @@ export function emptyMealPlanCache() {
 }
 
 function loadActiveMealPlanId() {
-  try {
-    const raw = localStorage.getItem(ACTIVE_MEAL_PLAN_ID_KEY);
-    const value = Number(raw);
-    if (Number.isInteger(value)) {
-      return value;
-    }
-  } catch {
-    // Ignore localStorage failures.
-  }
-  return null;
+  const raw = localStorage.getItem(ACTIVE_MEAL_PLAN_ID_KEY);
+  return raw === null ? null : Number(raw);
 }
 
 function loadMealPlanCache() {
-  const base = emptyMealPlanCache();
-  try {
-    const raw = localStorage.getItem(MEAL_PLAN_CACHE_KEY);
-    if (!raw) {
-      return base;
-    }
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") {
-      if (parsed.list instanceof Array) {
-        base.list = parsed.list;
-      }
-      if (parsed.byId && typeof parsed.byId === "object") {
-        base.byId = parsed.byId;
-      }
-    }
-  } catch {
-    // Ignore localStorage failures.
-  }
-  return base;
+  const raw = localStorage.getItem(MEAL_PLAN_CACHE_KEY);
+  return raw === null ? emptyMealPlanCache() : JSON.parse(raw);
 }
 
 function loadHomeActivePlan() {
-  try {
-    const raw = localStorage.getItem(HOME_ACTIVE_PLAN_CACHE_KEY);
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && parsed.plan && typeof parsed.plan === "object") {
-      return parsed.plan;
-    }
-  } catch {
-    // Ignore localStorage failures.
-  }
-  return null;
+  const raw = localStorage.getItem(HOME_ACTIVE_PLAN_CACHE_KEY);
+  return raw === null ? null : JSON.parse(raw).plan;
 }
 
 export const store = {
@@ -64,35 +28,23 @@ export const store = {
 };
 
 export function setActiveMealPlanId(planId) {
-  store.activeMealPlanId = Number.isInteger(planId) ? planId : null;
-  try {
-    if (store.activeMealPlanId === null) {
-      localStorage.removeItem(ACTIVE_MEAL_PLAN_ID_KEY);
-      return;
-    }
-    localStorage.setItem(ACTIVE_MEAL_PLAN_ID_KEY, String(store.activeMealPlanId));
-  } catch {
-    // Ignore localStorage failures.
+  store.activeMealPlanId = planId;
+  if (planId === null) {
+    localStorage.removeItem(ACTIVE_MEAL_PLAN_ID_KEY);
+    return;
   }
+  localStorage.setItem(ACTIVE_MEAL_PLAN_ID_KEY, String(planId));
 }
 
 export function setMealPlanCache(nextCache) {
   store.mealPlanCache = nextCache;
-  try {
-    localStorage.setItem(MEAL_PLAN_CACHE_KEY, JSON.stringify(store.mealPlanCache));
-  } catch {
-    // Ignore localStorage failures.
-  }
+  localStorage.setItem(MEAL_PLAN_CACHE_KEY, JSON.stringify(store.mealPlanCache));
 }
 
 export function setHomeActivePlan(plan) {
   store.homeActivePlan = plan;
-  try {
-    localStorage.setItem(HOME_ACTIVE_PLAN_CACHE_KEY, JSON.stringify({
-      plan: store.homeActivePlan,
-      updatedAt: new Date().toISOString(),
-    }));
-  } catch {
-    // Ignore localStorage failures.
-  }
+  localStorage.setItem(HOME_ACTIVE_PLAN_CACHE_KEY, JSON.stringify({
+    plan: store.homeActivePlan,
+    updatedAt: new Date().toISOString(),
+  }));
 }

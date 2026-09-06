@@ -2,24 +2,12 @@ import { escapeAttr } from "./utils.js";
 import { suppressNextCardClick, consumeSuppressedCardClick } from "./render.js";
 
 // Injected by initGestures() from shopping.js to avoid a circular dependency with sync.js.
-let _run, _setStatus, _deleteEntry, _setStatusMany, _deleteEntries;
+let _run, _setStatusMany, _deleteEntries;
 
-export function initGestures({ run, setStatus, deleteEntry, setStatusMany, deleteEntries }) {
+export function initGestures({ run, setStatusMany, deleteEntries }) {
   _run = run;
-  _setStatus = setStatus;
-  _deleteEntry = deleteEntry;
   _setStatusMany = setStatusMany;
   _deleteEntries = deleteEntries;
-}
-
-function normalizeEntryIds(value) {
-  if (Array.isArray(value)) {
-    return value
-      .map((entryId) => Number(entryId))
-      .filter((entryId) => Number.isInteger(entryId) && entryId !== 0);
-  }
-  const single = Number(value);
-  return Number.isInteger(single) && single !== 0 ? [single] : [];
 }
 
 const SWIPE_THRESHOLD = 80;
@@ -33,10 +21,7 @@ function attachSwipeTracking(card, onSwipe) {
   let isDragging = false;
 
   card.addEventListener("touchstart", (event) => {
-    const touch = event.changedTouches?.[0];
-    if (!touch) {
-      return;
-    }
+    const touch = event.changedTouches[0];
     startX = touch.clientX;
     startY = touch.clientY;
     deltaX = 0;
@@ -44,10 +29,7 @@ function attachSwipeTracking(card, onSwipe) {
   });
 
   card.addEventListener("touchmove", (event) => {
-    const touch = event.changedTouches?.[0];
-    if (!touch) {
-      return;
-    }
+    const touch = event.changedTouches[0];
     deltaX = touch.clientX - startX;
     const deltaY = touch.clientY - startY;
     if (Math.abs(deltaX) <= Math.abs(deltaY)) {
@@ -60,9 +42,6 @@ function attachSwipeTracking(card, onSwipe) {
     card.classList.toggle("swiping-delete-right", clamped > 20);
     const progress = String(Math.min(Math.abs(clamped) / SWIPE_DISTANCE, 1));
     for (const target of [card, actionShell]) {
-      if (!target) {
-        continue;
-      }
       target.style.setProperty("--swipe-progress", progress);
       target.style.setProperty("--swipe-delete-right-progress", progress);
       target.style.setProperty("--swipe-skip-progress", progress);
@@ -80,9 +59,6 @@ function attachSwipeTracking(card, onSwipe) {
     card.style.transform = "";
     card.classList.remove("swiping", "swiping-delete-right");
     for (const target of [card, actionShell]) {
-      if (!target) {
-        continue;
-      }
       target.style.setProperty("--swipe-progress", "0");
       target.style.setProperty("--swipe-delete-right-progress", "0");
       target.style.setProperty("--swipe-skip-progress", "0");
@@ -115,31 +91,17 @@ export function attachSwipeGestures(card, { onLeft, onRight }) {
 }
 
 async function setStatusForEntries(entryIds, status) {
-  const ids = normalizeEntryIds(entryIds);
-  if (ids.length === 0) {
+  if (entryIds.length === 0) {
     return;
   }
-  if (typeof _setStatusMany === "function") {
-    await _setStatusMany(ids, status);
-    return;
-  }
-  for (const entryId of ids) {
-    await _setStatus(entryId, status);
-  }
+  await _setStatusMany(entryIds, status);
 }
 
 async function deleteEntries(entryIds) {
-  const ids = normalizeEntryIds(entryIds);
-  if (ids.length === 0) {
+  if (entryIds.length === 0) {
     return;
   }
-  if (typeof _deleteEntries === "function") {
-    await _deleteEntries(ids);
-    return;
-  }
-  for (const entryId of ids) {
-    await _deleteEntry(entryId);
-  }
+  await _deleteEntries(entryIds);
 }
 
 export function attachSwipeRightDeleteGesture(card, entryIds) {
@@ -198,28 +160,23 @@ export function createCard(item, mode) {
   card.className = "shop-card";
   cardShell.appendChild(card);
 
-  const entryIds = normalizeEntryIds(item.entry_ids && item.entry_ids.length ? item.entry_ids : item.id);
-  const unitPart = item.unit ? ` ${item.unit}` : "";
-  const quantityText = `${item.amount}${unitPart}`.trim();
-  const amountLines = Array.isArray(item.amount_lines) && item.amount_lines.length > 0
-    ? item.amount_lines
-    : [quantityText];
+  const entryIds = item.entry_ids;
+  const amountLines = item.amount_lines;
   const amountMarkup = amountLines
     .map((line) => `<span class="shop-item-amount-line">${escapeAttr(line)}</span>`)
     .join("");
+  const recipeName = item.recipe.name;
 
   const deleteRightHint = `
     <div class="shop-swipe-delete-right-hint" aria-hidden="true">
       <span class="shop-swipe-delete-right-icon">×</span>
       <span class="shop-swipe-delete-right-label">Delete</span>
     </div>`;
-  const skipHint = mode
-    ? `
+  const skipHint = `
     <div class="shop-swipe-skip-hint" aria-hidden="true">
       <span class="shop-swipe-skip-icon">\u22ef</span>
       <span class="shop-swipe-skip-label">Postpone</span>
-    </div>`
-    : "";
+    </div>`;
 
   card.innerHTML = `
     ${deleteRightHint}
@@ -227,7 +184,7 @@ export function createCard(item, mode) {
     <div class="shop-card-head">
       <div class="shop-card-name-wrap">
         <strong class="shop-item-name">${escapeAttr(item.name)}</strong>
-        <span class="shop-item-category muted">${escapeAttr(item.ingredient_type)}</span>
+        <span class="shop-item-category muted">${escapeAttr(recipeName)}</span>
       </div>
       <div class="shop-item-amount muted">${amountMarkup}</div>
     </div>
