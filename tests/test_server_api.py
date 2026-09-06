@@ -1,12 +1,34 @@
 from copy import deepcopy
+import asyncio
 from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import app, lifespan
 from app.services.server_state import ServerState
 
 client = TestClient(app)
+
+
+def test_startup_flushes_pending_shopping_changes(monkeypatch, tmp_path) -> None:
+    state = use_temp_state(monkeypatch, tmp_path)
+    state.set_pending_shopping_changes(
+        [
+            {
+                "operation": "create",
+                "entry_id": None,
+                "payload": {"ad_hoc": True, "name": "Bread", "amount": 1},
+            }
+        ]
+    )
+
+    async def start_application() -> None:
+        async with lifespan(app):
+            await asyncio.sleep(0)
+
+    asyncio.run(start_application())
+
+    assert state.pending_shopping_changes() == {}
 
 
 class MealPlanRowStatefulClient:

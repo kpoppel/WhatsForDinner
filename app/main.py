@@ -1,5 +1,6 @@
-import logging
 import json
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -13,6 +14,7 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from app import api as api_module
 from app.api import router as api_router, server_state
 from app.config import settings
 from app.inspect_ui import render_inspector
@@ -27,8 +29,31 @@ _SERVICE_WORKER_PATH = Path("app/static/shopping-sw.js")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    yield
-    server_state.flush()
+    queue_tasks: list[asyncio.Task[None]] = []
+    for pending_sync in api_module.server_state.pending_meal_plan_syncs():
+        queue_tasks.append(asyncio.create_task(api_module._sync_pending_meal_plan(pending_sync["plan_id"])))
+    for plan in api_module.server_state.list_meal_plans():
+        for pending_change in api_module.server_state.pending_meal_plan_changes(int(plan["plan_id"])):
+            queue_tasks.append(
+                asyncio.create_task(
+                    api_module._sync_pending_meal_plan_entry(
+                        pending_change["plan_id"],
+                        pending_change["entry_id"],
+                    )
+                )
+            )
+    if api_module.server_state.pending_shopping_changes():
+        queue_tasks.append(asyncio.create_task(api_module._sync_pending_shopping_changes()))
+
+    try:
+        yield
+    finally:
+        for task in queue_tasks:
+            if not task.done():
+                task.cancel()
+        if queue_tasks:
+            await asyncio.gather(*queue_tasks, return_exceptions=True)
+        server_state.flush()
 
 app = FastAPI(
     title=settings.app_name,
