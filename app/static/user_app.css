@@ -1290,6 +1290,7 @@ body {
 .wf-editor-item-shell .wf-editor-swipe-postpone-hint {
   opacity: 1;
   z-index: 0;
+  width: 7.5rem;
   border-radius: 12px;
 }
 
