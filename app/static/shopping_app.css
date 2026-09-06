@@ -219,7 +219,9 @@
     .shop-card-shell .shop-swipe-delete-right-hint,
     .shop-card-shell .shop-swipe-skip-hint,
     .shop-card-shell .shop-swipe-delete-hint {
-      opacity: 1;
+      top: -1px;
+      bottom: -1px;
+      opacity: var(--swipe-progress);
       z-index: 0;
       width: 7.5rem;
       border-radius: 10px;

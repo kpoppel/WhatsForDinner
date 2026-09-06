@@ -1288,7 +1288,9 @@ body {
 
 .wf-editor-item-shell .wf-editor-swipe-delete-right-hint,
 .wf-editor-item-shell .wf-editor-swipe-postpone-hint {
-  opacity: 1;
+  top: -1px;
+  bottom: -1px;
+  opacity: var(--wf-editor-delete-progress);
   z-index: 0;
   width: 7.5rem;
   border-radius: 12px;
