@@ -166,6 +166,10 @@ import { apiReachable, browserOnline, isOnline } from "./js/selectors/connectivi
       setActiveTab("meal-plans");
       return;
     }
+    if (activeTab === "shopping-mode") {
+      setActiveTab("shop-editor");
+      return;
+    }
     setActiveTab("home");
   });
 
