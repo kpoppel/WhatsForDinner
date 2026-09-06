@@ -183,8 +183,11 @@ export function attachCompletedCardGestures(card, entryIds) {
 }
 
 export function createCard(item, mode) {
+  const cardShell = document.createElement("div");
+  cardShell.className = `shop-card-shell shop-card-status-${mode}`;
   const card = document.createElement("div");
-  card.className = `shop-card shop-card-status-${mode}`;
+  card.className = "shop-card";
+  cardShell.appendChild(card);
 
   const entryIds = normalizeEntryIds(item.entry_ids && item.entry_ids.length ? item.entry_ids : item.id);
   const unitPart = item.unit ? ` ${item.unit}` : "";
@@ -220,6 +223,9 @@ export function createCard(item, mode) {
       <div class="shop-item-amount muted">${amountMarkup}</div>
     </div>
   `;
+  for (const hint of card.querySelectorAll(".shop-swipe-delete-right-hint, .shop-swipe-skip-hint, .shop-swipe-delete-hint")) {
+    cardShell.appendChild(hint);
+  }
 
   if (mode === "remaining") {
     attachRemainingCardGestures(card, entryIds);
@@ -230,5 +236,5 @@ export function createCard(item, mode) {
   }
   attachSwipeRightDeleteGesture(card, entryIds);
 
-  return card;
+  return cardShell;
 }

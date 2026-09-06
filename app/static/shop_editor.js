@@ -539,8 +539,11 @@ function closeMergePickModal() {
 }
 
 function createEditorRow(item) {
+  const rowShell = document.createElement("div");
+  rowShell.className = "wf-editor-item-shell";
   const row = document.createElement("article");
   row.className = "wf-editor-item";
+  rowShell.appendChild(row);
 
   const status = String(item?.status || "remaining");
   if (status === "remaining") {
@@ -600,6 +603,9 @@ function createEditorRow(item) {
         <div class="wf-stepper-value wf-stepper-value-stacked">${amountMarkup}</div>
       </div>
     `;
+    for (const hint of row.querySelectorAll(".wf-editor-swipe-delete-right-hint, .wf-editor-swipe-postpone-hint")) {
+      rowShell.appendChild(hint);
+    }
 
     row.addEventListener("click", () => {
       if (consumeSuppressedRowClick(row)) {
@@ -608,7 +614,7 @@ function createEditorRow(item) {
       openMergedItemPicker(item, entryIds);
     });
     attachEditorGestures(row, entryIds);
-    return row;
+    return rowShell;
   }
 
   row.innerHTML = `
@@ -634,6 +640,9 @@ function createEditorRow(item) {
       </div>
     </div>
   `;
+  for (const hint of row.querySelectorAll(".wf-editor-swipe-delete-right-hint, .wf-editor-swipe-postpone-hint")) {
+    rowShell.appendChild(hint);
+  }
   row.classList.add("wf-editor-item-compact");
 
   row.querySelector('[data-action="increment"]')?.addEventListener("click", () => {
@@ -666,7 +675,7 @@ function createEditorRow(item) {
 
   attachEditorGestures(row, entryIds);
 
-  return row;
+  return rowShell;
 }
 
 async function adjustAmount(entryId, nextAmount) {

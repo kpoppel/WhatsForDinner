@@ -1264,7 +1264,7 @@ body {
   border-radius: 12px;
   padding: 0.65rem;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   gap: 0.6rem;
   align-items: center;
@@ -1273,6 +1273,36 @@ body {
   touch-action: pan-y;
   transition: transform 120ms ease, border-color 120ms ease;
   --wf-editor-delete-progress: 0;
+}
+
+.wf-editor-item-shell {
+  position: relative;
+  overflow: hidden;
+}
+
+.wf-editor-item-shell .wf-editor-item {
+  margin-bottom: 0;
+  z-index: 1;
+}
+
+.wf-editor-item-shell .wf-editor-swipe-delete-right-hint,
+.wf-editor-item-shell .wf-editor-swipe-postpone-hint {
+  opacity: 1;
+  z-index: 0;
+}
+
+.wf-editor-item-shell .wf-editor-swipe-delete-right-hint {
+  left: 0;
+  right: auto;
+  justify-content: flex-start;
+  padding-left: 0.7rem;
+}
+
+.wf-editor-item-shell .wf-editor-swipe-postpone-hint {
+  left: auto;
+  right: 0;
+  justify-content: flex-end;
+  padding-right: 0.7rem;
 }
 
 .wf-editor-item:hover {
