@@ -458,18 +458,20 @@ async function deleteEditorEntries(entryIds) {
   publishDataChanged();
 }
 
-function attachEditorGestures(row, entryIds) {
+function attachEditorGestures(row, entryIds, status) {
   attachSwipeGestures(row, {
     onLeft: () => {
       run(async () => {
+        const nextStatus = status === "skipped" ? "remaining" : "skipped";
         for (const entryId of entryIds) {
-          updateShoppingItem(entryId, { status: "skipped" });
+          updateShoppingItem(entryId, { status: nextStatus });
         }
         if (isOnline()) {
           await syncPending(false);
         }
         renderEditor();
-        setStatus(isOnline() ? "Item postponed." : "Offline: postpone queued.");
+        const message = nextStatus === "remaining" ? "Item restored." : "Item postponed.";
+        setStatus(isOnline() ? message : `Offline: ${message.toLowerCase()} queued.`);
         publishDataChanged();
       });
     },
@@ -564,6 +566,7 @@ function createEditorRow(item) {
   const unit = String(item.unit || "").trim();
   const reminderOn = Boolean(item.reminder_enabled);
   const recipe = recipeInfo(item);
+  const leftSwipeLabel = status === "skipped" ? "Restore" : "Postpone";
 
   const amountLines = Array.isArray(item.amount_lines) && item.amount_lines.length > 0
     ? item.amount_lines
@@ -592,7 +595,7 @@ function createEditorRow(item) {
       </div>
       <div class="wf-editor-swipe-postpone-hint" aria-hidden="true">
         <span class="wf-editor-swipe-postpone-icon">\u22ef</span>
-        <span class="wf-editor-swipe-postpone-label">Postpone</span>
+        <span class="wf-editor-swipe-postpone-label">${leftSwipeLabel}</span>
       </div>
       <div class="wf-editor-main">
         <p class="wf-editor-name">${escapeHtml(item.name || "Unnamed")}</p>
@@ -613,7 +616,7 @@ function createEditorRow(item) {
       }
       openMergedItemPicker(item, entryIds);
     });
-    attachEditorGestures(row, entryIds);
+    attachEditorGestures(row, entryIds, status);
     return rowShell;
   }
 
@@ -624,7 +627,7 @@ function createEditorRow(item) {
     </div>
     <div class="wf-editor-swipe-postpone-hint" aria-hidden="true">
       <span class="wf-editor-swipe-postpone-icon">\u22ef</span>
-      <span class="wf-editor-swipe-postpone-label">Postpone</span>
+      <span class="wf-editor-swipe-postpone-label">${leftSwipeLabel}</span>
     </div>
     <div class="wf-editor-main">
       <p class="wf-editor-name">${escapeHtml(item.name || "Unnamed")}</p>
@@ -673,7 +676,7 @@ function createEditorRow(item) {
     openEditModal(item);
   });
 
-  attachEditorGestures(row, entryIds);
+  attachEditorGestures(row, entryIds, status);
 
   return rowShell;
 }

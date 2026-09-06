@@ -1278,6 +1278,7 @@ body {
 .wf-editor-item-shell {
   position: relative;
   overflow: hidden;
+  border-radius: 12px;
 }
 
 .wf-editor-item-shell .wf-editor-item {
@@ -1289,6 +1290,7 @@ body {
 .wf-editor-item-shell .wf-editor-swipe-postpone-hint {
   opacity: 1;
   z-index: 0;
+  border-radius: 12px;
 }
 
 .wf-editor-item-shell .wf-editor-swipe-delete-right-hint {
@@ -1296,6 +1298,7 @@ body {
   right: auto;
   justify-content: flex-start;
   padding-left: 0.7rem;
+  background: #e87474;
 }
 
 .wf-editor-item-shell .wf-editor-swipe-postpone-hint {
@@ -1303,6 +1306,7 @@ body {
   right: 0;
   justify-content: flex-end;
   padding-right: 0.7rem;
+  background: linear-gradient(90deg, rgba(255, 245, 224, 0.92) 0%, #ffe5b8 50%, #ffd79a 100%);
 }
 
 .wf-editor-item:hover {

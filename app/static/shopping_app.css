@@ -212,6 +212,7 @@
       position: relative;
       overflow: hidden;
       margin-bottom: 0.4rem;
+      border-radius: 10px;
     }
     .shop-card-shell:last-child { margin-bottom: 0; }
     .shop-card-shell .shop-card { margin-bottom: 0; }
@@ -220,24 +221,28 @@
     .shop-card-shell .shop-swipe-delete-hint {
       opacity: 1;
       z-index: 0;
+      border-radius: 10px;
     }
     .shop-card-shell .shop-swipe-delete-right-hint {
       left: 0;
       right: auto;
       justify-content: flex-start;
       padding-left: 0.7rem;
+      background: #e87474;
     }
     .shop-card-shell .shop-swipe-skip-hint {
       left: auto;
       right: 0;
       justify-content: flex-end;
       padding-right: 0.7rem;
+      background: linear-gradient(90deg, rgba(255, 245, 224, 0.92) 0%, #ffe5b8 50%, #ffd79a 100%);
     }
     .shop-card-shell .shop-swipe-delete-hint {
       left: 0;
       right: auto;
       justify-content: flex-start;
       padding-left: 0.7rem;
+      background: #e87474;
     }
     .shop-card-shell .shop-card { z-index: 1; }
     .shop-card:last-child { margin-bottom: 0; }
