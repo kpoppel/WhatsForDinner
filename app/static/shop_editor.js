@@ -587,7 +587,7 @@ function createEditorRow(item) {
     row.classList.add("is-grouped");
     row.innerHTML = `
       <div class="wf-editor-swipe-delete-right-hint" aria-hidden="true">
-        <span class="wf-editor-swipe-delete-right-icon">x</span>
+        <span class="wf-editor-swipe-delete-right-icon">×</span>
         <span class="wf-editor-swipe-delete-right-label">Delete</span>
       </div>
       <div class="wf-editor-swipe-postpone-hint" aria-hidden="true">
@@ -619,7 +619,7 @@ function createEditorRow(item) {
 
   row.innerHTML = `
     <div class="wf-editor-swipe-delete-right-hint" aria-hidden="true">
-      <span class="wf-editor-swipe-delete-right-icon">x</span>
+      <span class="wf-editor-swipe-delete-right-icon">×</span>
       <span class="wf-editor-swipe-delete-right-label">Delete</span>
     </div>
     <div class="wf-editor-swipe-postpone-hint" aria-hidden="true">

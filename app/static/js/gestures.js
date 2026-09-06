@@ -201,7 +201,7 @@ export function createCard(item, mode) {
 
   const deleteRightHint = `
     <div class="shop-swipe-delete-right-hint" aria-hidden="true">
-      <span class="shop-swipe-delete-right-icon">x</span>
+      <span class="shop-swipe-delete-right-icon">×</span>
       <span class="shop-swipe-delete-right-label">Delete</span>
     </div>`;
   const skipHint = mode
