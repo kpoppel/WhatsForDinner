@@ -1279,7 +1279,7 @@ body {
   position: relative;
   overflow: hidden;
   border-radius: 12px;
-  background: #e87474;
+  background: linear-gradient(90deg, #e87474 0%, #ef8585 55%, #ffc0c0 100%);
 }
 
 .wf-editor-item-shell .wf-editor-item {

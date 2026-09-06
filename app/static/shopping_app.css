@@ -213,7 +213,7 @@
       overflow: hidden;
       margin-bottom: 0.4rem;
       border-radius: 10px;
-      background: #e87474;
+      background: linear-gradient(90deg, #e87474 0%, #ef8585 55%, #ffc0c0 100%);
     }
     .shop-card-shell:last-child { margin-bottom: 0; }
     .shop-card-shell .shop-card { margin-bottom: 0; }
