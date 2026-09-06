@@ -212,6 +212,21 @@
     .shop-card:active { box-shadow: 0 8px 16px rgba(12, 31, 23, 0.08); }
     .shop-card.swiping { border-color: #e59c71; }
     .shop-card.swiping-delete-right { border-color: #e87474; }
+    .shop-card-status-remaining {
+      background: #f0f7ff;
+      border-color: #90caf9;
+      box-shadow: inset 4px 0 0 #1976d2;
+    }
+    .shop-card-status-skipped {
+      background: #fff3c9;
+      border-color: #d7b85f;
+      box-shadow: inset 4px 0 0 #b7791f;
+    }
+    .shop-card-status-completed {
+      background: #dff4e3;
+      border-color: #87c895;
+      box-shadow: inset 4px 0 0 #2e7d32;
+    }
     .shop-swipe-delete-right-hint {
       position: absolute;
       top: 0;

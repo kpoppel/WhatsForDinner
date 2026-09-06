@@ -1316,10 +1316,20 @@ body {
   border-color: #e87474;
 }
 
+.wf-editor-item.swiping {
+  border-color: #e59c71;
+}
+
 .wf-editor-item.wf-editor-item-status-completed {
   background: #dff4e3;
   border-color: #87c895;
   box-shadow: inset 4px 0 0 #2e7d32;
+}
+
+.wf-editor-item.wf-editor-item-status-remaining {
+  background: #f0f7ff;
+  border-color: #90caf9;
+  box-shadow: inset 4px 0 0 var(--wf-accent);
 }
 
 .wf-editor-item.wf-editor-item-status-skipped {
@@ -1365,6 +1375,46 @@ body {
   font-size: 0.78rem;
   font-weight: 700;
   color: #542020;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.wf-editor-swipe-postpone-hint {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 0.7rem;
+  gap: 0.45rem;
+  background: linear-gradient(90deg, rgba(255, 245, 224, 0.92) 0%, #ffe5b8 50%, #ffd79a 100%);
+  opacity: var(--wf-editor-delete-progress);
+  transition: opacity 80ms linear;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.wf-editor-swipe-postpone-icon {
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: #2c200a;
+  background: #ffcc7a;
+  box-shadow: inset 0 0 0 1px rgba(44, 32, 10, 0.2);
+}
+
+.wf-editor-swipe-postpone-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #5f3c0f;
   letter-spacing: 0.01em;
   text-transform: uppercase;
 }
@@ -1445,6 +1495,12 @@ body {
 
 .wf-editor-meta-light {
   text-transform: capitalize;
+}
+
+.wf-field-help {
+  color: var(--wf-muted);
+  font-size: 0.76rem;
+  font-weight: 400;
 }
 
 .wf-editor-actions {

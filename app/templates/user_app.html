@@ -117,7 +117,7 @@
       <section id="wf-tab-shop-editor" class="wf-tab" data-tab-panel="shop-editor" aria-label="Shop Editor" hidden>
         <section class="wf-editor-toolbar">
           <div class="wf-segment" role="tablist" aria-label="Shopping grouping">
-            <button id="wf-editor-view-store" class="wf-segment-btn is-active" type="button" role="tab" aria-selected="true" data-editor-view="store">By Store Group</button>
+            <button id="wf-editor-view-store" class="wf-segment-btn is-active" type="button" role="tab" aria-selected="true" data-editor-view="store">By Category</button>
             <button id="wf-editor-view-recipe" class="wf-segment-btn" type="button" role="tab" aria-selected="false" data-editor-view="recipe">By Recipe</button>
           </div>
           <div class="wf-editor-toolbar-actions">
@@ -210,6 +210,7 @@
       <input id="wf-edit-entry-id" type="hidden" />
       <label class="wf-field">Name
         <input id="wf-edit-name" type="text" maxlength="120" required />
+        <span id="wf-edit-name-help" class="wf-field-help" hidden>Recipe-sourced names are managed by Tandoor.</span>
       </label>
       <label class="wf-field">Quantity
         <div class="wf-field-inline">

@@ -22,6 +22,89 @@ function normalizeEntryIds(value) {
   return Number.isInteger(single) && single !== 0 ? [single] : [];
 }
 
+const SWIPE_THRESHOLD = 80;
+const SWIPE_DISTANCE = 140;
+
+function attachSwipeTracking(card, onSwipe) {
+  let startX = 0;
+  let startY = 0;
+  let deltaX = 0;
+  let isDragging = false;
+
+  card.addEventListener("touchstart", (event) => {
+    const touch = event.changedTouches?.[0];
+    if (!touch) {
+      return;
+    }
+    startX = touch.clientX;
+    startY = touch.clientY;
+    deltaX = 0;
+    isDragging = false;
+  });
+
+  card.addEventListener("touchmove", (event) => {
+    const touch = event.changedTouches?.[0];
+    if (!touch) {
+      return;
+    }
+    deltaX = touch.clientX - startX;
+    const deltaY = touch.clientY - startY;
+    if (Math.abs(deltaX) <= Math.abs(deltaY)) {
+      return;
+    }
+    isDragging = true;
+    const clamped = Math.max(Math.min(deltaX, SWIPE_DISTANCE), -SWIPE_DISTANCE);
+    card.style.transform = `translateX(${clamped}px)`;
+    card.classList.toggle("swiping", clamped < -20);
+    card.classList.toggle("swiping-delete-right", clamped > 20);
+    const progress = String(Math.min(Math.abs(clamped) / SWIPE_DISTANCE, 1));
+    card.style.setProperty("--swipe-progress", progress);
+    card.style.setProperty("--swipe-delete-right-progress", progress);
+    card.style.setProperty("--swipe-skip-progress", progress);
+    card.style.setProperty("--swipe-delete-progress", progress);
+    card.style.setProperty("--wf-editor-delete-progress", progress);
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+  }, { passive: false });
+
+  card.addEventListener("touchend", () => {
+    const direction = isDragging && Math.abs(deltaX) > SWIPE_THRESHOLD
+      ? (deltaX < 0 ? "left" : "right")
+      : null;
+    card.style.transform = "";
+    card.classList.remove("swiping", "swiping-delete-right");
+    card.style.setProperty("--swipe-progress", "0");
+    card.style.setProperty("--swipe-delete-right-progress", "0");
+    card.style.setProperty("--swipe-skip-progress", "0");
+    card.style.setProperty("--swipe-delete-progress", "0");
+    card.style.setProperty("--wf-editor-delete-progress", "0");
+    if (direction) {
+      suppressNextCardClick(card);
+      onSwipe(direction);
+    }
+    isDragging = false;
+    deltaX = 0;
+  });
+
+  card.addEventListener("click", (event) => {
+    if (consumeSuppressedCardClick(card)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+}
+
+export function attachSwipeGestures(card, { onLeft, onRight }) {
+  attachSwipeTracking(card, (direction) => {
+    if (direction === "left") {
+      onLeft();
+      return;
+    }
+    onRight();
+  });
+}
+
 async function setStatusForEntries(entryIds, status) {
   const ids = normalizeEntryIds(entryIds);
   if (ids.length === 0) {
@@ -51,64 +134,12 @@ async function deleteEntries(entryIds) {
 }
 
 export function attachSwipeRightDeleteGesture(card, entryIds) {
-  let startX = 0;
-  let startY = 0;
-  let deltaX = 0;
-  let isDragging = false;
-
-  card.addEventListener("touchstart", (event) => {
-    const touch = event.changedTouches?.[0];
-    if (!touch) {
-      return;
-    }
-    startX = touch.clientX;
-    startY = touch.clientY;
-    deltaX = 0;
-    isDragging = false;
-    card.classList.remove("swiping-delete-right");
-    card.style.setProperty("--swipe-delete-right-progress", "0");
-  });
-
-  card.addEventListener("touchmove", (event) => {
-    const touch = event.changedTouches?.[0];
-    if (!touch) {
-      return;
-    }
-    deltaX = touch.clientX - startX;
-    const deltaY = touch.clientY - startY;
-    if (Math.abs(deltaX) <= Math.abs(deltaY) || deltaX <= 0) {
-      return;
-    }
-    isDragging = true;
-    const clamped = Math.max(Math.min(deltaX, 140), 0);
-    card.style.transform = `translateX(${clamped}px)`;
-    card.classList.toggle("swiping-delete-right", clamped > 20);
-    const progress = Math.min(Math.abs(clamped) / 140, 1);
-    card.style.setProperty("--swipe-delete-right-progress", String(progress));
-    if (event.cancelable) {
-      event.preventDefault();
-    }
-  }, { passive: false });
-
-  card.addEventListener("touchend", () => {
-    const shouldDelete = isDragging && deltaX > 80;
-    card.style.transform = "";
-    card.classList.remove("swiping-delete-right");
-    card.style.setProperty("--swipe-delete-right-progress", "0");
-    if (shouldDelete) {
-      suppressNextCardClick(card);
+  attachSwipeGestures(card, {
+    onLeft: () => {},
+    onRight: () => {
       _run(() => deleteEntries(entryIds));
-    }
-    isDragging = false;
-    deltaX = 0;
+    },
   });
-
-  card.addEventListener("click", (event) => {
-    if (consumeSuppressedCardClick(card)) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    }
-  }, true);
 }
 
 export function attachRestoreToRemainingClick(card, entryIds) {
@@ -121,58 +152,11 @@ export function attachRestoreToRemainingClick(card, entryIds) {
 }
 
 export function attachRemainingCardGestures(card, entryIds) {
-  let startX = 0;
-  let startY = 0;
-  let deltaX = 0;
-  let isDragging = false;
-
-  card.addEventListener("touchstart", (event) => {
-    const touch = event.changedTouches?.[0];
-    if (!touch) {
-      return;
-    }
-    startX = touch.clientX;
-    startY = touch.clientY;
-    deltaX = 0;
-    isDragging = false;
-    card.classList.remove("swiping");
-    card.style.setProperty("--swipe-skip-progress", "0");
-  });
-
-  card.addEventListener("touchmove", (event) => {
-    const touch = event.changedTouches?.[0];
-    if (!touch) {
-      return;
-    }
-    deltaX = touch.clientX - startX;
-    const deltaY = touch.clientY - startY;
-    if (Math.abs(deltaX) <= Math.abs(deltaY)) {
-      return;
-    }
-    isDragging = true;
-    const clamped = Math.max(Math.min(deltaX, 0), -140);
-    card.style.transform = `translateX(${clamped}px)`;
-    card.classList.toggle("swiping", clamped < -20);
-    const progress = Math.min(Math.abs(clamped) / 140, 1);
-    card.style.setProperty("--swipe-skip-progress", String(progress));
-    if (event.cancelable) {
-      event.preventDefault();
-    }
-  }, { passive: false });
-
-  card.addEventListener("touchend", () => {
-    const shouldSkip = isDragging && deltaX < -80;
-    card.style.transform = "";
-    card.classList.remove("swiping");
-    card.style.setProperty("--swipe-skip-progress", "0");
-    if (shouldSkip) {
-      suppressNextCardClick(card);
+  attachSwipeTracking(card, (direction) => {
+    if (direction === "left") {
       _run(() => setStatusForEntries(entryIds, "skipped"));
     }
-    isDragging = false;
-    deltaX = 0;
   });
-
   card.addEventListener("click", () => {
     if (consumeSuppressedCardClick(card)) {
       return;
@@ -182,58 +166,14 @@ export function attachRemainingCardGestures(card, entryIds) {
 }
 
 export function attachCompletedCardGestures(card, entryIds) {
-  let startX = 0;
-  let startY = 0;
-  let deltaX = 0;
-  let isDragging = false;
-
-  card.addEventListener("touchstart", (event) => {
-    const touch = event.changedTouches?.[0];
-    if (!touch) {
-      return;
-    }
-    startX = touch.clientX;
-    startY = touch.clientY;
-    deltaX = 0;
-    isDragging = false;
-    card.classList.remove("swiping-delete");
-    card.style.setProperty("--swipe-delete-progress", "0");
-  });
-
-  card.addEventListener("touchmove", (event) => {
-    const touch = event.changedTouches?.[0];
-    if (!touch) {
-      return;
-    }
-    deltaX = touch.clientX - startX;
-    const deltaY = touch.clientY - startY;
-    if (Math.abs(deltaX) <= Math.abs(deltaY)) {
-      return;
-    }
-    isDragging = true;
-    const clamped = Math.max(Math.min(deltaX, 0), -140);
-    card.style.transform = `translateX(${clamped}px)`;
-    card.classList.toggle("swiping-delete", clamped < -20);
-    const progress = Math.min(Math.abs(clamped) / 140, 1);
-    card.style.setProperty("--swipe-delete-progress", String(progress));
-    if (event.cancelable) {
-      event.preventDefault();
-    }
-  }, { passive: false });
-
-  card.addEventListener("touchend", () => {
-    const shouldDelete = isDragging && deltaX < -80;
-    card.style.transform = "";
-    card.classList.remove("swiping-delete");
-    card.style.setProperty("--swipe-delete-progress", "0");
-    if (shouldDelete) {
-      suppressNextCardClick(card);
+  attachSwipeGestures(card, {
+    onLeft: () => {
+      _run(() => setStatusForEntries(entryIds, "skipped"));
+    },
+    onRight: () => {
       _run(() => deleteEntries(entryIds));
-    }
-    isDragging = false;
-    deltaX = 0;
+    },
   });
-
   card.addEventListener("click", () => {
     if (consumeSuppressedCardClick(card)) {
       return;
@@ -244,7 +184,7 @@ export function attachCompletedCardGestures(card, entryIds) {
 
 export function createCard(item, mode) {
   const card = document.createElement("div");
-  card.className = "shop-card";
+  card.className = `shop-card shop-card-status-${mode}`;
 
   const entryIds = normalizeEntryIds(item.entry_ids && item.entry_ids.length ? item.entry_ids : item.id);
   const unitPart = item.unit ? ` ${item.unit}` : "";
@@ -261,25 +201,17 @@ export function createCard(item, mode) {
       <span class="shop-swipe-delete-right-icon">x</span>
       <span class="shop-swipe-delete-right-label">Delete</span>
     </div>`;
-  const skipHint = mode === "remaining"
+  const skipHint = mode
     ? `
     <div class="shop-swipe-skip-hint" aria-hidden="true">
       <span class="shop-swipe-skip-icon">\u22ef</span>
       <span class="shop-swipe-skip-label">Postpone</span>
     </div>`
     : "";
-  const deleteHint = mode === "completed"
-    ? `
-    <div class="shop-swipe-delete-hint" aria-hidden="true">
-      <span class="shop-swipe-delete-icon">x</span>
-      <span class="shop-swipe-delete-label">Delete</span>
-    </div>`
-    : "";
 
   card.innerHTML = `
     ${deleteRightHint}
     ${skipHint}
-    ${deleteHint}
     <div class="shop-card-head">
       <div class="shop-card-name-wrap">
         <strong class="shop-item-name">${escapeAttr(item.name)}</strong>

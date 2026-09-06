@@ -9,6 +9,7 @@ import {
 } from "./js/commands/shopping.js";
 import { isOnline } from "./js/selectors/connectivity.js";
 import { shoppingItem, shoppingItemIds, shoppingItems } from "./js/selectors/shopping.js";
+import { attachSwipeGestures } from "./js/gestures.js";
 
 const VIEW_KEY = "wfd.shop-editor.view.v1";
 const SEGMENT_DEFAULT = "store";
@@ -457,57 +458,24 @@ async function deleteEditorEntries(entryIds) {
   publishDataChanged();
 }
 
-function attachSwipeRightDeleteGesture(row, entryIds) {
-  let startX = 0;
-  let startY = 0;
-  let deltaX = 0;
-  let isDragging = false;
-
-  row.addEventListener("touchstart", (event) => {
-    const touch = event.changedTouches?.[0];
-    if (!touch) {
-      return;
-    }
-    startX = touch.clientX;
-    startY = touch.clientY;
-    deltaX = 0;
-    isDragging = false;
-    row.classList.remove("swiping-delete-right");
-    row.style.setProperty("--wf-editor-delete-progress", "0");
-  });
-
-  row.addEventListener("touchmove", (event) => {
-    const touch = event.changedTouches?.[0];
-    if (!touch) {
-      return;
-    }
-    deltaX = touch.clientX - startX;
-    const deltaY = touch.clientY - startY;
-    if (Math.abs(deltaX) <= Math.abs(deltaY) || deltaX <= 0) {
-      return;
-    }
-    isDragging = true;
-    const clamped = Math.max(Math.min(deltaX, 130), 0);
-    row.style.transform = `translateX(${clamped}px)`;
-    row.classList.toggle("swiping-delete-right", clamped > 18);
-    const progress = Math.min(Math.abs(clamped) / 130, 1);
-    row.style.setProperty("--wf-editor-delete-progress", String(progress));
-    if (event.cancelable) {
-      event.preventDefault();
-    }
-  }, { passive: false });
-
-  row.addEventListener("touchend", () => {
-    const shouldDelete = isDragging && deltaX > 78;
-    row.style.transform = "";
-    row.classList.remove("swiping-delete-right");
-    row.style.setProperty("--wf-editor-delete-progress", "0");
-    if (shouldDelete) {
-      suppressNextRowClick(row);
+function attachEditorGestures(row, entryIds) {
+  attachSwipeGestures(row, {
+    onLeft: () => {
+      run(async () => {
+        for (const entryId of entryIds) {
+          updateShoppingItem(entryId, { status: "skipped" });
+        }
+        if (isOnline()) {
+          await syncPending(false);
+        }
+        renderEditor();
+        setStatus(isOnline() ? "Item postponed." : "Offline: postpone queued.");
+        publishDataChanged();
+      });
+    },
+    onRight: () => {
       run(() => deleteEditorEntries(entryIds));
-    }
-    isDragging = false;
-    deltaX = 0;
+    },
   });
 }
 
@@ -575,7 +543,9 @@ function createEditorRow(item) {
   row.className = "wf-editor-item";
 
   const status = String(item?.status || "remaining");
-  if (status === "completed") {
+  if (status === "remaining") {
+    row.classList.add("wf-editor-item-status-remaining");
+  } else if (status === "completed") {
     row.classList.add("wf-editor-item-status-completed");
   } else if (status === "skipped") {
     row.classList.add("wf-editor-item-status-skipped");
@@ -617,6 +587,10 @@ function createEditorRow(item) {
         <span class="wf-editor-swipe-delete-right-icon">x</span>
         <span class="wf-editor-swipe-delete-right-label">Delete</span>
       </div>
+      <div class="wf-editor-swipe-postpone-hint" aria-hidden="true">
+        <span class="wf-editor-swipe-postpone-icon">\u22ef</span>
+        <span class="wf-editor-swipe-postpone-label">Postpone</span>
+      </div>
       <div class="wf-editor-main">
         <p class="wf-editor-name">${escapeHtml(item.name || "Unnamed")}</p>
         <p class="wf-editor-meta">${escapeHtml(recipeSummary)}</p>
@@ -633,7 +607,7 @@ function createEditorRow(item) {
       }
       openMergedItemPicker(item, entryIds);
     });
-    attachSwipeRightDeleteGesture(row, entryIds);
+    attachEditorGestures(row, entryIds);
     return row;
   }
 
@@ -641,6 +615,10 @@ function createEditorRow(item) {
     <div class="wf-editor-swipe-delete-right-hint" aria-hidden="true">
       <span class="wf-editor-swipe-delete-right-icon">x</span>
       <span class="wf-editor-swipe-delete-right-label">Delete</span>
+    </div>
+    <div class="wf-editor-swipe-postpone-hint" aria-hidden="true">
+      <span class="wf-editor-swipe-postpone-icon">\u22ef</span>
+      <span class="wf-editor-swipe-postpone-label">Postpone</span>
     </div>
     <div class="wf-editor-main">
       <p class="wf-editor-name">${escapeHtml(item.name || "Unnamed")}</p>
@@ -686,7 +664,7 @@ function createEditorRow(item) {
     openEditModal(item);
   });
 
-  attachSwipeRightDeleteGesture(row, entryIds);
+  attachEditorGestures(row, entryIds);
 
   return row;
 }
@@ -954,9 +932,15 @@ async function saveOcrReviewModal() {
 }
 
 function openEditModal(item) {
+  const nameInput = document.getElementById("wf-edit-name");
+  const nameHelp = document.getElementById("wf-edit-name-help");
+  const recipeSourced = Number.isInteger(item.food_id);
   editModal.hidden = false;
   setInputValue("wf-edit-entry-id", String(item.id));
   setInputValue("wf-edit-name", String(item.name || ""));
+  nameInput.disabled = recipeSourced;
+  nameInput.title = recipeSourced ? "Recipe-sourced names are managed by Tandoor." : "";
+  nameHelp.hidden = !recipeSourced;
   setInputValue("wf-edit-amount", String(item.amount ?? 0));
   const unitText = String(item.unit || "").trim();
   editUnitLabel.textContent = unitText;
@@ -990,12 +974,15 @@ async function saveEditModal() {
   const reminderText = reminderTextRaw || `${name} thaw/prep reminder`;
 
   const patch = {
-    name,
     amount,
     reminder_enabled: reminderEnabled,
     reminder_date: reminderEnabled ? reminderDate : null,
     reminder_text: reminderEnabled ? reminderText : "",
   };
+
+  if (!Number.isInteger(shoppingItem(entryId)?.food_id)) {
+    patch.name = name;
+  }
 
   if (entryId < 0) {
     patch.store_group = { id: null, name: category };
