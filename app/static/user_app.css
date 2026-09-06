@@ -1293,7 +1293,7 @@ body {
   bottom: -1px;
   opacity: var(--wf-editor-delete-progress);
   z-index: 0;
-  width: 7.5rem;
+  width: 50%;
   border-radius: 12px;
 }
 
@@ -1382,7 +1382,7 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
-  width: 7.5rem;
+  width: 50%;
   display: flex;
   align-items: center;
   justify-content: flex-start;

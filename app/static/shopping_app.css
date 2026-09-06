@@ -224,7 +224,7 @@
       bottom: -1px;
       opacity: var(--swipe-progress);
       z-index: 0;
-      width: 7.5rem;
+      width: 50%;
       border-radius: 10px;
     }
     .shop-card-shell .shop-swipe-delete-right-hint {
@@ -274,7 +274,7 @@
       left: 0;
       right: 0;
       bottom: 0;
-      width: 7.5rem;
+      width: 50%;
       display: flex;
       align-items: center;
       justify-content: flex-start;
