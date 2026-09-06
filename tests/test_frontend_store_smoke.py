@@ -139,6 +139,20 @@ def test_service_worker_precaches_client_build_assets() -> None:
     source = (repo_root / "app/static/shopping-sw.js").read_text(encoding="utf-8"); assert "__WFD_BUILD_ID__" in source; assert "__WFD_CLIENT_ASSETS__" in source
 
 
+def test_shell_periodically_probes_connectivity_while_online() -> None:
+  repo_root = Path(__file__).resolve().parents[1]
+  source = (repo_root / "app/static/user_shell.js").read_text(encoding="utf-8")
+
+  assert "setInterval(() => {\n    void refreshApiReachability();\n  }, 6000);" in source
+
+
+def test_shopping_status_badge_reacts_to_connectivity_updates() -> None:
+  repo_root = Path(__file__).resolve().parents[1]
+  source = (repo_root / "app/static/js/shopping.js").read_text(encoding="utf-8")
+
+  assert "window.addEventListener(\"wfd:online-state\", () => {\n  updateStatusBadges();\n});" in source
+
+
 def test_ui_modules_do_not_import_api_or_shopping_state() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     static_root = repo_root / "app/static"

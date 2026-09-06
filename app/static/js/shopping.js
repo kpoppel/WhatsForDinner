@@ -1,4 +1,4 @@
-import { render, wireCollapsibleSection, initRender } from "./render.js";
+import { render, wireCollapsibleSection, initRender, updateStatusBadges } from "./render.js";
 import { isOnline } from "./selectors/connectivity.js";
 import {
   deleteShoppingEntries as deleteEntries,
@@ -24,6 +24,10 @@ document.getElementById("toggle-instructions").addEventListener("click", () => {
 
 window.addEventListener("wfd:connection-restored", () => {
   void run(() => refreshAndSyncIfNeeded());
+});
+
+window.addEventListener("wfd:online-state", () => {
+  updateStatusBadges();
 });
 
 if (["/app", "/app/"].includes(window.location.pathname)) {

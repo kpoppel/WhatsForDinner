@@ -160,8 +160,6 @@ import { apiReachable, browserOnline, isOnline } from "./js/selectors/connectivi
   applyOnlineAwareControls();
   void refreshApiReachability();
   setInterval(() => {
-    if (!isOnline()) {
-      void refreshApiReachability();
-    }
+    void refreshApiReachability();
   }, 6000);
 })();
