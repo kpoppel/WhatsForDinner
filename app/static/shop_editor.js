@@ -930,8 +930,9 @@ async function saveOcrReviewModal() {
   renderEditor();
 
   if (isOnline()) {
+    // The sync endpoint is deferred, so the server view is not yet authoritative
+    // here; refreshing now would discard the optimistic rows.
     await syncPending(false);
-    await refresh();
     renderEditor();
     setStatus(names.length === 1 ? "Item added." : `${names.length} items added.`);
     publishDataChanged();
