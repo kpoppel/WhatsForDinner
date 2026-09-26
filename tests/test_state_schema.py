@@ -4,7 +4,6 @@ from datetime import date, timedelta
 import pytest
 
 from app.services.server_state import ServerState
-from app.services.recipe_use_backfill import backfill_recipe_use_titles
 from app.services.state_migrations import StateSchemaError
 
 
@@ -182,41 +181,6 @@ def test_recipe_use_migrates_to_one_latest_record(tmp_path) -> None:
         "recipe_id": 11, "title": None, "used_date": (date.today() + timedelta(days=2)).isoformat(),
         "source": "plan", "plan_id": 2, "entry_id": 2,
     }]
-
-
-def test_recipe_use_backfill_resolves_legacy_titles_once(tmp_path) -> None:
-    import asyncio
-
-    state = ServerState(str(tmp_path))
-    payload = json.loads(state.state_file.read_text(encoding="utf-8"))
-    payload["schema_version"] = 20
-    payload["recipe_use_history"] = [
-        {"recipe_id": 11, "used_date": date.today().isoformat(), "source": "manual", "plan_id": None, "entry_id": None},
-        {"recipe_id": 12, "used_date": date.today().isoformat(), "source": "plan", "plan_id": 1, "entry_id": 1},
-    ]
-    state.state_file.write_text(json.dumps(payload), encoding="utf-8")
-    restored = ServerState(str(tmp_path))
-    requested = []
-
-    class RecipeClient:
-        async def get_recipe(self, recipe_id):
-            requested.append(recipe_id)
-            return {"name": f"Recipe {recipe_id}"}
-
-    class FailingRecipeClient:
-        async def get_recipe(self, recipe_id):
-            if recipe_id == 12:
-                raise RuntimeError("Tandoor unavailable")
-            return {"name": "Recipe 11"}
-
-    with pytest.raises(RuntimeError, match="Tandoor unavailable"):
-        asyncio.run(backfill_recipe_use_titles(restored, FailingRecipeClient()))
-    assert [row["title"] for row in ServerState(str(tmp_path)).list_recipe_uses()] == [None, None]
-
-    assert asyncio.run(backfill_recipe_use_titles(restored, RecipeClient())) == 2
-    assert asyncio.run(backfill_recipe_use_titles(restored, RecipeClient())) == 0
-    assert requested == [11, 12]
-    assert [row["title"] for row in ServerState(str(tmp_path)).list_recipe_uses()] == ["Recipe 11", "Recipe 12"]
 
 
 def test_stage2_state_persists_compact_pending_shopping_changes(tmp_path) -> None:

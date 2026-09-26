@@ -210,19 +210,6 @@ class ServerState:
                 self._save(data)
             return data["recipe_use_history"]
 
-    def backfill_recipe_use_titles(self, titles: dict[int, str]) -> None:
-        """Commit resolved historical titles together after all lookups succeed."""
-        with self._lock:
-            data = self._load()
-            unresolved = {row["recipe_id"] for row in data["recipe_use_history"] if row["title"] is None}
-            if unresolved != titles.keys() or any(not title.strip() for title in titles.values()):
-                raise ValueError("Backfill must provide a title for every unresolved recipe use.")
-            for row in data["recipe_use_history"]:
-                if row["title"] is None:
-                    row["title"] = titles[row["recipe_id"]]
-            if unresolved:
-                self._save(data)
-
     def set_recipe_use(
         self, recipe_id: int, title: str, used_date: date, source: str = "manual",
         plan_id: int | None = None, entry_id: int | None = None,
