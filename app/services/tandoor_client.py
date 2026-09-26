@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -18,7 +19,8 @@ class TandoorNotFound(TandoorError):
 class TandoorClient:
     def __init__(self) -> None:
         """Keep one connection pool for this Tandoor client instance."""
-        self.base_url = settings.tandoor_base_url.rstrip("/")
+        self.base_url = settings.tandoor_api_url.rstrip("/")
+        self.public_url = urlsplit(settings.tandoor_public_url)
         self.timeout = settings.tandoor_timeout_seconds
         self.api_token = settings.tandoor_api_token
         self._http = httpx.AsyncClient(timeout=self.timeout)
@@ -28,7 +30,11 @@ class TandoorClient:
         await self._http.aclose()
 
     def _headers(self) -> dict[str, str]:
-        headers = {"Accept": "application/json"}
+        headers = {
+            "Accept": "application/json",
+            "Host": self.public_url.netloc,
+            "X-Forwarded-Proto": self.public_url.scheme,
+        }
         if self.api_token:
             token = self.api_token.strip()
             # Tandoor API expects: Authorization: Bearer TOKEN

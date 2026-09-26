@@ -272,7 +272,7 @@ def _recipe_context_from_entry(entry: dict[str, Any]) -> str:
 def _recipe_url(recipe_id: int | None) -> str | None:
     if recipe_id is None:
         return None
-    return f"{settings.tandoor_base_url.rstrip('/')}/recipe/{recipe_id}"
+    return f"{settings.tandoor_public_url.rstrip('/')}/recipe/{recipe_id}"
 
 
 def _enrich_plan_recipe_urls(plan: dict[str, Any] | None) -> dict[str, Any] | None:

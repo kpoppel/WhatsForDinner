@@ -5,7 +5,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "WhatsForDinner"
     api_v1_prefix: str = "/api/v1"
-    tandoor_base_url: str = "http://localhost:8080"
+    tandoor_api_url: str
+    tandoor_public_url: str
     tandoor_api_token: str = ""
     tandoor_auth_scheme: str = "Bearer"
     tandoor_timeout_seconds: float = 15.0

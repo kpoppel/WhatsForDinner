@@ -47,7 +47,7 @@ class MealPlanService:
     def _recipe_url(self, recipe_id: int | None) -> str | None:
         if recipe_id is None:
             return None
-        return f"{settings.tandoor_base_url.rstrip('/')}/recipe/{recipe_id}"
+        return f"{settings.tandoor_public_url.rstrip('/')}/recipe/{recipe_id}"
 
     def _recipe_title(self, recipe: dict[str, Any]) -> str:
         return str(recipe.get("name") or recipe.get("title") or f"Recipe {recipe.get('id')}")

@@ -1333,6 +1333,8 @@ def test_stage2_stored_meal_plans_sorted_by_start_date_proximity(monkeypatch, tm
 
 def test_stage2_shopping_view_and_sync(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
+    monkeypatch.setattr("app.api.settings.tandoor_api_url", "http://web_recipes")
+    monkeypatch.setattr("app.api.settings.tandoor_public_url", "https://recipes.example.test")
 
     class FakeClient(MealPlanRowStatefulClient):
         async def list_shopping_entries(self, limit=100):
@@ -1404,7 +1406,7 @@ def test_stage2_shopping_view_and_sync(monkeypatch, tmp_path) -> None:
     assert chicken_row["recipe"]["id"] == 911
     assert chicken_row["recipe"]["name"] == "Chicken Casserole"
     assert chicken_row["recipe"]["image"] == "https://example.test/recipe-911.jpg"
-    assert chicken_row["recipe"]["url"].endswith("/recipe/911")
+    assert chicken_row["recipe"]["url"] == "https://recipes.example.test/recipe/911"
 
     store_layout = payload["grouped"]["store_layout"]["remaining"]
     assert list(store_layout.keys()) == ["6"]
