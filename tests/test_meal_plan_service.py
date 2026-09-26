@@ -180,7 +180,7 @@ class FakeMealClient:
 
 
 class BrokenMealClient(FakeMealClient):
-    async def list_recipes(self, search=None, limit=20, keyword_ids=None):
+    async def list_recipes(self, search=None, limit=20, page=None, keyword_ids=None):
         raise TandoorError("recipes unavailable")
 
 
@@ -313,6 +313,31 @@ def test_generate_plan_reuses_constraints_and_entries(tmp_path, monkeypatch) -> 
     assert entries[2]["mode"] == "takeout"
 
 
+def test_generate_plan_uses_eligible_recipes_on_later_pages(tmp_path) -> None:
+    state = ServerState(str(tmp_path))
+    client = FakeMealClient()
+    service = MealPlanService(state, client)
+    first_day = date.today()
+    state.set_recipe_use(11, "Roast Veg", first_day)
+    requested_pages = []
+
+    async def list_recipes(search=None, limit=20, page=None, keyword_ids=None):
+        requested_pages.append(page)
+        if page == 2:
+            return {"results": [{"id": 12, "name": "Rice Bowl"}], "next": None}
+        return {"results": [{"id": 11, "name": "Roast Veg"}], "next": "?page=2"}
+
+    client.list_recipes = list_recipes
+    result = asyncio.run(service.generate_plan(
+        start_day=first_day, length_days=1, diners=2,
+        constraints={"leftover_days": [], "takeout_days": [], "empty_days": []},
+        keyword_ids=[7], no_repeat_days=30,
+    ))
+
+    assert requested_pages == [None, 2]
+    assert result["data"]["entries"][0]["recipes"][0]["id"] == 12
+
+
 def test_random_recipe_for_entry_excludes_current_and_recent_without_saving(tmp_path, monkeypatch) -> None:
     state = ServerState(str(tmp_path))
     service = MealPlanService(state, FakeMealClient())
@@ -375,7 +400,7 @@ def test_random_recipe_for_entry_checks_next_page_when_first_is_excluded(tmp_pat
 
     chosen = asyncio.run(service.random_recipe_for_entry(plan["plan_id"], 1))
     assert chosen == {"id": 13, "title": "Bean Stew"}
-    assert requested_pages == [1, 2]
+    assert requested_pages == [None, 2]
     assert state.get_meal_plan(plan["plan_id"]) == plan
 
 
@@ -454,7 +479,7 @@ def test_random_recipe_for_entry_reuses_keyword_matches_when_exhausted(tmp_path,
     chosen = asyncio.run(service.random_recipe_for_entry(plan["plan_id"], 1, exclude_recipe_id=12))
     assert seen_candidates == [11, 12, 14]
     assert chosen == {"id": 14, "title": "Old Soup"}
-    assert requested_filters == [([7], 1), ([7], 2)]
+    assert requested_filters == [([7], None), ([7], 2)]
     assert state.get_meal_plan(plan["plan_id"]) == plan
 
 

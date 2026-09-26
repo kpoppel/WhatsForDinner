@@ -61,6 +61,21 @@ class MealPlanService:
             return [row for row in payload if isinstance(row, dict)]
         return []
 
+    async def _list_recipe_candidates(self, *, limit: int, keyword_ids: list[int]) -> list[dict[str, Any]]:
+        """Fetch every page of recipes matching the selected keywords."""
+        recipes: list[dict[str, Any]] = []
+        page = 1
+        params: dict[str, Any] = {"limit": limit, "keyword_ids": keyword_ids if keyword_ids else None}
+        while True:
+            if page > 1:
+                params["page"] = page
+            result = await self._client.list_recipes(**params)
+            recipes.extend(self._extract_results(result))
+            if not isinstance(result, dict) or not result.get("next"):
+                break
+            page += 1
+        return recipes
+
     def _extract_recipe_ingredient_ids(self, recipe_payload: dict[str, Any]) -> list[int]:
         ids: list[int] = []
         steps = recipe_payload.get("steps")
@@ -125,22 +140,13 @@ class MealPlanService:
             current_ids.add(exclude_recipe_id)
         entry_date = date.fromisoformat(entry["date"])
         history_dates = self._collect_recipe_history_dates()
-        recipes: list[dict[str, Any]] = []
-        page = 1
-        while True:
-            try:
-                result = await self._client.list_recipes(
-                    limit=max(20, plan["length_days"] * 3),
-                    page=page,
-                    keyword_ids=plan["keyword_ids"] if plan["keyword_ids"] else None,
-                )
-            except TandoorError as exc:
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-            recipes.extend(recipe for recipe in self._extract_results(result) if isinstance(recipe.get("id"), int))
-            if not isinstance(result, dict) or not result.get("next"):
-                break
-            page += 1
+        try:
+            recipes = await self._list_recipe_candidates(
+                limit=max(20, plan["length_days"] * 3), keyword_ids=plan["keyword_ids"],
+            )
+        except TandoorError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        recipes = [recipe for recipe in recipes if isinstance(recipe.get("id"), int)]
 
         if not recipes:
             raise HTTPException(status_code=404, detail="No recipes match this meal plan's keywords.")
@@ -726,13 +732,10 @@ class MealPlanService:
         takeout_days = self._parse_constraint_days(constraints.get("takeout_days", []), start_day, length_days)
         empty_days = self._parse_constraint_days(constraints.get("empty_days", []), start_day, length_days)
 
-        recipe_candidates: list[dict[str, Any]] = []
         try:
-            result = await self._client.list_recipes(
-                limit=max(20, length_days * 3),
-                keyword_ids=keyword_ids if len(keyword_ids) > 0 else None,
+            recipe_candidates = await self._list_recipe_candidates(
+                limit=max(20, length_days * 3), keyword_ids=keyword_ids,
             )
-            recipe_candidates = self._extract_results(result)
         except TandoorError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
