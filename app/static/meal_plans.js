@@ -466,6 +466,7 @@ import { readMealPlanCache, selectActiveMealPlan } from "./js/store/selectors.js
     return { enabled, text };
   }
 
+  /** Display plans chronologically while marking the independently selected active plan. */
   function renderPlanList(plans) {
     listNode.innerHTML = "";
 
@@ -474,7 +475,7 @@ import { readMealPlanCache, selectActiveMealPlan } from "./js/store/selectors.js
       return;
     }
 
-    for (const plan of plans) {
+    for (const plan of [...plans].sort((left, right) => left.start_date.localeCompare(right.start_date))) {
       const planId = Number(plan.plan_id);
       const card = document.createElement("article");
       card.className = "wf-plan-card";
