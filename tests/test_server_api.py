@@ -152,40 +152,25 @@ def test_recipe_name_search_uses_one_tandoor_page(monkeypatch, tmp_path) -> None
     assert calls == [("tomato", 1, 2)]
 
 
-def test_recipe_name_search_cancels_in_flight_lookup_on_disconnect(monkeypatch, tmp_path) -> None:
+def test_recipe_name_search_does_not_consume_request_stream(monkeypatch, tmp_path) -> None:
     from app import api as api_module
 
     use_temp_state(monkeypatch, tmp_path)
-    started = asyncio.Event()
-    disconnected = asyncio.Event()
-    cancelled = asyncio.Event()
 
     class SearchClient:
         async def list_recipes(self, search=None, limit=20, page=None, keyword_ids=None):
-            started.set()
-            try:
-                await asyncio.Event().wait()
-            finally:
-                cancelled.set()
+            return {"count": 1, "results": [{"id": 11, "name": "Tomato Soup"}]}
 
-    class DisconnectingRequest:
+    class SearchRequest:
         async def stream(self):
-            await disconnected.wait()
-            yield b""
-
-    async def exercise() -> None:
-        pending = asyncio.create_task(api_module.find_recipes(
-            request=DisconnectingRequest(), mode="name", search="tomato", food_ids=None,
-            keywords_only=False, page=1, page_size=20,
-        ))
-        await asyncio.wait_for(started.wait(), 1)
-        disconnected.set()
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(pending, 1)
-        assert cancelled.is_set()
+            raise AssertionError("Name searches must not read the ASGI request stream.")
 
     monkeypatch.setattr(api_module, "client", SearchClient())
-    asyncio.run(exercise())
+    result = asyncio.run(api_module.find_recipes(
+        request=SearchRequest(), mode="name", search="tomato", food_ids=None,
+        keywords_only=False, page=1, page_size=20,
+    ))
+    assert result == {"count": 1, "results": [{"id": 11, "title": "Tomato Soup", "match_count": 0}]}
 
 
 def test_recipe_food_search_stops_after_disconnect(monkeypatch, tmp_path) -> None:

@@ -666,26 +666,9 @@ async def find_recipes(
     keyword_ids = server_state.selected_keywords() if keywords_only else None
     try:
         if mode == "name":
-            lookup = asyncio.create_task(client.list_recipes(
+            data = await client.list_recipes(
                 search=search.strip(), limit=page_size, page=page, keyword_ids=keyword_ids,
-            ))
-
-            async def wait_for_disconnect() -> None:
-                async for _ in request.stream():
-                    pass
-
-            disconnected = asyncio.create_task(wait_for_disconnect())
-            try:
-                done, _ = await asyncio.wait({lookup, disconnected}, return_when=asyncio.FIRST_COMPLETED)
-                if disconnected in done:
-                    lookup.cancel()
-                    raise asyncio.CancelledError()
-                data = await lookup
-            finally:
-                disconnected.cancel()
-                if not lookup.done():
-                    lookup.cancel()
-                await asyncio.gather(lookup, disconnected, return_exceptions=True)
+            )
             return {"count": data["count"], "results": [
                 {"id": row["id"], "title": row["name"], "match_count": 0}
                 for row in data["results"]

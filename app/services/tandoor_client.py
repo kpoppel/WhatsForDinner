@@ -17,9 +17,15 @@ class TandoorNotFound(TandoorError):
 
 class TandoorClient:
     def __init__(self) -> None:
+        """Keep one connection pool for this Tandoor client instance."""
         self.base_url = settings.tandoor_base_url.rstrip("/")
         self.timeout = settings.tandoor_timeout_seconds
         self.api_token = settings.tandoor_api_token
+        self._http = httpx.AsyncClient(timeout=self.timeout)
+
+    async def aclose(self) -> None:
+        """Release pooled connections when the application shuts down."""
+        await self._http.aclose()
 
     def _headers(self) -> dict[str, str]:
         headers = {"Accept": "application/json"}
@@ -41,18 +47,17 @@ class TandoorClient:
     ) -> Any:
         url = f"{self.base_url}{path}"
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.request(
-                    method=method,
-                    url=url,
-                    params=params,
-                    json=json,
-                    headers=self._headers(),
-                )
-                response.raise_for_status()
-                if response.content:
-                    return response.json()
-                return {"status": "ok"}
+            response = await self._http.request(
+                method=method,
+                url=url,
+                params=params,
+                json=json,
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            if response.content:
+                return response.json()
+            return {"status": "ok"}
         except httpx.HTTPStatusError as exc:
             body = exc.response.text.strip()
             body_snippet = body[:300] if body else ""

@@ -53,6 +53,7 @@ async def lifespan(_app: FastAPI):
                 task.cancel()
         if queue_tasks:
             await asyncio.gather(*queue_tasks, return_exceptions=True)
+        await api_module.client.aclose()
         server_state.flush()
 
 app = FastAPI(
