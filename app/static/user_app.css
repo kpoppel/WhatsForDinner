@@ -1169,6 +1169,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
@@ -1176,6 +1177,13 @@ body {
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--wf-ink);
+}
+
+.wf-extra-recipes-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
 }
 
 .wf-extra-add-btn {

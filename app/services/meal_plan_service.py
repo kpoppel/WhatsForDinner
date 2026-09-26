@@ -111,6 +111,41 @@ class MealPlanService:
                 return True
         return False
 
+    async def random_recipe_for_entry(self, plan_id: int, entry_id: int, exclude_recipe_id: int | None = None) -> dict:
+        """Suggest a different meal recipe for one day without changing the stored plan."""
+        plan = self._state.get_meal_plan(plan_id)
+        if plan is None:
+            raise HTTPException(status_code=404, detail="Meal plan not found.")
+        entry = self._find_entry(plan, entry_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="Meal day not found.")
+
+        try:
+            result = await self._client.list_recipes(
+                limit=max(20, plan["length_days"] * 3),
+                keyword_ids=plan["keyword_ids"] if len(plan["keyword_ids"]) > 0 else None,
+            )
+        except TandoorError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        current_ids = {recipe["id"] for recipe in entry["recipes"] if isinstance(recipe.get("id"), int)}
+        if exclude_recipe_id is not None:
+            current_ids.add(exclude_recipe_id)
+        entry_date = date.fromisoformat(entry["date"])
+        history_dates = self._collect_recipe_history_dates()
+        candidates = [
+            recipe for recipe in self._extract_results(result)
+            if isinstance(recipe.get("id"), int)
+            and recipe["id"] not in current_ids
+            and not self._is_within_no_repeat_window(
+                recipe["id"], entry_date, plan["no_repeat_days"], history_dates,
+            )
+        ]
+        if not candidates:
+            raise HTTPException(status_code=409, detail="No eligible recipes for this meal day.")
+        chosen = random.SystemRandom().choice(candidates)
+        return {"id": chosen["id"], "title": self._recipe_title(chosen)}
+
     def _next_plan_entry_id(self) -> int:
         return self._state.allocate_entry_id()
 

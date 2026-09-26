@@ -15,6 +15,11 @@ export async function updateMealPlanEntry(planId, entryId, patch) {
   });
 }
 
+export async function randomMealPlanEntryRecipe(planId, entryId, excludeRecipeId) {
+  const query = excludeRecipeId === null ? "" : `?exclude_recipe_id=${excludeRecipeId}`;
+  return await api(`/meal-plans/${planId}/entries/${entryId}/random-recipe${query}`);
+}
+
 export async function deleteMealPlanEntry(planId, entryId) {
   return await api(`/meal-plans/${planId}/entries/${entryId}`, {
     method: "DELETE",

@@ -12,6 +12,7 @@ import {
   loadMealPlan,
   loadMealPlanDefaultDiners,
   loadStoredMealPlans,
+  randomMealPlanEntryRecipe,
   searchMealPlanRecipes,
   updateMealPlanEntry,
   updateMealPlanStartDate,
@@ -49,6 +50,7 @@ import { readMealPlanCache } from "./js/store/selectors.js";
   const mealEditorRecipesField = document.getElementById("wf-meal-editor-recipes-field");
   const mealEditorRecipesList = document.getElementById("wf-meal-editor-recipes-list");
   const mealEditorRecipesAddButton = document.getElementById("wf-meal-editor-recipes-add-btn");
+  const mealEditorRecipesRandomButton = document.getElementById("wf-meal-editor-recipes-random-btn");
   const mealEditorRecipesAddRow = document.getElementById("wf-meal-editor-recipes-add-row");
   const mealEditorRecipesSearchInput = document.getElementById("wf-meal-editor-recipes-search");
   const mealEditorRecipesSearchResults = document.getElementById("wf-meal-editor-recipes-search-results");
@@ -92,6 +94,7 @@ import { readMealPlanCache } from "./js/store/selectors.js";
     !(mealEditorRecipesField instanceof HTMLElement) ||
     !(mealEditorRecipesList instanceof HTMLElement) ||
     !(mealEditorRecipesAddButton instanceof HTMLButtonElement) ||
+    !(mealEditorRecipesRandomButton instanceof HTMLButtonElement) ||
     !(mealEditorRecipesAddRow instanceof HTMLElement) ||
     !(mealEditorRecipesSearchInput instanceof HTMLInputElement) ||
     !(mealEditorRecipesSearchResults instanceof HTMLElement) ||
@@ -180,6 +183,7 @@ import { readMealPlanCache } from "./js/store/selectors.js";
     changeStartDateButton.disabled = isOffline;
     addDayButton.disabled = isOffline;
     generateShoppingButton.disabled = isOffline;
+    mealEditorRecipesRandomButton.disabled = isOffline;
     if (isOffline) {
       generateButton.title = "Offline: generation is unavailable.";
       changeStartDateButton.title = "Offline: updating plan date is unavailable.";
@@ -1777,6 +1781,26 @@ import { readMealPlanCache } from "./js/store/selectors.js";
     }, 220);
   }
 
+  async function chooseRandomDayRecipe() {
+    assertMealPlanWriteAllowed("choose a random recipe");
+    const entryId = Number(mealEditorEntryIdInput.value);
+    const currentMeal = editorRecipes.find((recipe) => recipe.purpose === "meal");
+    const excludeRecipeId = currentMeal && Number.isInteger(currentMeal.id) ? currentMeal.id : null;
+    mealEditorRecipesRandomButton.disabled = true;
+    try {
+      const result = await randomMealPlanEntryRecipe(selectedPlanId, entryId, excludeRecipeId);
+      editorRecipes = [
+        { ...result.data, purpose: "meal" },
+        ...editorRecipes.filter((recipe) => recipe.purpose === "shopping_only"),
+      ];
+      renderEditorRecipeCards();
+      syncMealTitleFromFirstRecipe();
+      setAddRecipeRowVisible(false);
+    } finally {
+      mealEditorRecipesRandomButton.disabled = false;
+    }
+  }
+
   function setEditorMode(nextMode) {
     editorMode = nextMode;
 
@@ -1899,6 +1923,7 @@ import { readMealPlanCache } from "./js/store/selectors.js";
 
     openMealEditorModal();
     mealEditorSaveButton.disabled = isMealPlanOfflineReadOnly();
+    mealEditorRecipesRandomButton.disabled = isMealPlanOfflineReadOnly();
     if (isMealPlanOfflineReadOnly()) {
       setStatus("Offline: meal plan edits are disabled.");
     }
@@ -2024,6 +2049,9 @@ import { readMealPlanCache } from "./js/store/selectors.js";
       return;
     }
     setAddRecipeRowVisible(true);
+  });
+  mealEditorRecipesRandomButton.addEventListener("click", () => {
+    void runAction(chooseRandomDayRecipe);
   });
   mealEditorRecipesAddCancel.addEventListener("click", () => {
     setAddRecipeRowVisible(false);

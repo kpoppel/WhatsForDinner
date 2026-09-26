@@ -1020,6 +1020,12 @@ async def add_meal_plan_entry(plan_id: int, payload: MealPlanEntryCreateRequest 
     )
 
 
+@router.get("/meal-plans/{plan_id}/entries/{entry_id}/random-recipe")
+async def random_meal_plan_entry_recipe(plan_id: int, entry_id: int, exclude_recipe_id: int | None = None) -> dict:
+    """Suggest a recipe for one meal day without saving the entry."""
+    return {"data": await _meal_plan_service().random_recipe_for_entry(plan_id, entry_id, exclude_recipe_id)}
+
+
 @router.patch("/meal-plans/{plan_id}/entries/{entry_id}")
 async def patch_meal_plan_entry(
     plan_id: int,

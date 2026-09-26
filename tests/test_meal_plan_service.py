@@ -313,6 +313,33 @@ def test_generate_plan_reuses_constraints_and_entries(tmp_path, monkeypatch) -> 
     assert entries[2]["mode"] == "takeout"
 
 
+def test_random_recipe_for_entry_excludes_current_and_recent_without_saving(tmp_path) -> None:
+    state = ServerState(str(tmp_path))
+    service = MealPlanService(state, FakeMealClient())
+    first_day = date.today()
+    plan = state.create_meal_plan({
+        "start_date": first_day.isoformat(),
+        "length_days": 1,
+        "diners": 2,
+        "entries": [{
+            "entry_id": 1, "day_index": 0, "date": first_day.isoformat(), "mode": "planned",
+            "recipes": [{"id": 11, "title": "Roast Veg", "purpose": "meal"}],
+            "servings": 2, "reminder_enabled": False, "reminder_text": "", "notes": "",
+        }],
+        "keyword_ids": [7],
+        "constraints": {"leftover_days": [], "takeout_days": [], "empty_days": []},
+        "no_repeat_days": 30,
+    })
+
+    chosen = asyncio.run(service.random_recipe_for_entry(plan["plan_id"], 1))
+    assert chosen == {"id": 12, "title": "Rice Bowl"}
+    assert state.get_meal_plan(plan["plan_id"]) == plan
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(service.random_recipe_for_entry(plan["plan_id"], 1, exclude_recipe_id=12))
+    assert error.value.status_code == 409
+
+
 def test_patch_plan_rebases_dates_and_length(tmp_path) -> None:
     state = ServerState(str(tmp_path))
     service = MealPlanService(state, FakeMealClient())
