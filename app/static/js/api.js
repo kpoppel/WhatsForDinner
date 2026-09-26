@@ -58,12 +58,14 @@ function isJsonResponse(response) {
  */
 async function request(path, options, timeoutMs) {
   let response;
+  const { signal, ...fetchOptions } = options;
   try {
     response = await fetch(`${apiPrefix}${path}`, {
-      signal: AbortSignal.timeout(timeoutMs),
-      ...options,
+      ...fetchOptions,
+      signal: AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(signal ? [signal] : [])]),
     });
   } catch (error) {
+    if (signal && signal.aborted) throw error;
     publishApiReachability(false);
     throw new ApiUnreachableError("The server could not be reached.", error);
   }
@@ -82,6 +84,7 @@ async function request(path, options, timeoutMs) {
   try {
     data = await response.json();
   } catch (error) {
+    if (signal && signal.aborted) throw error;
     publishApiReachability(false);
     throw new ApiUnreachableError("The server returned a malformed response.", error);
   }

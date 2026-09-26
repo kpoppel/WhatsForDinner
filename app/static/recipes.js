@@ -29,6 +29,8 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
   let selectedPlan = null;
   let timer = 0;
   let revision = 0;
+  let searchController = null;
+  let usesController = null;
 
   /** Create an accessible icon action using the same touch target everywhere. */
   function iconButton(icon, label, onClick) {
@@ -57,17 +59,20 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
 
   /** Load the global exclusion list for both entry routes. */
   async function refreshUses() {
+    if (usesController) usesController.abort();
     if (!isOnline()) {
       reviewStatus.textContent = "Offline: recipe exclusions are unavailable.";
       return;
     }
+    const controller = new AbortController();
+    usesController = controller;
     reviewStatus.textContent = "Loading exclusions...";
     try {
-      uses = (await api("/recipe-uses")).results;
+      uses = (await api("/recipe-uses", { signal: controller.signal })).results;
       renderReview();
       reviewStatus.textContent = uses.length ? "" : "No recipes excluded.";
     } catch (error) {
-      report(error, reviewStatus);
+      if (!controller.signal.aborted) report(error, reviewStatus);
     }
   }
 
@@ -119,6 +124,10 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
   /** Show either the search surface or the same global review surface. */
   function showView(view) {
     const reviewing = view === "review";
+    if (reviewing) {
+      ++revision;
+      if (searchController) searchController.abort();
+    }
     searchView.hidden = reviewing;
     reviewView.hidden = !reviewing;
     for (const [id, active] of [["wf-recipes-search-tab", !reviewing], ["wf-recipes-review-tab", reviewing]]) {
@@ -127,7 +136,12 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
       button.setAttribute("aria-selected", String(active));
     }
     if (reviewing) void refreshUses();
-    else void searchRecipes();
+    else {
+      const current = ++revision;
+      void refreshUses().then(() => {
+        if (current === revision && !root.hidden) void searchRecipes();
+      });
+    }
   }
 
   /** Render compact search rows and their plan/exclusion actions. */
@@ -175,9 +189,11 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
     document.getElementById("wf-recipes-next").disabled = page * 20 >= total;
   }
 
-  /** Ask the API for a globally ranked page or a name-search page. */
+  /** Ask the API for a globally ranked ingredient page or a Tandoor search page. */
   async function searchRecipes() {
     const current = ++revision;
+    if (searchController) searchController.abort();
+    if (root.hidden || reviewView.hidden === false) return;
     if (!isOnline()) {
       results.replaceChildren();
       status.textContent = "Offline: recipe search is unavailable.";
@@ -193,13 +209,15 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
     status.textContent = "Searching recipes...";
     const params = new URLSearchParams({ mode, page: String(page), page_size: "20", search: mode === "name" ? query.value.trim() : "", keywords_only: String(document.getElementById("wf-recipes-keywords").checked) });
     for (const food of selectedFoods) params.append("food_ids", String(food.id));
+    const controller = new AbortController();
+    searchController = controller;
     try {
-      const data = await api(`/recipes/find?${params}`);
+      const data = await api(`/recipes/find?${params}`, { signal: controller.signal });
       if (current !== revision) return;
       total = data.count;
       status.textContent = `${total} recipes`;
       renderResults(data.results);
-    } catch (error) { if (current === revision) report(error); }
+    } catch (error) { if (current === revision && !controller.signal.aborted) report(error); }
   }
 
   /** Show matching Tandoor foods, retaining their exact IDs. */
@@ -255,7 +273,7 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
     mode = next;
     page = 1;
     query.value = "";
-    query.placeholder = next === "name" ? "Search recipe names" : "Find a Tandoor food";
+    query.placeholder = next === "name" ? "Search recipes" : "Find a Tandoor food";
     tokens.hidden = next === "name";
     options.hidden = true;
     for (const [id, active] of [["wf-recipes-name", next === "name"], ["wf-recipes-ingredients", next === "ingredients"]]) {
@@ -356,8 +374,11 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
   window.addEventListener("wfd:open-recipe-review", () => showView("review"));
   window.addEventListener("wfd:open-recipe-search", () => showView("search"));
   window.addEventListener("wfd:tab-changed", (event) => {
-    if (event.detail.tab === "recipes" && reviewView.hidden) {
-      void refreshUses().then(searchRecipes);
+    if (event.detail.tab !== "recipes") {
+      ++revision;
+      window.clearTimeout(timer);
+      if (searchController) searchController.abort();
+      if (usesController) usesController.abort();
     }
   });
   window.addEventListener("wfd:data-changed", (event) => {

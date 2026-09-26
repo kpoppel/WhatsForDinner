@@ -2,6 +2,7 @@ from copy import deepcopy
 import asyncio
 from datetime import date, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app, lifespan
@@ -130,22 +131,55 @@ def test_recipe_food_search_ranks_any_match_before_paging(monkeypatch, tmp_path)
     assert second.json()["results"] == [{"id": 1, "title": "Alpha", "match_count": 1}]
 
 
-def test_recipe_name_search_filters_ingredient_only_hits_before_paging(monkeypatch, tmp_path) -> None:
+def test_recipe_name_search_uses_one_tandoor_page(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
+    calls = []
 
     class SearchClient:
         async def list_recipes(self, search=None, limit=20, page=None, keyword_ids=None):
+            calls.append((search, limit, page))
             rows = {1: [{"id": 1, "name": "Tomato Soup"}, {"id": 2, "name": "Bean Soup"}],
                     2: [{"id": 3, "name": "Tomato Salad"}]}
-            return {"results": rows[page], "next": "next" if page == 1 else None}
+            return {"count": 3, "results": rows[page], "next": "next" if page == 1 else None}
 
     monkeypatch.setattr("app.api.client", SearchClient())
     response = client.get("/api/v1/recipes/find", params={
         "mode": "name", "search": "tomato", "page": 2, "page_size": 1,
     })
-    assert response.json() == {"count": 2, "results": [
+    assert response.json() == {"count": 3, "results": [
         {"id": 3, "title": "Tomato Salad", "match_count": 0},
     ]}
+    assert calls == [("tomato", 1, 2)]
+
+
+def test_recipe_food_search_stops_after_disconnect(monkeypatch, tmp_path) -> None:
+    from app import api as api_module
+
+    use_temp_state(monkeypatch, tmp_path)
+    pages = []
+
+    class SearchClient:
+        async def get_food(self, food_id):
+            return {"id": food_id}
+
+        async def list_recipes(self, search=None, limit=20, page=None, keyword_ids=None, food_ids=None):
+            pages.append(page)
+            return {"results": [{"id": page, "name": "Tomato Soup"}], "next": "next"}
+
+    class DisconnectingRequest:
+        checks = 0
+
+        async def is_disconnected(self):
+            self.checks += 1
+            return self.checks > 1
+
+    monkeypatch.setattr(api_module, "client", SearchClient())
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(api_module.find_recipes(
+            request=DisconnectingRequest(), mode="ingredients", search="", food_ids=[10],
+            keywords_only=False, page=1, page_size=20,
+        ))
+    assert pages == [1]
 
 
 def test_recipe_use_api_manages_one_record(monkeypatch, tmp_path) -> None:

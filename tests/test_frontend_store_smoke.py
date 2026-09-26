@@ -97,6 +97,25 @@ if (!networkRejected) {{
   throw new Error('api must report network failures as unreachable');
 }}
 
+globalThis.fetch = async (url, options) => {{
+  options.signal.throwIfAborted();
+  return await new Promise((resolve, reject) => {{
+    options.signal.addEventListener('abort', () => reject(options.signal.reason), {{ once: true }});
+  }});
+}};
+const controller = new AbortController();
+const cancelled = apiClient.api('/recipes/find', {{ signal: controller.signal }});
+controller.abort();
+let abortPreservedReachability = false;
+try {{
+  await cancelled;
+}} catch (error) {{
+  abortPreservedReachability = error.name === 'AbortError' && !apiClient.isApiUnreachableError(error);
+}}
+if (!abortPreservedReachability) {{
+  throw new Error('cancelled recipe requests must not signal an unreachable server');
+}}
+
 globalThis.fetch = async () => ({{ ok: true, status: 200, headers: htmlHeaders, json: async () => ({{ status: 'ok' }}) }});
 let portalRejected = false;
 try {{

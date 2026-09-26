@@ -6,7 +6,7 @@ from typing import Any
 import asyncio
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, Query, Request, UploadFile
 
 from app.config import settings
 from app.models.contracts import (
@@ -649,6 +649,7 @@ async def recipes(
 
 @router.get("/recipes/find")
 async def find_recipes(
+    request: Request,
     mode: str = Query(default="name", pattern="^(name|ingredients)$"),
     search: str = "",
     food_ids: list[int] | None = Query(default=None),
@@ -656,7 +657,7 @@ async def find_recipes(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> dict:
-    """Rank exact any-food matches globally before paginating the result."""
+    """Page Tandoor's recipe search or rank any-food matches globally."""
     selected = sorted(set(food_ids)) if food_ids is not None else []
     if mode == "ingredients" and not selected:
         return {"count": 0, "results": []}
@@ -665,27 +666,13 @@ async def find_recipes(
     keyword_ids = server_state.selected_keywords() if keywords_only else None
     try:
         if mode == "name":
-            if not search.strip():
-                data = await client.list_recipes(limit=page_size, page=page, keyword_ids=keyword_ids)
-                return {"count": data["count"], "results": [
-                    {"id": row["id"], "title": row["name"], "match_count": 0}
-                    for row in data["results"]
-                ]}
-            named: list[dict] = []
-            upstream_page = 1
-            while True:
-                data = await client.list_recipes(
-                    search=search.strip(), limit=100, page=upstream_page, keyword_ids=keyword_ids,
-                )
-                named.extend(
-                    {"id": row["id"], "title": row["name"], "match_count": 0}
-                    for row in data["results"] if search.strip().casefold() in row["name"].casefold()
-                )
-                if data["next"] is None:
-                    break
-                upstream_page += 1
-            offset = (page - 1) * page_size
-            return {"count": len(named), "results": named[offset:offset + page_size]}
+            data = await client.list_recipes(
+                search=search.strip(), limit=page_size, page=page, keyword_ids=keyword_ids,
+            )
+            return {"count": data["count"], "results": [
+                {"id": row["id"], "title": row["name"], "match_count": 0}
+                for row in data["results"]
+            ]}
 
         for food_id in selected:
             try:
@@ -696,6 +683,8 @@ async def find_recipes(
         for food_id in selected:
             upstream_page = 1
             while True:
+                if await request.is_disconnected():
+                    raise asyncio.CancelledError()
                 data = await client.list_recipes(
                     limit=100, page=upstream_page, keyword_ids=keyword_ids,
                     food_ids=[food_id],
