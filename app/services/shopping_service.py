@@ -6,7 +6,7 @@ from typing import Any, Callable
 from app.services.server_state import ServerState
 from fastapi import HTTPException
 
-from app.services.tandoor_client import TandoorClient, TandoorError
+from app.services.tandoor_client import TandoorClient, TandoorError, TandoorNotFound
 
 SHOPPING_STATUSES = {"remaining", "skipped", "completed"}
 
@@ -191,6 +191,7 @@ class ShoppingService:
         ensure_tandoor_writes_enabled: Callable[[str], None],
         operation_name: str,
     ) -> dict[str, Any]:
+        """Delete an entry, treating an absent remote entry as already deleted."""
         deleted_local = self._state.delete_local_shopping_entry(entry_id)
         if deleted_local is not None:
             self._state.delete_shopping_item_metadata(entry_id)
@@ -202,6 +203,8 @@ class ShoppingService:
         ensure_tandoor_writes_enabled(operation_name)
         try:
             deleted = await self._client.delete_shopping_entry(entry_id)
+        except TandoorNotFound:
+            deleted = {"deleted": entry_id}
         except TandoorError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 

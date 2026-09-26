@@ -6,7 +6,7 @@ from fastapi import HTTPException
 
 from app.services.shopping_service import ShoppingService
 from app.services.server_state import ServerState
-from app.services.tandoor_client import TandoorError
+from app.services.tandoor_client import TandoorError, TandoorNotFound
 
 
 class FakeShoppingClient:
@@ -271,6 +271,38 @@ def test_sync_retries_existing_deferred_changes(tmp_path) -> None:
     )
 
     assert result["deferred"] is False
+    assert client.updated_payloads == [(3, {"checked": True, "delay_until": None})]
+    assert state.pending_shopping_changes() == {}
+
+
+def test_sync_continues_after_already_deleted_entry(tmp_path, monkeypatch) -> None:
+    """An absent Tandoor entry must not block subsequent queued changes."""
+    state = ServerState(str(tmp_path))
+    client = FakeShoppingClient()
+
+    async def missing_entry(_entry_id):
+        raise TandoorNotFound("No ShoppingListEntry matches the given query.")
+
+    monkeypatch.setattr(client, "delete_shopping_entry", missing_entry)
+    service = ShoppingService(state, client)
+
+    result = asyncio.run(
+        service.apply_sync_changes(
+            changes=[
+                {"operation": "delete", "entry_id": 3054},
+                {"operation": "update", "entry_id": 3, "payload": {"status": "completed"}},
+            ],
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            extract_reminder_patch=extract_reminder_patch,
+            build_local_entry_payload=build_local_entry_payload,
+            local_store_group_payload=local_store_group_payload,
+            status_to_tandoor_fields=status_to_tandoor_fields,
+            effective_status=effective_status,
+        )
+    )
+
+    assert result["deferred"] is False
+    assert [change["operation"] for change in result["applied"]] == ["delete", "update"]
     assert client.updated_payloads == [(3, {"checked": True, "delay_until": None})]
     assert state.pending_shopping_changes() == {}
 
