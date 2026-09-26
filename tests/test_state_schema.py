@@ -4,6 +4,7 @@ from datetime import date, timedelta
 import pytest
 
 from app.services.server_state import ServerState
+from app.services.recipe_use_backfill import backfill_recipe_use_titles
 from app.services.state_migrations import StateSchemaError
 
 
@@ -13,7 +14,7 @@ def test_stage2_state_writes_schema_version(tmp_path) -> None:
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 20
+    assert payload["schema_version"] == 21
     assert "archive" not in payload
     assert "shopping_sync_events" not in payload
 
@@ -65,9 +66,9 @@ def test_recipe_use_history_keeps_latest_use_across_plan_changes(tmp_path) -> No
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
     assert payload["recipe_use_history"] == [
-        {"recipe_id": 11, "used_date": "2026-09-01", "source": "plan", "plan_id": 1, "entry_id": 1},
-        {"recipe_id": 12, "used_date": "2026-09-01", "source": "plan", "plan_id": 1, "entry_id": 1},
-        {"recipe_id": 13, "used_date": "2026-09-02", "source": "plan", "plan_id": 1, "entry_id": 1},
+        {"recipe_id": 11, "title": "Roast Veg", "used_date": "2026-09-01", "source": "plan", "plan_id": 1, "entry_id": 1},
+        {"recipe_id": 12, "title": "Rice Bowl", "used_date": "2026-09-01", "source": "plan", "plan_id": 1, "entry_id": 1},
+        {"recipe_id": 13, "title": "Pasta", "used_date": "2026-09-02", "source": "plan", "plan_id": 1, "entry_id": 1},
     ]
 
 
@@ -97,7 +98,7 @@ def test_recipe_use_history_backfills_existing_plans_on_startup(tmp_path) -> Non
     with restored.state_file.open("r", encoding="utf-8") as fp:
         restored_payload = json.load(fp)
     assert restored_payload["recipe_use_history"] == [
-        {"recipe_id": 11, "used_date": "2026-09-01", "source": "plan", "plan_id": 1, "entry_id": 1}
+        {"recipe_id": 11, "title": None, "used_date": "2026-09-01", "source": "plan", "plan_id": 1, "entry_id": 1}
     ]
 
 
@@ -129,6 +130,7 @@ def test_recipe_use_history_prunes_to_the_configured_window(tmp_path) -> None:
     assert payload["recipe_use_history"] == [
         {
             "recipe_id": 12,
+            "title": "Recent Recipe",
             "used_date": (today - timedelta(days=30)).isoformat(),
             "source": "plan",
             "plan_id": plan["plan_id"],
@@ -148,18 +150,18 @@ def test_recipe_use_latest_manual_edit_and_sticky_removal(tmp_path) -> None:
     today = date.today()
     future = today + timedelta(days=5)
     plan = state.create_meal_plan({"entries": [{
-        "entry_id": 1, "date": today.isoformat(), "recipes": [{"id": 11}],
+        "entry_id": 1, "date": today.isoformat(), "recipes": [{"id": 11, "title": "Pasta"}],
     }]})
-    state.set_recipe_use(11, future)
+    state.set_recipe_use(11, "Pasta", future)
     assert state.list_recipe_uses() == [{
-        "recipe_id": 11, "used_date": future.isoformat(), "source": "manual",
+        "recipe_id": 11, "title": "Pasta", "used_date": future.isoformat(), "source": "manual",
         "plan_id": None, "entry_id": None,
     }]
     state.remove_recipe_use(11)
     state.update_meal_plan(plan["plan_id"], {"diners": 4})
     assert state.list_recipe_uses() == []
     state.update_meal_plan(plan["plan_id"], {"entries": [{
-        "entry_id": 1, "date": future.isoformat(), "recipes": [{"id": 11}],
+        "entry_id": 1, "date": future.isoformat(), "recipes": [{"id": 11, "title": "Pasta"}],
     }]})
     assert state.list_recipe_uses()[0]["used_date"] == future.isoformat()
     state.delete_meal_plan(plan["plan_id"])
@@ -177,9 +179,44 @@ def test_recipe_use_migrates_to_one_latest_record(tmp_path) -> None:
     state.state_file.write_text(json.dumps(payload), encoding="utf-8")
     restored = ServerState(str(tmp_path))
     assert restored.list_recipe_uses() == [{
-        "recipe_id": 11, "used_date": (date.today() + timedelta(days=2)).isoformat(),
+        "recipe_id": 11, "title": None, "used_date": (date.today() + timedelta(days=2)).isoformat(),
         "source": "plan", "plan_id": 2, "entry_id": 2,
     }]
+
+
+def test_recipe_use_backfill_resolves_legacy_titles_once(tmp_path) -> None:
+    import asyncio
+
+    state = ServerState(str(tmp_path))
+    payload = json.loads(state.state_file.read_text(encoding="utf-8"))
+    payload["schema_version"] = 20
+    payload["recipe_use_history"] = [
+        {"recipe_id": 11, "used_date": date.today().isoformat(), "source": "manual", "plan_id": None, "entry_id": None},
+        {"recipe_id": 12, "used_date": date.today().isoformat(), "source": "plan", "plan_id": 1, "entry_id": 1},
+    ]
+    state.state_file.write_text(json.dumps(payload), encoding="utf-8")
+    restored = ServerState(str(tmp_path))
+    requested = []
+
+    class RecipeClient:
+        async def get_recipe(self, recipe_id):
+            requested.append(recipe_id)
+            return {"name": f"Recipe {recipe_id}"}
+
+    class FailingRecipeClient:
+        async def get_recipe(self, recipe_id):
+            if recipe_id == 12:
+                raise RuntimeError("Tandoor unavailable")
+            return {"name": "Recipe 11"}
+
+    with pytest.raises(RuntimeError, match="Tandoor unavailable"):
+        asyncio.run(backfill_recipe_use_titles(restored, FailingRecipeClient()))
+    assert [row["title"] for row in ServerState(str(tmp_path)).list_recipe_uses()] == [None, None]
+
+    assert asyncio.run(backfill_recipe_use_titles(restored, RecipeClient())) == 2
+    assert asyncio.run(backfill_recipe_use_titles(restored, RecipeClient())) == 0
+    assert requested == [11, 12]
+    assert [row["title"] for row in ServerState(str(tmp_path)).list_recipe_uses()] == ["Recipe 11", "Recipe 12"]
 
 
 def test_stage2_state_persists_compact_pending_shopping_changes(tmp_path) -> None:
@@ -273,7 +310,7 @@ def test_stage2_state_migrates_v1_payload_to_v8(tmp_path) -> None:
     state.set_selected_keywords([])
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
-    assert payload["schema_version"] == 20
+    assert payload["schema_version"] == 21
     assert "meal_plan_instance_sync" not in payload
     assert "archive" not in payload
 
@@ -337,7 +374,7 @@ def test_stage2_state_migrates_v2_payload_and_strips_entry_ids(tmp_path) -> None
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 20
+    assert payload["schema_version"] == 21
     recipe = payload["meal_plans"]["1"]["entries"][0]["recipes"][0]
     assert recipe["tandoor_sync"] == {"meal_plan_row_id": 5, "shopping_recipe_id": 7}
     assert "tandoor_sync" not in payload["meal_plans"]["1"]
@@ -385,7 +422,7 @@ def test_stage2_state_migrates_v3_payload_to_v8_without_event_history(tmp_path) 
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
 
-    assert payload["schema_version"] == 20
+    assert payload["schema_version"] == 21
     assert "archive" not in payload
     assert "shopping_sync_events" not in payload
     assert "next_sync_event_id" not in payload
@@ -419,7 +456,7 @@ def test_stage2_state_migrates_v8_payload_without_shopping_snapshot(tmp_path) ->
 
     with state_file.open("r", encoding="utf-8") as fp:
         migrated_payload = json.load(fp)
-    assert migrated_payload["schema_version"] == 20
+    assert migrated_payload["schema_version"] == 21
     assert "shopping_snapshot" not in migrated_payload
 
 

@@ -231,9 +231,33 @@ def test_recipe_use_api_manages_one_record(monkeypatch, tmp_path) -> None:
     future = (date.today() + timedelta(days=3)).isoformat()
     edited = client.put("/api/v1/recipe-uses/11", json={"used_date": future})
     assert edited.status_code == 200
+    class OfflineRecipeClient:
+        async def get_recipe(self, recipe_id):
+            raise AssertionError("Listing exclusions must not fetch recipe details.")
+
+    monkeypatch.setattr("app.api.client", OfflineRecipeClient())
     assert client.get("/api/v1/recipe-uses").json()["results"][0]["exclusion_until"] == (date.today() + timedelta(days=33)).isoformat()
     assert client.delete("/api/v1/recipe-uses/11").status_code == 200
     assert state.list_recipe_uses() == []
+
+
+def test_recipe_use_list_requires_legacy_title_backfill(monkeypatch, tmp_path) -> None:
+    state = use_temp_state(monkeypatch, tmp_path)
+    payload = state._load()
+    payload["recipe_use_history"] = [{
+        "recipe_id": 11, "title": None, "used_date": date.today().isoformat(),
+        "source": "manual", "plan_id": None, "entry_id": None,
+    }]
+    state._save(payload)
+
+    class OfflineRecipeClient:
+        async def get_recipe(self, recipe_id):
+            raise AssertionError("Legacy exclusions must not trigger per-recipe requests.")
+
+    monkeypatch.setattr("app.api.client", OfflineRecipeClient())
+    response = client.get("/api/v1/recipe-uses")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Recipe exclusion titles require backfill."
 
 
 def test_recipe_food_search_rejects_unknown_food(monkeypatch, tmp_path) -> None:

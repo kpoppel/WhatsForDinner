@@ -731,12 +731,12 @@ async def recipe_foods(search: str = Query(min_length=1)) -> dict:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-async def _recipe_use_view(record: dict) -> dict:
-    """Resolve display titles without storing names as recipe identity."""
-    recipe = await client.get_recipe(record["recipe_id"])
+def _recipe_use_view(record: dict) -> dict:
+    """Display a stored exclusion without requesting its recipe from Tandoor."""
+    if record["title"] is None:
+        raise HTTPException(status_code=409, detail="Recipe exclusion titles require backfill.")
     return {
         **record,
-        "title": recipe["name"],
         "exclusion_until": (
             date.fromisoformat(record["used_date"])
             + timedelta(days=server_state.meal_plan_rules()["no_repeat_days"])
@@ -747,24 +747,21 @@ async def _recipe_use_view(record: dict) -> dict:
 @router.get("/recipe-uses")
 async def list_recipe_uses() -> dict:
     """Return the global no-repeat review, pruning expired records on access."""
-    try:
-        return {"results": [await _recipe_use_view(item) for item in server_state.list_recipe_uses()]}
-    except TandoorError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"results": [_recipe_use_view(item) for item in server_state.list_recipe_uses()]}
 
 
 @router.post("/recipe-uses")
 async def add_recipe_use(payload: RecipeUseRequest = Body(...)) -> dict:
     """Manually exclude a known recipe using the server's local date."""
     try:
-        await client.get_recipe(payload.recipe_id)
+        recipe = await client.get_recipe(payload.recipe_id)
     except TandoorNotFound as exc:
         raise HTTPException(status_code=404, detail="Recipe not found.") from exc
     except TandoorError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     if server_state.meal_plan_rules()["no_repeat_days"] == 0:
         raise HTTPException(status_code=409, detail="Don't Repeat is disabled in Settings.")
-    return {"data": server_state.set_recipe_use(payload.recipe_id, date.today())}
+    return {"data": server_state.set_recipe_use(payload.recipe_id, recipe["name"], date.today())}
 
 
 @router.put("/recipe-uses/{recipe_id}")
@@ -773,8 +770,10 @@ async def edit_recipe_use(recipe_id: int, payload: RecipeUseDateRequest = Body(.
     record = next((row for row in server_state.list_recipe_uses() if row["recipe_id"] == recipe_id), None)
     if record is None:
         raise HTTPException(status_code=404, detail="Recipe exclusion not found.")
+    if record["title"] is None:
+        raise HTTPException(status_code=409, detail="Recipe exclusion titles require backfill.")
     return {"data": server_state.set_recipe_use(
-        recipe_id, payload.used_date, record["source"], record["plan_id"], record["entry_id"],
+        recipe_id, record["title"], payload.used_date, record["source"], record["plan_id"], record["entry_id"],
     )}
 
 

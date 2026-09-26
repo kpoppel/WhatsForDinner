@@ -210,13 +210,26 @@ class ServerState:
                 self._save(data)
             return data["recipe_use_history"]
 
+    def backfill_recipe_use_titles(self, titles: dict[int, str]) -> None:
+        """Commit resolved historical titles together after all lookups succeed."""
+        with self._lock:
+            data = self._load()
+            unresolved = {row["recipe_id"] for row in data["recipe_use_history"] if row["title"] is None}
+            if unresolved != titles.keys() or any(not title.strip() for title in titles.values()):
+                raise ValueError("Backfill must provide a title for every unresolved recipe use.")
+            for row in data["recipe_use_history"]:
+                if row["title"] is None:
+                    row["title"] = titles[row["recipe_id"]]
+            if unresolved:
+                self._save(data)
+
     def set_recipe_use(
-        self, recipe_id: int, used_date: date, source: str = "manual",
+        self, recipe_id: int, title: str, used_date: date, source: str = "manual",
         plan_id: int | None = None, entry_id: int | None = None,
     ) -> dict[str, Any]:
-        """Explicitly set the last use date without editing a saved plan."""
+        """Store the last use date and display title without editing a saved plan."""
         record = {
-            "recipe_id": recipe_id, "used_date": used_date.isoformat(),
+            "recipe_id": recipe_id, "title": title, "used_date": used_date.isoformat(),
             "source": source, "plan_id": plan_id, "entry_id": entry_id,
         }
         with self._lock:
@@ -287,7 +300,7 @@ class ServerState:
                 if current is not None:
                     history.remove(current)
                 history.append({
-                    "recipe_id": recipe_id, "used_date": used_date, "source": "plan",
+                    "recipe_id": recipe_id, "title": recipe["title"], "used_date": used_date, "source": "plan",
                     "plan_id": plan_id, "entry_id": entry_id,
                 })
 

@@ -391,6 +391,15 @@ def _migrate_v19_to_v20(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v20_to_v21(payload: dict[str, Any]) -> dict[str, Any]:
+    """Mark titles from historical records for explicit one-time backfill."""
+    next_payload = deepcopy(payload)
+    for item in next_payload["recipe_use_history"]:
+        item["title"] = None
+    next_payload["schema_version"] = 21
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(raw)
 
@@ -473,6 +482,10 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     if schema_version == 19:
         payload = _migrate_v19_to_v20(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 20:
+        payload = _migrate_v20_to_v21(payload)
         schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:
