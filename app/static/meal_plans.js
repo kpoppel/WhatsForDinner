@@ -18,7 +18,7 @@ import {
   updateMealPlanStartDate,
 } from "./js/commands/meal-plans.js";
 import { isOnline } from "./js/selectors/connectivity.js";
-import { readMealPlanCache } from "./js/store/selectors.js";
+import { readMealPlanCache, selectActiveMealPlan } from "./js/store/selectors.js";
 
 (() => {
   const changeStartDateButton = document.getElementById("wf-plan-change-start-btn");
@@ -375,6 +375,12 @@ import { readMealPlanCache } from "./js/store/selectors.js";
       return 0;
     });
 
+    const currentPlan = selectActiveMealPlan(sorted, null, toIsoDate(today));
+    const currentIndex = sorted.indexOf(currentPlan);
+    if (currentIndex > 0) {
+      sorted.splice(currentIndex, 1);
+      sorted.unshift(currentPlan);
+    }
     return sorted;
   }
 
@@ -1163,9 +1169,7 @@ import { readMealPlanCache } from "./js/store/selectors.js";
       }
     }
 
-    if (Number.isInteger(selectedPlanId)) {
-      writeActiveMealPlanId(selectedPlanId);
-    } else if (Number.isInteger(firstPlanId)) {
+    if (Number.isInteger(firstPlanId)) {
       writeActiveMealPlanId(firstPlanId);
     }
 

@@ -51,6 +51,27 @@ if (selectors.readActiveMealPlanId() !== 42) {{
   throw new Error('writeActiveMealPlanId/readActiveMealPlanId mismatch');
 }}
 
+const plans = [
+  {{ plan_id: 2, start_date: '2026-09-27', length_days: 7 }},
+  {{ plan_id: 1, start_date: '2026-09-20', length_days: 7 }},
+];
+if (selectors.selectActiveMealPlan(plans, 2, '2026-09-26').plan_id !== 1) {{
+  throw new Error('a future plan must not displace a plan covering today');
+}}
+if (selectors.selectActiveMealPlan(plans, 1, '2026-09-27').plan_id !== 2) {{
+  throw new Error('the new plan should become active on its start date');
+}}
+if (selectors.selectActiveMealPlan(plans, 1, '2026-10-10').plan_id !== 1) {{
+  throw new Error('keep the preferred plan when none covers today');
+}}
+const overlapping = [
+  {{ plan_id: 3, start_date: '2026-09-25', length_days: 7 }},
+  {{ plan_id: 1, start_date: '2026-09-20', length_days: 7 }},
+];
+if (selectors.selectActiveMealPlan(overlapping, 1, '2026-09-26').plan_id !== 3) {{
+  throw new Error('the most recent current plan should win when ranges overlap');
+}}
+
 commands.writeHomeActivePlanCache({{ plan_id: 7, entries: [{{ day_index: 1 }}, {{ day_index: 0 }}] }});
 const homeCache = selectors.readHomeActivePlanCache((entries) =>
   [...(entries || [])].sort((a, b) => a.day_index - b.day_index)

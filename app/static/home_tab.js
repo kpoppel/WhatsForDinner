@@ -14,6 +14,7 @@ import {
   readActiveMealPlanId,
   readHomeActivePlanCache,
   readMealPlanCache,
+  selectActiveMealPlan,
 } from "./js/store/selectors.js";
 
 (() => {
@@ -534,10 +535,7 @@ import {
     });
 
     const preferredId = readActiveMealPlanId();
-    const preferredRow = Number.isInteger(preferredId)
-      ? rows.find((row) => Number(row?.plan_id) === preferredId)
-      : null;
-    const planId = Number((preferredRow || rows[0]).plan_id);
+    const planId = Number(selectActiveMealPlan(rows, preferredId, todayIsoDate()).plan_id);
     if (!Number.isInteger(planId)) {
       return { plan: null, entries: [] };
     }
@@ -573,10 +571,7 @@ import {
     }
 
     const preferredId = readActiveMealPlanId();
-    const preferredRow = Number.isInteger(preferredId)
-      ? rows.find((row) => Number(row?.plan_id) === preferredId)
-      : null;
-    const planId = Number((preferredRow || rows[0]).plan_id);
+    const planId = Number(selectActiveMealPlan(rows, preferredId, todayIsoDate()).plan_id);
     if (!Number.isInteger(planId)) {
       return { plan: null, entries: [] };
     }

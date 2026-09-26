@@ -226,6 +226,27 @@ def test_recipe_use_api_manages_one_record(monkeypatch, tmp_path) -> None:
     assert state.list_recipe_uses() == []
 
 
+def test_recipe_use_summary_counts_only_matching_active_exclusions(monkeypatch, tmp_path) -> None:
+    state = use_temp_state(monkeypatch, tmp_path)
+    state.set_selected_keywords([7])
+    state.set_recipe_use(2, "Excluded match", date.today())
+    state.set_recipe_use(99, "Other keyword", date.today())
+    pages = []
+
+    class RecipeClient:
+        async def list_recipes(self, limit=20, page=None, keyword_ids=None):
+            pages.append((limit, page, keyword_ids))
+            if page == 1:
+                return {"results": [{"id": 1}, {"id": 2}], "next": "next-page"}
+            return {"results": [{"id": 3}], "next": None}
+
+    monkeypatch.setattr("app.api.client", RecipeClient())
+    response = client.get("/api/v1/recipe-uses/summary")
+    assert response.status_code == 200
+    assert response.json() == {"matching": 3, "eligible": 2}
+    assert pages == [(100, 1, [7]), (100, 2, [7])]
+
+
 def test_recipe_use_list_requires_legacy_title_backfill(monkeypatch, tmp_path) -> None:
     state = use_temp_state(monkeypatch, tmp_path)
     payload = state._load()

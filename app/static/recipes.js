@@ -8,6 +8,7 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
   const query = document.getElementById("wf-recipes-query");
   const status = document.getElementById("wf-recipes-status");
   const reviewStatus = document.getElementById("wf-recipes-review-status");
+  const reviewCounts = document.getElementById("wf-recipes-review-counts");
   const results = document.getElementById("wf-recipes-results");
   const reviewList = document.getElementById("wf-recipes-review-list");
   const options = document.getElementById("wf-recipes-food-options");
@@ -68,6 +69,7 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
   /** Load the global exclusion list for both entry routes. */
   async function refreshUses() {
     if (usesController) usesController.abort();
+    reviewCounts.textContent = "";
     if (!isOnline()) {
       reviewStatus.textContent = "Offline: recipe exclusions are unavailable.";
       return;
@@ -81,6 +83,16 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
       reviewStatus.textContent = uses.length ? "" : "No recipes excluded.";
     } catch (error) {
       if (!controller.signal.aborted) report(error, reviewStatus);
+      return;
+    }
+    if (!reviewView.hidden) {
+      reviewCounts.textContent = "Counting matching recipes...";
+      try {
+        const summary = await api("/recipe-uses/summary", { signal: controller.signal });
+        reviewCounts.textContent = `${summary.matching} recipes match selected filters · ${summary.eligible} eligible`;
+      } catch (error) {
+        if (!controller.signal.aborted) report(error, reviewCounts);
+      }
     }
   }
 

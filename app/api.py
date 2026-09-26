@@ -754,6 +754,27 @@ async def list_recipe_uses() -> dict:
     return {"results": [_recipe_use_view(item) for item in server_state.list_recipe_uses()]}
 
 
+@router.get("/recipe-uses/summary")
+async def recipe_use_summary() -> dict:
+    """Count keyword-matching recipes and those not currently excluded."""
+    keyword_ids = server_state.selected_keywords()
+    excluded_ids = {item["recipe_id"] for item in server_state.list_recipe_uses()}
+    matched_ids: set[int] = set()
+    page = 1
+    try:
+        while True:
+            data = await client.list_recipes(
+                limit=100, page=page, keyword_ids=keyword_ids if keyword_ids else None,
+            )
+            matched_ids.update(row["id"] for row in data["results"])
+            if data["next"] is None:
+                break
+            page += 1
+    except TandoorError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"matching": len(matched_ids), "eligible": len(matched_ids - excluded_ids)}
+
+
 @router.post("/recipe-uses")
 async def add_recipe_use(payload: RecipeUseRequest = Body(...)) -> dict:
     """Manually exclude a known recipe using the server's local date."""
