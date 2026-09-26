@@ -101,6 +101,7 @@ class ShoppingService:
         effective_status: Callable[[dict[str, Any], dict[str, str]], str],
         operation_name: str,
     ) -> dict[str, Any]:
+        """Update an entry and report missing remote entries as not found."""
         request_payload = dict(payload)
         reminder_patch, has_reminder_patch = extract_reminder_patch(request_payload)
 
@@ -165,6 +166,8 @@ class ShoppingService:
         if request_payload:
             try:
                 updated = await self._client.update_shopping_entry(entry_id, request_payload)
+            except TandoorNotFound as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
             except TandoorError as exc:
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
         else:

@@ -275,6 +275,44 @@ def test_sync_retries_existing_deferred_changes(tmp_path) -> None:
     assert state.pending_shopping_changes() == {}
 
 
+def test_sync_rejects_missing_remote_update_and_continues(tmp_path, monkeypatch) -> None:
+    """A deleted entry cannot be updated, but it must not block other changes."""
+    state = ServerState(str(tmp_path))
+    client = FakeShoppingClient()
+    update_entry = client.update_shopping_entry
+
+    async def update_or_missing(entry_id, payload):
+        if entry_id == 2014:
+            raise TandoorNotFound("No ShoppingListEntry matches the given query.")
+        return await update_entry(entry_id, payload)
+
+    monkeypatch.setattr(client, "update_shopping_entry", update_or_missing)
+    service = ShoppingService(state, client)
+
+    result = asyncio.run(
+        service.apply_sync_changes(
+            changes=[
+                {"operation": "update", "entry_id": 2014, "payload": {"status": "completed"}},
+                {"operation": "update", "entry_id": 3, "payload": {"name": "Milk"}},
+            ],
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            extract_reminder_patch=extract_reminder_patch,
+            build_local_entry_payload=build_local_entry_payload,
+            local_store_group_payload=local_store_group_payload,
+            status_to_tandoor_fields=status_to_tandoor_fields,
+            effective_status=effective_status,
+        )
+    )
+
+    assert result["deferred"] is False
+    assert [row["index"] for row in result["rejected"]] == [0]
+    assert "No ShoppingListEntry matches" in result["rejected"][0]["reason"]
+    assert [row["index"] for row in result["applied"]] == [1]
+    assert client.updated_payloads == [(3, {"name": "Milk"})]
+    state.flush()
+    assert ServerState(str(tmp_path)).pending_shopping_changes() == {}
+
+
 def test_sync_continues_after_already_deleted_entry(tmp_path, monkeypatch) -> None:
     """An absent Tandoor entry must not block subsequent queued changes."""
     state = ServerState(str(tmp_path))
