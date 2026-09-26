@@ -21,7 +21,10 @@ class LocalStorageMock {{
 }}
 
 globalThis.localStorage = new LocalStorageMock();
-globalThis.window = {{ WFD_API_PREFIX: '/api/v1' }};
+globalThis.window = {{ WFD_API_PREFIX: '/api/v1', dispatchEvent: () => true }};
+
+const jsonHeaders = {{ get: (name) => (name.toLowerCase() === 'content-type' ? 'application/json' : null) }};
+const htmlHeaders = {{ get: (name) => (name.toLowerCase() === 'content-type' ? 'text/html' : null) }};
 
 const commands = await import({commands_path!r});
 const selectors = await import({selectors_path!r});
@@ -62,7 +65,7 @@ if (!Array.isArray(homeCache.entries) || homeCache.entries[0].day_index !== 0) {
 let request = null;
 globalThis.fetch = async (url, options) => {{
   request = {{ url, options }};
-  return {{ ok: true, json: async () => ({{ source: 'ok' }}) }};
+  return {{ ok: true, status: 200, headers: jsonHeaders, json: async () => ({{ source: 'ok' }}) }};
 }};
 const okPayload = await apiClient.api('/health');
 if (!okPayload || okPayload.source !== 'ok') {{
@@ -72,22 +75,55 @@ if (request.url !== '/api/v1/health' || request.options.headers['Content-Type'] 
   throw new Error('api request construction smoke failed');
 }}
 
-globalThis.fetch = async () => ({{ ok: false, json: async () => ({{ detail: 'boom' }}) }});
+globalThis.fetch = async () => ({{ ok: false, status: 400, headers: jsonHeaders, json: async () => ({{ detail: 'boom' }}) }});
 let failed = false;
 try {{
   await apiClient.api('/health');
 }} catch (error) {{
-  failed = String(error).includes('boom');
+  failed = String(error).includes('boom') && !apiClient.isApiUnreachableError(error);
 }}
 if (!failed) {{
   throw new Error('api error path smoke failed');
+}}
+
+globalThis.fetch = async () => {{ throw new Error('network down'); }};
+let networkRejected = false;
+try {{
+  await apiClient.api('/health');
+}} catch (error) {{
+  networkRejected = apiClient.isApiUnreachableError(error);
+}}
+if (!networkRejected) {{
+  throw new Error('api must report network failures as unreachable');
+}}
+
+globalThis.fetch = async () => ({{ ok: true, status: 200, headers: htmlHeaders, json: async () => ({{ status: 'ok' }}) }});
+let portalRejected = false;
+try {{
+  await apiClient.api('/health');
+}} catch (error) {{
+  portalRejected = apiClient.isApiUnreachableError(error);
+}}
+if (!portalRejected) {{
+  throw new Error('api must treat non-JSON captive-portal responses as unreachable');
+}}
+
+globalThis.fetch = async () => ({{ ok: true, status: 503, headers: jsonHeaders, json: async () => ({{ detail: 'down' }}) }});
+let gatewayRejected = false;
+try {{
+  await apiClient.api('/health');
+}} catch (error) {{
+  gatewayRejected = apiClient.isApiUnreachableError(error);
+}}
+if (!gatewayRejected) {{
+  throw new Error('api must treat gateway failures as unreachable');
 }}
 
 let uploadRequest = null;
 const formData = {{ source: 'camera' }};
 globalThis.fetch = async (url, options) => {{
   uploadRequest = {{ url, options }};
-  return {{ ok: true, json: async () => ({{ rows: [] }}) }};
+  return {{ ok: true, status: 200, headers: jsonHeaders, json: async () => ({{ rows: [] }}) }};
 }};
 await apiClient.apiUpload('/shopping-list/ocr', formData);
 if (uploadRequest.url !== '/api/v1/shopping-list/ocr' || uploadRequest.options.body !== formData) {{
@@ -97,7 +133,7 @@ if (uploadRequest.url !== '/api/v1/shopping-list/ocr' || uploadRequest.options.b
 let healthRequest = null;
 globalThis.fetch = async (url, options) => {{
   healthRequest = {{ url, options }};
-  return {{ ok: true, json: async () => ({{ status: 'ok' }}) }};
+  return {{ ok: true, status: 200, headers: jsonHeaders, json: async () => ({{ status: 'ok', service: 'whatsfordinner' }}) }};
 }};
 await apiClient.health();
 if (
@@ -153,17 +189,36 @@ def test_service_worker_uses_cached_shell_for_slow_or_non_ok_navigation() -> Non
   assert source.count("fetch(request, { signal: AbortSignal.timeout(NAVIGATION_TIMEOUT_MS) })") == 2
 
 
-def test_shell_backoffs_connectivity_probes_and_allows_manual_retry() -> None:
+def test_shell_probes_connectivity_on_a_short_cadence_and_allows_manual_retry() -> None:
   repo_root = Path(__file__).resolve().parents[1]
   source = (repo_root / "app/static/user_shell.js").read_text(encoding="utf-8")
 
-  assert "const REACHABILITY_HEALTHY_DELAY_MS = 300000;" in source
-  assert "const REACHABILITY_MAX_DELAY_MS = 300000;" in source
-  assert "Math.min(reachabilityDelayMs * 2, REACHABILITY_MAX_DELAY_MS)" in source
+  assert "const REACHABILITY_ONLINE_DELAY_MS = 30000;" in source
+  assert "const REACHABILITY_OFFLINE_DELAY_MS = 10000;" in source
+  assert "setApiReachable(reachable);" in source
   assert "let reachabilityGeneration = 0;" in source
   assert "if (generation !== reachabilityGeneration)" in source
+  assert 'document.addEventListener("visibilitychange"' in source
   assert 'window.addEventListener("wfd:manual-connection-check"' in source
   assert 'window.addEventListener("wfd:api-reachability-changed"' in source
+
+
+def test_health_probe_verifies_the_service_identity() -> None:
+  repo_root = Path(__file__).resolve().parents[1]
+  source = (repo_root / "app/static/js/commands/connectivity.js").read_text(encoding="utf-8")
+  api_source = (repo_root / "app/api.py").read_text(encoding="utf-8")
+
+  assert 'const HEALTH_SERVICE_ID = "whatsfordinner";' in source
+  assert 'HEALTH_SERVICE_ID = "whatsfordinner"' in api_source
+  assert "payload.service === HEALTH_SERVICE_ID" in source
+
+
+def test_shopping_sync_stays_silent_when_the_server_is_unreachable() -> None:
+  repo_root = Path(__file__).resolve().parents[1]
+  source = (repo_root / "app/static/js/sync.js").read_text(encoding="utf-8")
+
+  unreachable_branch = source.index("if (isApiUnreachableError(error))")
+  assert unreachable_branch < source.index("notifySyncFailure();", unreachable_branch)
 
 
 def test_api_layer_owns_reachability_reporting() -> None:
@@ -352,13 +407,14 @@ globalThis.window = {{
 globalThis.CustomEvent = class {{ constructor(name, options) {{ this.name = name; this.options = options; }} }};
 globalThis.document = {{ getElementById() {{ return element(); }} }};
 
+const jsonHeaders = {{ get: (name) => (name.toLowerCase() === 'content-type' ? 'application/json' : null) }};
 const calls = [];
 globalThis.fetch = async (url) => {{
   calls.push(url);
   if (url.endsWith('/shopping-list/sync')) {{
-    return {{ ok: true, json: async () => ({{ applied: [{{}}], rejected: [], server_cursor: 1 }}) }};
+    return {{ ok: true, status: 200, headers: jsonHeaders, json: async () => ({{ applied: [{{}}], rejected: [], server_cursor: 1 }}) }};
   }}
-  return {{ ok: true, json: async () => ({{
+  return {{ ok: true, status: 200, headers: jsonHeaders, json: async () => ({{
     data: {{ sections: {{ remaining: [], skipped: [], completed: [] }} }},
     cursor: 2,
   }}) }};
@@ -378,9 +434,9 @@ stateModule.state.pendingChanges = [{{ operation: 'delete', entry_id: 2, queued_
 globalThis.fetch = async (url) => {{
   calls.push(url);
   if (url.endsWith('/shopping-list/sync')) {{
-    return {{ ok: true, json: async () => ({{ applied: [], rejected: [{{ index: 0 }}], server_cursor: 2 }}) }};
+    return {{ ok: true, status: 200, headers: jsonHeaders, json: async () => ({{ applied: [], rejected: [{{ index: 0 }}], server_cursor: 2 }}) }};
   }}
-  return {{ ok: true, json: async () => ({{
+  return {{ ok: true, status: 200, headers: jsonHeaders, json: async () => ({{
     data: {{ sections: {{ remaining: [], skipped: [], completed: [] }} }},
     cursor: 3,
   }}) }};

@@ -29,10 +29,12 @@ import { apiReachable, browserOnline, isOnline, syncing } from "./js/selectors/c
   }
 
   let activeTab = "home";
-  const REACHABILITY_INITIAL_DELAY_MS = 6000;
-  const REACHABILITY_HEALTHY_DELAY_MS = 300000;
-  const REACHABILITY_MAX_DELAY_MS = 300000;
-  let reachabilityDelayMs = REACHABILITY_INITIAL_DELAY_MS;
+  // Shopping happens away from home, where the network can change without any
+  // browser event, so the server is re-probed on a short fixed cadence rather
+  // than backing off. Probing is suspended while the page is hidden to keep the
+  // cost off the battery, and resumed immediately when the user returns.
+  const REACHABILITY_ONLINE_DELAY_MS = 30000;
+  const REACHABILITY_OFFLINE_DELAY_MS = 10000;
   let reachabilityTimer = null;
   let reachabilityGeneration = 0;
   function applyNetworkStatus() {
@@ -87,6 +89,11 @@ import { apiReachable, browserOnline, isOnline, syncing } from "./js/selectors/c
     }));
   }
 
+  /**
+   * Resolve the authoritative online state. navigator.onLine only proves the
+   * negative case: a device joined to shop Wi-Fi reports itself online, so the
+   * server probe is what decides reachability.
+   */
   async function refreshApiReachability() {
     const wasOnline = isOnline();
     if (!browserOnline()) {
@@ -96,12 +103,21 @@ import { apiReachable, browserOnline, isOnline, syncing } from "./js/selectors/c
     }
 
     const reachable = await probeApiReachability();
+    setApiReachable(reachable);
 
     applyOnlineAwareControls();
     if (!wasOnline && isOnline()) {
       window.dispatchEvent(new CustomEvent("wfd:connection-restored"));
     }
     return reachable;
+  }
+
+  function stopReachabilityChecks() {
+    if (reachabilityTimer !== null) {
+      window.clearTimeout(reachabilityTimer);
+      reachabilityTimer = null;
+    }
+    reachabilityGeneration += 1;
   }
 
   function scheduleReachabilityCheck(delayMs) {
@@ -118,10 +134,11 @@ import { apiReachable, browserOnline, isOnline, syncing } from "./js/selectors/c
       if (generation !== reachabilityGeneration) {
         return;
       }
-      reachabilityDelayMs = reachable
-        ? REACHABILITY_HEALTHY_DELAY_MS
-        : Math.min(reachabilityDelayMs * 2, REACHABILITY_MAX_DELAY_MS);
-      scheduleReachabilityCheck(reachabilityDelayMs);
+      if (document.visibilityState === "hidden") {
+        stopReachabilityChecks();
+        return;
+      }
+      scheduleReachabilityCheck(reachable ? REACHABILITY_ONLINE_DELAY_MS : REACHABILITY_OFFLINE_DELAY_MS);
     }, delayMs);
   }
 
@@ -197,17 +214,23 @@ import { apiReachable, browserOnline, isOnline, syncing } from "./js/selectors/c
   window.WFD_setActiveTab = setActiveTab;
 
   window.addEventListener("online", () => {
-    reachabilityDelayMs = REACHABILITY_INITIAL_DELAY_MS;
     scheduleReachabilityCheck(0);
   });
 
   window.addEventListener("offline", () => {
-    if (reachabilityTimer !== null) {
-      window.clearTimeout(reachabilityTimer);
-      reachabilityTimer = null;
-    }
+    stopReachabilityChecks();
     setApiReachable(false);
     applyOnlineAwareControls();
+  });
+
+  // Returning to the app is the moment the network most likely changed (walked
+  // into the shop, left the house, joined the VPN), so re-probe right away.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      stopReachabilityChecks();
+      return;
+    }
+    scheduleReachabilityCheck(0);
   });
 
   window.addEventListener("wfd:api-reachability-changed", () => {
@@ -222,7 +245,6 @@ import { apiReachable, browserOnline, isOnline, syncing } from "./js/selectors/c
   });
 
   window.addEventListener("wfd:manual-connection-check", () => {
-    reachabilityDelayMs = REACHABILITY_INITIAL_DELAY_MS;
     scheduleReachabilityCheck(0);
   });
 

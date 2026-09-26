@@ -14,7 +14,7 @@ def setup_module(module) -> None:
 def test_health_route() -> None:
     response = client.get("/api/v1/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json() == {"status": "ok", "service": "whatsfordinner"}
 
 
 def test_versioned_openapi_schema_route() -> None:

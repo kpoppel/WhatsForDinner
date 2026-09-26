@@ -35,6 +35,9 @@ meal_plan_sync_locks: dict[int, asyncio.Lock] = {}
 shopping_sync_lock = asyncio.Lock()
 SYNC_RETRY_DELAY_SECONDS = 5
 SYNC_MAX_RETRIES = 10
+# Identity marker returned by /health so clients can reject responses that came
+# from a captive portal or a different host rather than this API.
+HEALTH_SERVICE_ID = "whatsfordinner"
 client = TandoorClient()
 server_state = ServerState(
     settings.stage2_data_dir,
@@ -613,7 +616,13 @@ def _stored_plan_sort_key(plan: dict[str, Any]) -> tuple:
 
 @router.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok"}
+    """Liveness probe.
+
+    ``service`` identifies this application so clients can tell a genuine
+    response apart from a captive portal or another host answering on the same
+    address while the device is on a foreign network.
+    """
+    return {"status": "ok", "service": HEALTH_SERVICE_ID}
 
 
 @router.get("/recipes")

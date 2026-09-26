@@ -1,4 +1,4 @@
-import { api } from "./api.js";
+import { api, isApiUnreachableError } from "./api.js";
 import { setApiReachable } from "./commands/connectivity.js";
 import { browserOnline, isOnline } from "./selectors/connectivity.js";
 import {
@@ -99,6 +99,14 @@ export function syncPending(showPayload = true) {
   });
   pendingSync = nextSync.catch(() => {});
   return nextSync.catch(async (error) => {
+    // Losing the server mid-shop is the expected working mode: the API layer
+    // has already flipped reachability off, so keep the queued changes and stay
+    // silent instead of interrupting the user once per item.
+    if (isApiUnreachableError(error)) {
+      updateStatusBadges();
+      render();
+      throw error;
+    }
     try {
       await refresh();
     } catch {
