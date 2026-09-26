@@ -28,7 +28,7 @@ class FakeMealClient:
             }
         ]
 
-    async def list_recipes(self, search=None, limit=20, keyword_ids=None):
+    async def list_recipes(self, search=None, limit=20, page=None, keyword_ids=None):
         return {
             "results": [
                 {"id": 11, "name": "Roast Veg"},
@@ -313,7 +313,7 @@ def test_generate_plan_reuses_constraints_and_entries(tmp_path, monkeypatch) -> 
     assert entries[2]["mode"] == "takeout"
 
 
-def test_random_recipe_for_entry_excludes_current_and_recent_without_saving(tmp_path) -> None:
+def test_random_recipe_for_entry_excludes_current_and_recent_without_saving(tmp_path, monkeypatch) -> None:
     state = ServerState(str(tmp_path))
     service = MealPlanService(state, FakeMealClient())
     first_day = date.today()
@@ -335,9 +335,154 @@ def test_random_recipe_for_entry_excludes_current_and_recent_without_saving(tmp_
     assert chosen == {"id": 12, "title": "Rice Bowl"}
     assert state.get_meal_plan(plan["plan_id"]) == plan
 
+    seen_candidates = []
+
+    def choose(_self, candidates):
+        seen_candidates.extend(recipe["id"] for recipe in candidates)
+        return candidates[0]
+
+    monkeypatch.setattr("app.services.meal_plan_service.random.SystemRandom.choice", choose)
+    chosen = asyncio.run(service.random_recipe_for_entry(plan["plan_id"], 1, exclude_recipe_id=12))
+    assert seen_candidates == [11, 12]
+    assert chosen == {"id": 11, "title": "Roast Veg"}
+
+
+def test_random_recipe_for_entry_checks_next_page_when_first_is_excluded(tmp_path) -> None:
+    state = ServerState(str(tmp_path))
+    client = FakeMealClient()
+    service = MealPlanService(state, client)
+    first_day = date.today()
+    plan = state.create_meal_plan({
+        "start_date": first_day.isoformat(), "length_days": 1, "diners": 2,
+        "entries": [{
+            "entry_id": 1, "day_index": 0, "date": first_day.isoformat(), "mode": "planned",
+            "recipes": [{"id": 11, "title": "Roast Veg", "purpose": "meal"}],
+            "servings": 2, "reminder_enabled": False, "reminder_text": "", "notes": "",
+        }],
+        "keyword_ids": [7],
+        "constraints": {"leftover_days": [], "takeout_days": [], "empty_days": []},
+        "no_repeat_days": 30,
+    })
+    requested_pages = []
+
+    async def list_recipes(search=None, limit=20, page=None, keyword_ids=None):
+        requested_pages.append(page)
+        if page == 2:
+            return {"results": [{"id": 13, "name": "Bean Stew"}], "next": None}
+        return {"results": [{"id": 11, "name": "Roast Veg"}], "next": "?page=2"}
+
+    client.list_recipes = list_recipes
+
+    chosen = asyncio.run(service.random_recipe_for_entry(plan["plan_id"], 1))
+    assert chosen == {"id": 13, "title": "Bean Stew"}
+    assert requested_pages == [1, 2]
+    assert state.get_meal_plan(plan["plan_id"]) == plan
+
+
+def test_random_recipe_for_entry_chooses_from_all_eligible_pages(tmp_path, monkeypatch) -> None:
+    state = ServerState(str(tmp_path))
+    client = FakeMealClient()
+    service = MealPlanService(state, client)
+    first_day = date.today()
+    plan = state.create_meal_plan({
+        "start_date": first_day.isoformat(), "length_days": 1, "diners": 2,
+        "entries": [{
+            "entry_id": 1, "day_index": 0, "date": first_day.isoformat(), "mode": "planned",
+            "recipes": [{"id": 11, "title": "Roast Veg", "purpose": "meal"}],
+            "servings": 2, "reminder_enabled": False, "reminder_text": "", "notes": "",
+        }],
+        "keyword_ids": [7],
+        "constraints": {"leftover_days": [], "takeout_days": [], "empty_days": []},
+        "no_repeat_days": 30,
+    })
+
+    async def list_recipes(search=None, limit=20, page=None, keyword_ids=None):
+        if page == 2:
+            return {"results": [{"id": 13, "name": "Bean Stew"}], "next": None}
+        return {"results": [{"id": 11, "name": "Roast Veg"}, {"id": 12, "name": "Rice Bowl"}], "next": "?page=2"}
+
+    client.list_recipes = list_recipes
+    seen_candidates = []
+
+    def choose(_self, candidates):
+        seen_candidates.extend(recipe["id"] for recipe in candidates)
+        return candidates[-1]
+
+    monkeypatch.setattr("app.services.meal_plan_service.random.SystemRandom.choice", choose)
+
+    chosen = asyncio.run(service.random_recipe_for_entry(plan["plan_id"], 1))
+    assert seen_candidates == [12, 13]
+    assert chosen == {"id": 13, "title": "Bean Stew"}
+
+
+def test_random_recipe_for_entry_reuses_keyword_matches_when_exhausted(tmp_path, monkeypatch) -> None:
+    state = ServerState(str(tmp_path))
+    client = FakeMealClient()
+    service = MealPlanService(state, client)
+    first_day = date.today()
+    plan = state.create_meal_plan({
+        "start_date": first_day.isoformat(), "length_days": 1, "diners": 2,
+        "entries": [{
+            "entry_id": 1, "day_index": 0, "date": first_day.isoformat(), "mode": "planned",
+            "recipes": [{"id": 11, "title": "Roast Veg", "purpose": "meal"}],
+            "servings": 2, "reminder_enabled": False, "reminder_text": "", "notes": "",
+        }],
+        "keyword_ids": [7],
+        "constraints": {"leftover_days": [], "takeout_days": [], "empty_days": []},
+        "no_repeat_days": 30,
+    })
+    state.set_recipe_use(14, "Old Soup", first_day)
+    requested_filters = []
+
+    async def list_recipes(search=None, limit=20, page=None, keyword_ids=None):
+        requested_filters.append((keyword_ids, page))
+        if page == 2:
+            return {"results": [{"id": 14, "name": "Old Soup"}], "next": None}
+        return {"results": [
+            {"id": 11, "name": "Roast Veg"}, {"id": 12, "name": "Rice Bowl"},
+        ], "next": "?page=2"}
+
+    client.list_recipes = list_recipes
+    seen_candidates = []
+
+    def choose(_self, candidates):
+        seen_candidates.extend(recipe["id"] for recipe in candidates)
+        return candidates[-1]
+
+    monkeypatch.setattr("app.services.meal_plan_service.random.SystemRandom.choice", choose)
+
+    chosen = asyncio.run(service.random_recipe_for_entry(plan["plan_id"], 1, exclude_recipe_id=12))
+    assert seen_candidates == [11, 12, 14]
+    assert chosen == {"id": 14, "title": "Old Soup"}
+    assert requested_filters == [([7], 1), ([7], 2)]
+    assert state.get_meal_plan(plan["plan_id"]) == plan
+
+
+def test_random_recipe_for_entry_with_no_keyword_matches_returns_404(tmp_path) -> None:
+    state = ServerState(str(tmp_path))
+    client = FakeMealClient()
+    service = MealPlanService(state, client)
+    first_day = date.today()
+    plan = state.create_meal_plan({
+        "start_date": first_day.isoformat(), "length_days": 1, "diners": 2,
+        "entries": [{
+            "entry_id": 1, "day_index": 0, "date": first_day.isoformat(), "mode": "planned",
+            "recipes": [], "servings": 2, "reminder_enabled": False, "reminder_text": "", "notes": "",
+        }],
+        "keyword_ids": [7],
+        "constraints": {"leftover_days": [], "takeout_days": [], "empty_days": []},
+        "no_repeat_days": 30,
+    })
+
+    async def list_recipes(search=None, limit=20, page=None, keyword_ids=None):
+        return {"results": [], "next": None}
+
+    client.list_recipes = list_recipes
+
     with pytest.raises(HTTPException) as error:
-        asyncio.run(service.random_recipe_for_entry(plan["plan_id"], 1, exclude_recipe_id=12))
-    assert error.value.status_code == 409
+        asyncio.run(service.random_recipe_for_entry(plan["plan_id"], 1))
+    assert error.value.status_code == 404
+    assert error.value.detail == "No recipes match this meal plan's keywords."
 
 
 def test_patch_plan_rebases_dates_and_length(tmp_path) -> None:
