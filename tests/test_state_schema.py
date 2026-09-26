@@ -200,6 +200,24 @@ def test_stage2_state_persists_compact_pending_shopping_changes(tmp_path) -> Non
     }
 
 
+def test_stage2_state_prunes_stale_local_shopping_statuses_on_load(tmp_path) -> None:
+    """Only stored local entries retain status overrides after a restart."""
+    state = ServerState(str(tmp_path))
+    stale_id = state.allocate_local_shopping_entry_id()
+    live_id = state.allocate_local_shopping_entry_id()
+    state.set_shopping_status(stale_id, "completed")
+    state.set_local_shopping_entry(live_id, {"id": live_id})
+    state.set_shopping_status(live_id, "skipped")
+    state.set_shopping_item_metadata(live_id, {"reminder_enabled": True})
+    state.flush()
+
+    restored = ServerState(str(tmp_path))
+    assert restored.get_shopping_statuses() == {str(live_id): "skipped"}
+    assert restored.get_shopping_item_metadata() == {str(live_id): {"reminder_enabled": True}}
+    assert restored.list_local_shopping_entries() == [{"id": live_id}]
+    assert restored.allocate_local_shopping_entry_id() == live_id - 1
+
+
 def test_stage2_state_invalid_payload_fails_fast(tmp_path) -> None:
     invalid_payload = {
         "schema_version": 4,
@@ -419,8 +437,8 @@ def test_stage2_state_migrates_v9_payload_without_remote_status_overrides(tmp_pa
         "next_entry_id": 1,
         "shopping_status_overrides": {"1949": "completed", "-1": "skipped"},
         "shopping_item_metadata": {},
-        "local_shopping_entries": {},
-        "next_local_shopping_entry_id": -1,
+        "local_shopping_entries": {"-1": {"id": -1}},
+        "next_local_shopping_entry_id": -2,
         "meal_plan_instance_sync": {},
         "recipe_use_history": [],
         "pending_shopping_changes": {},

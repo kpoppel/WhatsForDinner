@@ -36,6 +36,11 @@ class ServerState:
         else:
             self._data = self._read()
             self._prune_recipe_use_history(self._data)
+            self._data["shopping_status_overrides"] = {
+                entry_id: status
+                for entry_id, status in self._data["shopping_status_overrides"].items()
+                if entry_id in self._data["local_shopping_entries"]
+            }
             self._write(self._data)
 
     def _read(self) -> dict[str, Any]:
@@ -557,6 +562,7 @@ class ServerState:
             return deepcopy(current)
 
     def delete_local_shopping_entry(self, entry_id: int) -> dict[str, Any] | None:
+        """Remove a local entry and its associated status and metadata."""
         with self._lock:
             data = self._load()
             raw = data.get("local_shopping_entries", {})
@@ -565,6 +571,8 @@ class ServerState:
             removed = raw.pop(str(entry_id), None)
             if not isinstance(removed, dict):
                 return None
+            data["shopping_status_overrides"].pop(str(entry_id), None)
+            data["shopping_item_metadata"].pop(str(entry_id), None)
             self._save(data)
             return deepcopy(removed)
 

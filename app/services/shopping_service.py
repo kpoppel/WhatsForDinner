@@ -197,7 +197,6 @@ class ShoppingService:
         """Delete an entry, treating an absent remote entry as already deleted."""
         deleted_local = self._state.delete_local_shopping_entry(entry_id)
         if deleted_local is not None:
-            self._state.delete_shopping_item_metadata(entry_id)
             return {
                 "source": "local-state",
                 "data": {"deleted": entry_id},

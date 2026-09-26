@@ -134,6 +134,35 @@ def test_create_entry_ad_hoc_persists_local(tmp_path) -> None:
     assert state.get_shopping_item_metadata()[str(created["id"])]["reminder_enabled"] is True
 
 
+def test_delete_local_entry_clears_associated_state(tmp_path) -> None:
+    """Deleting a local entry clears its status and metadata without reusing its ID."""
+    state = ServerState(str(tmp_path))
+    service = ShoppingService(state, FakeShoppingClient())
+    created = asyncio.run(
+        service.create_entry(
+            payload={"ad_hoc": True, "name": "Ice", "status": "skipped", "reminder_enabled": True},
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            extract_reminder_patch=extract_reminder_patch,
+            build_local_entry_payload=build_local_entry_payload,
+            status_to_tandoor_fields=status_to_tandoor_fields,
+            operation_name="test_create_local_entry",
+        )
+    )["data"]
+
+    asyncio.run(
+        service.delete_entry(
+            entry_id=created["id"],
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            operation_name="test_delete_local_entry",
+        )
+    )
+
+    assert state.list_local_shopping_entries() == []
+    assert state.get_shopping_statuses() == {}
+    assert state.get_shopping_item_metadata() == {}
+    assert state.allocate_local_shopping_entry_id() == created["id"] - 1
+
+
 def test_create_update_delete_remote_roundtrip(tmp_path) -> None:
     state = ServerState(str(tmp_path))
     client = FakeShoppingClient()
