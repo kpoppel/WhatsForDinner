@@ -42,9 +42,7 @@ Recipe search uses `/api/v1/recipes/find` and food autocomplete uses `/api/v1/re
    cp .env.example .env
    ```
 
-   Set `TANDOOR_API_URL` to the address reachable by the server, `TANDOOR_PUBLIC_URL`
-   to the external address used in links and media URLs, and `TANDOOR_API_TOKEN`
-   if your Tandoor instance requires auth.
+   Set `TANDOOR_BASE_URL` and `TANDOOR_API_TOKEN` if your Tandoor instance requires auth.
 
 4. Run the API:
 
@@ -86,16 +84,8 @@ Copy the template you want to `docker-compose.yaml` before using plain `docker c
 
 Before deploying, ensure `.env` contains your Tandoor settings:
 
-- `TANDOOR_API_URL` (for example, `http://web_recipes` when both containers share a Docker network)
-- `TANDOOR_PUBLIC_URL` (for example, `https://opskrifter.poulsen.top`)
+- `TANDOOR_BASE_URL`
 - `TANDOOR_API_TOKEN`
-
-The app sends Tandoor the public host and scheme when connecting through the
-internal API URL. Tandoor uses them for absolute media URLs, while recipe links
-rendered by this app also use the public URL. Both settings are required; set
-them to the same URL when no internal route is available. The containers must
-share a network for a Docker service name to resolve, and Tandoor's API token
-is still required on that network.
 
 #### Getting a Tandoor Token
 Visit your instance of Tandoor: https://<tandoor_url>/settings/api and create a new API token here. It needs read/write access to update meal plans and shopping lists.
