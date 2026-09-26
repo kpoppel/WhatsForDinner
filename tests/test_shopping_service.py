@@ -307,6 +307,41 @@ def test_sync_continues_after_already_deleted_entry(tmp_path, monkeypatch) -> No
     assert state.pending_shopping_changes() == {}
 
 
+def test_sync_clears_completed_delete_before_later_failure(tmp_path, monkeypatch) -> None:
+    """A later Tandoor failure must not cause a completed delete to be replayed."""
+    state = ServerState(str(tmp_path))
+    client = FakeShoppingClient()
+
+    async def failing_update(_entry_id, _payload):
+        raise TandoorError("update failed")
+
+    monkeypatch.setattr(client, "update_shopping_entry", failing_update)
+    service = ShoppingService(state, client)
+
+    result = asyncio.run(
+        service.apply_sync_changes(
+            changes=[
+                {"operation": "delete", "entry_id": 3054},
+                {"operation": "update", "entry_id": 3, "payload": {"status": "completed"}},
+            ],
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            extract_reminder_patch=extract_reminder_patch,
+            build_local_entry_payload=build_local_entry_payload,
+            local_store_group_payload=local_store_group_payload,
+            status_to_tandoor_fields=status_to_tandoor_fields,
+            effective_status=effective_status,
+        )
+    )
+
+    assert result["deferred"] is True
+    assert client.deleted_entry_ids == [3054]
+    assert state.pending_shopping_changes() == {
+        "3": {"operation": "update", "entry_id": 3, "payload": {"status": "completed"}}
+    }
+    state.flush()
+    assert ServerState(str(tmp_path)).pending_shopping_changes() == state.pending_shopping_changes()
+
+
 def test_sync_uses_tandoor_bulk_for_completed_items(tmp_path) -> None:
     state = ServerState(str(tmp_path))
     client = FakeShoppingClient()
@@ -330,3 +365,4 @@ def test_sync_uses_tandoor_bulk_for_completed_items(tmp_path) -> None:
     assert result["deferred"] is False
     assert client.bulk_updated_payloads == [([3, 4], True)]
     assert client.updated_payloads == []
+    assert state.pending_shopping_changes() == {}

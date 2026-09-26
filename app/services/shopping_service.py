@@ -224,6 +224,7 @@ class ShoppingService:
         status_to_tandoor_fields: Callable[[str], dict[str, Any]],
         effective_status: Callable[[dict[str, Any], dict[str, str]], str],
     ) -> dict[str, Any]:
+        """Apply queued changes and checkpoint each completed outcome."""
         async with self._sync_lock:
             applied: list[dict[str, Any]] = []
             rejected: list[dict[str, Any]] = []
@@ -241,6 +242,7 @@ class ShoppingService:
 
             self._state.set_pending_shopping_changes(valid_changes)
             pending_changes = self._state.pending_shopping_changes()
+            change_keys = list(pending_changes)
             changes_to_apply = list(pending_changes.values())
             bulk_completed = [
                 (idx, change)
@@ -272,6 +274,9 @@ class ShoppingService:
                             "data": {"id": entry_id, "checked": True},
                         }
                     )
+                self._state.clear_pending_shopping_changes(
+                    {change_keys[idx]: pending_changes[change_keys[idx]] for idx, _ in bulk_completed}
+                )
 
             for idx, change in enumerate(changes_to_apply):
                 if idx in bulk_indexes and len(bulk_completed) > 1:
@@ -353,7 +358,9 @@ class ShoppingService:
                 except (TandoorError, ValueError) as exc:
                     rejected.append({"index": idx, "reason": str(exc)})
 
-            self._state.clear_pending_shopping_changes(pending_changes)
+                self._state.clear_pending_shopping_changes(
+                    {change_keys[idx]: pending_changes[change_keys[idx]]}
+                )
             return {
                 "deferred": False,
                 "applied": applied,
