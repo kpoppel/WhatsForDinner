@@ -15,6 +15,8 @@ from app.models.contracts import (
     MealPlanEntryPatchRequest,
     MealPlanPatchRequest,
     MealPlanRulesRequest,
+    RecipeUseDateRequest,
+    RecipeUseRequest,
     SetSelectedKeywordsRequest,
     SettingsRequest,
     ShoppingEntryCreateRequest,
@@ -27,7 +29,7 @@ from app.services.meal_plan_service import MealPlanService
 from app.services.ocr_client import GeminiOcrClient, OcrError
 from app.services.shopping_service import ShoppingService
 from app.services.server_state import ServerState
-from app.services.tandoor_client import TandoorClient, TandoorError
+from app.services.tandoor_client import TandoorClient, TandoorError, TandoorNotFound
 
 router = APIRouter(tags=["mobile-api"])
 logger = logging.getLogger(__name__)
@@ -643,6 +645,139 @@ async def recipes(
         return {"source": "tandoor", "data": data}
     except TandoorError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/recipes/find")
+async def find_recipes(
+    mode: str = Query(default="name", pattern="^(name|ingredients)$"),
+    search: str = "",
+    food_ids: list[int] | None = Query(default=None),
+    keywords_only: bool = False,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> dict:
+    """Rank exact any-food matches globally before paginating the result."""
+    selected = sorted(set(food_ids)) if food_ids is not None else []
+    if mode == "ingredients" and not selected:
+        return {"count": 0, "results": []}
+    if any(food_id <= 0 for food_id in selected):
+        raise HTTPException(status_code=422, detail="food_ids must be positive.")
+    keyword_ids = server_state.selected_keywords() if keywords_only else None
+    try:
+        if mode == "name":
+            if not search.strip():
+                data = await client.list_recipes(limit=page_size, page=page, keyword_ids=keyword_ids)
+                return {"count": data["count"], "results": [
+                    {"id": row["id"], "title": row["name"], "match_count": 0}
+                    for row in data["results"]
+                ]}
+            named: list[dict] = []
+            upstream_page = 1
+            while True:
+                data = await client.list_recipes(
+                    search=search.strip(), limit=100, page=upstream_page, keyword_ids=keyword_ids,
+                )
+                named.extend(
+                    {"id": row["id"], "title": row["name"], "match_count": 0}
+                    for row in data["results"] if search.strip().casefold() in row["name"].casefold()
+                )
+                if data["next"] is None:
+                    break
+                upstream_page += 1
+            offset = (page - 1) * page_size
+            return {"count": len(named), "results": named[offset:offset + page_size]}
+
+        for food_id in selected:
+            try:
+                await client.get_food(food_id)
+            except TandoorNotFound as exc:
+                raise HTTPException(status_code=422, detail=f"Unknown food ID: {food_id}.") from exc
+        matches: dict[int, dict] = {}
+        for food_id in selected:
+            upstream_page = 1
+            while True:
+                data = await client.list_recipes(
+                    limit=100, page=upstream_page, keyword_ids=keyword_ids,
+                    food_ids=[food_id],
+                )
+                for row in data["results"]:
+                    recipe_id = row["id"]
+                    if recipe_id not in matches:
+                        matches[recipe_id] = {"id": recipe_id, "title": row["name"], "match_count": 0}
+                    matches[recipe_id]["match_count"] += 1
+                if data["next"] is None:
+                    break
+                upstream_page += 1
+        ranked = sorted(matches.values(), key=lambda row: (-row["match_count"], row["title"], row["id"]))
+        offset = (page - 1) * page_size
+        return {"count": len(ranked), "results": ranked[offset:offset + page_size]}
+    except TandoorError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/recipe-foods")
+async def recipe_foods(search: str = Query(min_length=1)) -> dict:
+    """Autocomplete foods using Tandoor's own IDs and names."""
+    try:
+        data = await client.list_foods(search)
+        return {"results": [{"id": row["id"], "name": row["name"]} for row in data["results"]]}
+    except TandoorError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+async def _recipe_use_view(record: dict) -> dict:
+    """Resolve display titles without storing names as recipe identity."""
+    recipe = await client.get_recipe(record["recipe_id"])
+    return {
+        **record,
+        "title": recipe["name"],
+        "exclusion_until": (
+            date.fromisoformat(record["used_date"])
+            + timedelta(days=server_state.meal_plan_rules()["no_repeat_days"])
+        ).isoformat(),
+    }
+
+
+@router.get("/recipe-uses")
+async def list_recipe_uses() -> dict:
+    """Return the global no-repeat review, pruning expired records on access."""
+    try:
+        return {"results": [await _recipe_use_view(item) for item in server_state.list_recipe_uses()]}
+    except TandoorError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/recipe-uses")
+async def add_recipe_use(payload: RecipeUseRequest = Body(...)) -> dict:
+    """Manually exclude a known recipe using the server's local date."""
+    try:
+        await client.get_recipe(payload.recipe_id)
+    except TandoorNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recipe not found.") from exc
+    except TandoorError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if server_state.meal_plan_rules()["no_repeat_days"] == 0:
+        raise HTTPException(status_code=409, detail="Don't Repeat is disabled in Settings.")
+    return {"data": server_state.set_recipe_use(payload.recipe_id, date.today())}
+
+
+@router.put("/recipe-uses/{recipe_id}")
+async def edit_recipe_use(recipe_id: int, payload: RecipeUseDateRequest = Body(...)) -> dict:
+    """Change the record's date without changing its originating plan."""
+    record = next((row for row in server_state.list_recipe_uses() if row["recipe_id"] == recipe_id), None)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Recipe exclusion not found.")
+    return {"data": server_state.set_recipe_use(
+        recipe_id, payload.used_date, record["source"], record["plan_id"], record["entry_id"],
+    )}
+
+
+@router.delete("/recipe-uses/{recipe_id}")
+async def delete_recipe_use(recipe_id: int) -> dict:
+    """Remove a recipe exclusion explicitly."""
+    if not server_state.remove_recipe_use(recipe_id):
+        raise HTTPException(status_code=404, detail="Recipe exclusion not found.")
+    return {"removed": recipe_id}
 
 
 @router.get("/recipe-tags")

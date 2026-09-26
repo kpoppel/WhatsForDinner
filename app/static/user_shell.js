@@ -7,6 +7,7 @@ import { apiReachable, browserOnline, isOnline, syncing } from "./js/selectors/c
     settings: { title: "Settings" },
     "meal-plans": { title: "Saved Meal Plans" },
     "meal-plan-detail": { title: "Meal Plan Schedule" },
+    recipes: { title: "Recipes" },
     "shop-editor": { title: "Shopping List Editor" },
     "shopping-mode": { title: "🛒 Shopping Mode" },
   };
@@ -29,6 +30,7 @@ import { apiReachable, browserOnline, isOnline, syncing } from "./js/selectors/c
   }
 
   let activeTab = "home";
+  let reviewReturnTab = "recipes";
   // Shopping happens away from home, where the network can change without any
   // browser event, so the server is re-probed on a short fixed cadence rather
   // than backing off. Probing is suspended while the page is hidden to keep the
@@ -166,6 +168,7 @@ import { apiReachable, browserOnline, isOnline, syncing } from "./js/selectors/c
 
     const isShoppingMode = nextTab === "shopping-mode";
     const isMealPlanDetail = nextTab === "meal-plan-detail";
+    const isPlanReview = nextTab === "recipes" && reviewReturnTab === "meal-plans";
     shell.classList.toggle("in-shopping-mode", isShoppingMode);
     bottomNav.hidden = isShoppingMode;
     settingsButton.hidden = isShoppingMode;
@@ -174,7 +177,7 @@ import { apiReachable, browserOnline, isOnline, syncing } from "./js/selectors/c
       exitButton.hidden = false;
       exitButton.textContent = "← Exit";
       exitButton.setAttribute("aria-label", "Exit shopping mode");
-    } else if (isMealPlanDetail) {
+    } else if (isMealPlanDetail || isPlanReview) {
       exitButton.hidden = false;
       exitButton.textContent = "<- Back";
       exitButton.setAttribute("aria-label", "Back to meal plans");
@@ -187,15 +190,33 @@ import { apiReachable, browserOnline, isOnline, syncing } from "./js/selectors/c
     for (const control of shoppingControls) {
       control.hidden = !isShoppingMode;
     }
+    window.dispatchEvent(new CustomEvent("wfd:tab-changed", { detail: { tab: nextTab } }));
   }
 
   for (const button of navButtons) {
     button.addEventListener("click", () => {
+      if (button.dataset.tab === "recipes") {
+        reviewReturnTab = "recipes";
+      }
       setActiveTab(String(button.dataset.tab || ""));
+      if (button.dataset.tab === "recipes") {
+        window.dispatchEvent(new CustomEvent("wfd:open-recipe-search"));
+      }
     });
   }
 
+  document.getElementById("wf-plan-review-btn").addEventListener("click", () => {
+    reviewReturnTab = "meal-plans";
+    setActiveTab("recipes");
+    window.dispatchEvent(new CustomEvent("wfd:open-recipe-review"));
+  });
+
   exitButton.addEventListener("click", () => {
+    if (activeTab === "recipes" && reviewReturnTab === "meal-plans") {
+      reviewReturnTab = "recipes";
+      setActiveTab("meal-plans");
+      return;
+    }
     if (activeTab === "meal-plan-detail") {
       setActiveTab("meal-plans");
       return;

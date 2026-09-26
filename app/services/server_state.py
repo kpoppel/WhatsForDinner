@@ -196,18 +196,63 @@ class ServerState:
             "selected_keyword_ids": keyword_ids,
         }
 
-    def _record_recipe_uses(self, data: dict[str, Any], plan_id: int, plan: dict[str, Any]) -> None:
-        """Append unique recipe-use events from the plan without removing historical records."""
+    def list_recipe_uses(self) -> list[dict[str, Any]]:
+        """Return current exclusions and prune expired uses on access."""
+        with self._lock:
+            data = self._load()
+            self._prune_recipe_use_history(data)
+            if data["recipe_use_history"] != self._data["recipe_use_history"]:
+                self._save(data)
+            return data["recipe_use_history"]
+
+    def set_recipe_use(
+        self, recipe_id: int, used_date: date, source: str = "manual",
+        plan_id: int | None = None, entry_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Explicitly set the last use date without editing a saved plan."""
+        record = {
+            "recipe_id": recipe_id, "used_date": used_date.isoformat(),
+            "source": source, "plan_id": plan_id, "entry_id": entry_id,
+        }
+        with self._lock:
+            data = self._load()
+            data["recipe_use_history"] = [
+                item for item in data["recipe_use_history"] if item["recipe_id"] != recipe_id
+            ]
+            data["recipe_use_history"].append(record)
+            self._prune_recipe_use_history(data)
+            self._save(data)
+        return record
+
+    def remove_recipe_use(self, recipe_id: int) -> bool:
+        """Remove an exclusion without changing its original plan entry."""
+        with self._lock:
+            data = self._load()
+            before = len(data["recipe_use_history"])
+            data["recipe_use_history"] = [
+                item for item in data["recipe_use_history"] if item["recipe_id"] != recipe_id
+            ]
+            if len(data["recipe_use_history"]) == before:
+                return False
+            self._save(data)
+            return True
+
+    def _record_recipe_uses(
+        self, data: dict[str, Any], plan_id: int, plan: dict[str, Any],
+        previous: dict[str, Any] | None = None,
+    ) -> None:
+        """Register only new or rescheduled uses; unchanged entries stay removed."""
         self._prune_recipe_use_history(data)
+        previous_uses: set[tuple[int, str, int]] = set()
+        if previous is not None:
+            for old_entry in previous.get("entries", []):
+                for old_recipe in old_entry.get("recipes", []):
+                    previous_uses.add((old_recipe["id"], old_entry["date"], old_entry["entry_id"]))
         entries = plan.get("entries")
         if not isinstance(entries, list):
             return
 
         history = data["recipe_use_history"]
-        existing_uses = {
-            (item["recipe_id"], item["used_date"], item["plan_id"], item["entry_id"])
-            for item in history
-        }
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
@@ -229,18 +274,17 @@ class ServerState:
                 recipe_id = recipe.get("id")
                 if not isinstance(recipe_id, int):
                     continue
-                recipe_use = (recipe_id, used_date, plan_id, entry_id)
-                if recipe_use in existing_uses:
+                if (recipe_id, used_date, entry_id) in previous_uses:
                     continue
-                history.append(
-                    {
-                        "recipe_id": recipe_id,
-                        "used_date": used_date,
-                        "plan_id": plan_id,
-                        "entry_id": entry_id,
-                    }
-                )
-                existing_uses.add(recipe_use)
+                current = next((item for item in history if item["recipe_id"] == recipe_id), None)
+                if current is not None and current["used_date"] >= used_date:
+                    continue
+                if current is not None:
+                    history.remove(current)
+                history.append({
+                    "recipe_id": recipe_id, "used_date": used_date, "source": "plan",
+                    "plan_id": plan_id, "entry_id": entry_id,
+                })
 
     def create_meal_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
@@ -274,9 +318,10 @@ class ServerState:
             current = data["meal_plans"].get(key)
             if current is None:
                 return None
+            previous = deepcopy(current)
             current.update(payload)
             data["meal_plans"][key] = current
-            self._record_recipe_uses(data, plan_id, current)
+            self._record_recipe_uses(data, plan_id, current, previous)
             self._save(data)
             return deepcopy(current)
 

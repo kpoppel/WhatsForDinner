@@ -11,6 +11,10 @@ class TandoorError(RuntimeError):
     """Raised when Tandoor cannot be reached or returns an error."""
 
 
+class TandoorNotFound(TandoorError):
+    """Raised when Tandoor reports that a requested resource does not exist."""
+
+
 class TandoorClient:
     def __init__(self) -> None:
         self.base_url = settings.tandoor_base_url.rstrip("/")
@@ -52,7 +56,8 @@ class TandoorClient:
         except httpx.HTTPStatusError as exc:
             body = exc.response.text.strip()
             body_snippet = body[:300] if body else ""
-            raise TandoorError(
+            error_type = TandoorNotFound if exc.response.status_code == 404 else TandoorError
+            raise error_type(
                 f"Tandoor returned {exc.response.status_code} for {path}."
                 + (f" Response: {body_snippet}" if body_snippet else "")
             ) from exc
@@ -68,6 +73,7 @@ class TandoorClient:
         limit: int = 20,
         page: int | None = None,
         keyword_ids: list[int] | None = None,
+        food_ids: list[int] | None = None,
     ) -> Any:
         params: dict[str, Any] = {"page_size": limit}
         if page is not None:
@@ -76,7 +82,17 @@ class TandoorClient:
             params["query"] = search
         if keyword_ids:
             params["keywords"] = keyword_ids
+        if food_ids:
+            params["foods"] = food_ids
         return await self._get("/api/recipe/", params=params)
+
+    async def list_foods(self, search: str, limit: int = 20) -> Any:
+        """Find Tandoor foods with their stable food IDs."""
+        return await self._get("/api/food/", params={"query": search, "page_size": limit})
+
+    async def get_food(self, food_id: int) -> Any:
+        """Look up one food to validate its ID before recipe search."""
+        return await self._get(f"/api/food/{food_id}/")
 
     async def get_recipe(self, recipe_id: int) -> Any:
         return await self._get(f"/api/recipe/{recipe_id}/")

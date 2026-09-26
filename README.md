@@ -7,9 +7,11 @@ FastAPI backend for a mobile app that proxies recipe and shopping list data from
 - REST endpoints for mobile clients
 - Tandoor integration via configurable base URL and token
 - Browser inspection UI at `/inspect` to quickly test endpoints
-- Stage 2 user app at `/app` with four sections: configuration, quick 1-day meal planning, multi-day meal planning, and shopping list handling
+- User app at `/app` with Home, Meal Plans, Shop Editor, Shopping Mode, and Recipes navigation. Recipes supports name search, exact Tandoor food-ID ingredient search, and one shared Don't Repeat review also available from Meal Plans.
 - Offline-friendly shopping sync endpoints with cursor-based change feeds
 - OpenAPI docs at `/docs` and versioned docs at `/api/v1/docs`
+
+Recipe search uses `/api/v1/recipes/find` and food autocomplete uses `/api/v1/recipe-foods`. The managed no-repeat list at `/api/v1/recipe-uses` keeps the latest use date per recipe, including uses from deleted plans; `no_repeat_days = 0` clears it. New plan days selected from Recipes must follow the last saved day.
 
 ## Architecture guardrails
 

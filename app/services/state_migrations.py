@@ -378,6 +378,19 @@ def _migrate_v18_to_v19(payload: dict[str, Any]) -> dict[str, Any]:
     return next_payload
 
 
+def _migrate_v19_to_v20(payload: dict[str, Any]) -> dict[str, Any]:
+    """Collapse historical events into the latest use per recipe."""
+    next_payload = deepcopy(payload)
+    latest: dict[int, dict[str, Any]] = {}
+    for item in next_payload["recipe_use_history"]:
+        recipe_id = item["recipe_id"]
+        if recipe_id not in latest or item["used_date"] > latest[recipe_id]["used_date"]:
+            latest[recipe_id] = {**item, "source": "plan"}
+    next_payload["recipe_use_history"] = list(latest.values())
+    next_payload["schema_version"] = 20
+    return next_payload
+
+
 def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
     payload = deepcopy(raw)
 
@@ -456,6 +469,10 @@ def migrate_and_validate_state(raw: dict[str, Any]) -> dict[str, Any]:
 
     if schema_version == 18:
         payload = _migrate_v18_to_v19(payload)
+        schema_version = payload.get("schema_version")
+
+    if schema_version == 19:
+        payload = _migrate_v19_to_v20(payload)
         schema_version = payload.get("schema_version")
 
     if schema_version != CURRENT_STATE_SCHEMA_VERSION:

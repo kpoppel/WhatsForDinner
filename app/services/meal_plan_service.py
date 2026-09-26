@@ -90,37 +90,11 @@ class MealPlanService:
         return sorted(set(ids))
 
     def _collect_recipe_history_dates(self) -> dict[int, list[date]]:
-        history: dict[int, list[date]] = {}
-        for plan in self._state.list_meal_plans():
-            entries = plan.get("entries")
-            if not isinstance(entries, list):
-                continue
-
-            for entry in entries:
-                if not isinstance(entry, dict):
-                    continue
-                date_value = entry.get("date")
-                if not isinstance(date_value, str):
-                    continue
-                try:
-                    entry_date = date.fromisoformat(date_value)
-                except ValueError:
-                    continue
-
-                recipes = entry.get("recipes")
-                if not isinstance(recipes, list):
-                    continue
-                for recipe in recipes:
-                    if not isinstance(recipe, dict):
-                        continue
-                    recipe_id = recipe.get("id")
-                    if isinstance(recipe_id, int):
-                        history.setdefault(recipe_id, []).append(entry_date)
-
-        for recipe_id, dates in history.items():
-            dates.sort()
-            history[recipe_id] = dates
-        return history
+        """Read persisted exclusions, including uses from deleted plans."""
+        return {
+            item["recipe_id"]: [date.fromisoformat(item["used_date"])]
+            for item in self._state.list_recipe_uses()
+        }
 
     def _is_within_no_repeat_window(
         self,
@@ -133,9 +107,7 @@ class MealPlanService:
             return False
 
         for seen_date in history_dates.get(recipe_id, []):
-            if seen_date >= candidate_date:
-                break
-            if (candidate_date - seen_date).days <= no_repeat_days:
+            if seen_date >= candidate_date or (candidate_date - seen_date).days <= no_repeat_days:
                 return True
         return False
 
@@ -165,6 +137,17 @@ class MealPlanService:
             if start_day is not None:
                 row["date"] = (start_day + timedelta(days=idx)).isoformat()
         return normalized
+
+    def _has_custom_plan_dates(self, plan: dict[str, Any]) -> bool:
+        """Identify a date gap intentionally chosen when adding a plan day."""
+        try:
+            start_day = date.fromisoformat(str(plan["start_date"]))
+        except (KeyError, ValueError):
+            return False
+        return any(
+            row["date"] != (start_day + timedelta(days=row["day_index"])).isoformat()
+            for row in plan["entries"]
+        )
 
     def _enrich_plan_recipe_urls(self, plan: dict[str, Any] | None) -> dict[str, Any] | None:
         if not isinstance(plan, dict):
@@ -875,15 +858,26 @@ class MealPlanService:
             entries = plan.get("entries")
             if not isinstance(entries, list):
                 entries = []
+            preserve_dates = self._has_custom_plan_dates(plan)
 
             day_index = int(payload.get("day_index") if payload.get("day_index") is not None else len(entries))
             entry_date = payload.get("date")
-            if not isinstance(entry_date, str):
+            if isinstance(entry_date, str):
                 try:
-                    start_day = date.fromisoformat(str(plan.get("start_date")))
-                except ValueError:
-                    start_day = date.today()
-                entry_date = (start_day + timedelta(days=day_index)).isoformat()
+                    chosen_date = date.fromisoformat(entry_date)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD.") from exc
+                if entries and chosen_date <= max(date.fromisoformat(row["date"]) for row in entries):
+                    raise HTTPException(status_code=400, detail="New day must follow the last saved day.")
+            else:
+                if preserve_dates and entries:
+                    entry_date = (max(date.fromisoformat(row["date"]) for row in entries) + timedelta(days=1)).isoformat()
+                else:
+                    try:
+                        start_day = date.fromisoformat(str(plan.get("start_date")))
+                    except ValueError:
+                        start_day = date.today()
+                    entry_date = (start_day + timedelta(days=day_index)).isoformat()
 
             mode = str(payload.get("mode") or "planned")
             recipes = payload.get("recipes") if isinstance(payload.get("recipes"), list) else []
@@ -902,7 +896,7 @@ class MealPlanService:
             }
 
             entries.append(entry)
-            entries = self._normalize_plan_entries(entries, plan.get("start_date"))
+            entries = self._normalize_plan_entries(entries, None if "date" in payload or preserve_dates else plan.get("start_date"))
 
             updated = self._state.update_meal_plan(
                 plan_id,
@@ -1051,7 +1045,9 @@ class MealPlanService:
             if len(entries) == before:
                 raise HTTPException(status_code=404, detail="Meal plan entry not found.")
 
-            entries = self._normalize_plan_entries(entries, plan.get("start_date"))
+            entries = self._normalize_plan_entries(
+                entries, None if self._has_custom_plan_dates(plan) else plan.get("start_date")
+            )
             updated = self._state.update_meal_plan(
                 plan_id,
                 {

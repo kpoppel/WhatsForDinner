@@ -105,6 +105,80 @@ def use_temp_state(monkeypatch, tmp_path):
     return state
 
 
+def test_recipe_food_search_ranks_any_match_before_paging(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    class FoodClient:
+        async def get_food(self, food_id):
+            assert food_id in {10, 20}
+            return {"id": food_id}
+
+        async def list_recipes(self, search=None, limit=20, page=None, keyword_ids=None, food_ids=None):
+            rows = {10: [{"id": 1, "name": "Alpha"}, {"id": 2, "name": "Beta"}],
+                    20: [{"id": 2, "name": "Beta"}, {"id": 3, "name": "Gamma"}]}
+            return {"results": rows[food_ids[0]], "next": None}
+
+    monkeypatch.setattr("app.api.client", FoodClient())
+    response = client.get("/api/v1/recipes/find", params={
+        "mode": "ingredients", "food_ids": [10, 20], "page_size": 1, "page": 1,
+    })
+    assert response.status_code == 200
+    assert response.json() == {"count": 3, "results": [{"id": 2, "title": "Beta", "match_count": 2}]}
+    second = client.get("/api/v1/recipes/find", params={
+        "mode": "ingredients", "food_ids": [10, 20], "page_size": 1, "page": 2,
+    })
+    assert second.json()["results"] == [{"id": 1, "title": "Alpha", "match_count": 1}]
+
+
+def test_recipe_name_search_filters_ingredient_only_hits_before_paging(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+
+    class SearchClient:
+        async def list_recipes(self, search=None, limit=20, page=None, keyword_ids=None):
+            rows = {1: [{"id": 1, "name": "Tomato Soup"}, {"id": 2, "name": "Bean Soup"}],
+                    2: [{"id": 3, "name": "Tomato Salad"}]}
+            return {"results": rows[page], "next": "next" if page == 1 else None}
+
+    monkeypatch.setattr("app.api.client", SearchClient())
+    response = client.get("/api/v1/recipes/find", params={
+        "mode": "name", "search": "tomato", "page": 2, "page_size": 1,
+    })
+    assert response.json() == {"count": 2, "results": [
+        {"id": 3, "title": "Tomato Salad", "match_count": 0},
+    ]}
+
+
+def test_recipe_use_api_manages_one_record(monkeypatch, tmp_path) -> None:
+    state = use_temp_state(monkeypatch, tmp_path)
+
+    class RecipeClient:
+        async def get_recipe(self, recipe_id):
+            return {"id": recipe_id, "name": "Pasta"}
+
+    monkeypatch.setattr("app.api.client", RecipeClient())
+    added = client.post("/api/v1/recipe-uses", json={"recipe_id": 11})
+    assert added.status_code == 200
+    future = (date.today() + timedelta(days=3)).isoformat()
+    edited = client.put("/api/v1/recipe-uses/11", json={"used_date": future})
+    assert edited.status_code == 200
+    assert client.get("/api/v1/recipe-uses").json()["results"][0]["exclusion_until"] == (date.today() + timedelta(days=33)).isoformat()
+    assert client.delete("/api/v1/recipe-uses/11").status_code == 200
+    assert state.list_recipe_uses() == []
+
+
+def test_recipe_food_search_rejects_unknown_food(monkeypatch, tmp_path) -> None:
+    use_temp_state(monkeypatch, tmp_path)
+    from app.services.tandoor_client import TandoorNotFound
+
+    class MissingFoodClient:
+        async def get_food(self, food_id):
+            raise TandoorNotFound("Food not found.")
+
+    monkeypatch.setattr("app.api.client", MissingFoodClient())
+    response = client.get("/api/v1/recipes/find", params={"mode": "ingredients", "food_ids": 999999})
+    assert response.status_code == 422
+
+
 class MealPlanShoppingStatefulClient:
     def __init__(self) -> None:
         self.entries: dict[int, dict] = {}
@@ -997,6 +1071,7 @@ def test_stage2_patch_meal_plan_start_date_rebases_entries(monkeypatch, tmp_path
 
 def test_stage2_no_repeat_blocks_recent_recipe(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
+    first_day = date.today()
 
     class FakeClient(MealPlanRowStatefulClient):
         async def list_recipes(self, search=None, limit=20, keyword_ids=None):
@@ -1008,7 +1083,7 @@ def test_stage2_no_repeat_blocks_recent_recipe(monkeypatch, tmp_path) -> None:
     first = client.post(
         "/api/v1/meal-plans/generate",
         json={
-            "start_date": "2026-08-01",
+            "start_date": first_day.isoformat(),
             "length_days": 1,
             "diners": 2,
         },
@@ -1019,7 +1094,7 @@ def test_stage2_no_repeat_blocks_recent_recipe(monkeypatch, tmp_path) -> None:
     second = client.post(
         "/api/v1/meal-plans/generate",
         json={
-            "start_date": "2026-08-10",
+            "start_date": (first_day + timedelta(days=9)).isoformat(),
             "length_days": 1,
             "diners": 2,
         },

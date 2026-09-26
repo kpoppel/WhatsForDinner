@@ -16,6 +16,18 @@ class SetSelectedKeywordsRequest(BaseModel):
     keyword_ids: list[int]
 
 
+class RecipeUseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recipe_id: int = Field(gt=0)
+
+
+class RecipeUseDateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    used_date: date
+
+
 class MealPlanRulesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

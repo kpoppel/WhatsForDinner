@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from fastapi import HTTPException
@@ -237,21 +237,47 @@ def build_shopping_view(entries: list[dict]) -> dict:
     return {"count": len(entries)}
 
 
+def test_new_dated_day_keeps_chosen_date_after_later_plan_edits(tmp_path) -> None:
+    state = ServerState(str(tmp_path))
+    first_day = date.today()
+    first_entry_id = state.allocate_entry_id()
+    plan = state.create_meal_plan({
+        "start_date": first_day.isoformat(), "length_days": 1, "diners": 2,
+        "entries": [{
+            "entry_id": first_entry_id, "day_index": 0, "date": first_day.isoformat(),
+            "recipes": [], "mode": "empty",
+        }],
+    })
+    service = MealPlanService(state, FakeMealClient())
+    chosen = (first_day + timedelta(days=8)).isoformat()
+    created = asyncio.run(service.add_entry(plan["plan_id"], {
+        "date": chosen, "mode": "planned",
+        "recipes": [{"id": 11, "title": "Roast Veg", "purpose": "meal"}],
+    }))
+    assert created["data"]["entries"][-1]["date"] == chosen
+    assert state.list_recipe_uses()[0]["used_date"] == chosen
+    asyncio.run(service.add_entry(plan["plan_id"], {"mode": "empty"}))
+    assert state.get_meal_plan(plan["plan_id"])["entries"][-1]["date"] == (first_day + timedelta(days=9)).isoformat()
+    asyncio.run(service.delete_entry(plan["plan_id"], 1))
+    assert state.get_meal_plan(plan["plan_id"])["entries"][0]["date"] == chosen
+
+
 def test_generate_plan_reuses_constraints_and_entries(tmp_path, monkeypatch) -> None:
     state = ServerState(str(tmp_path))
     service = MealPlanService(state, FakeMealClient())
+    first_day = date.today()
 
     # Existing plan history should prevent immediate repeat when no_repeat_days is active.
     state.create_meal_plan(
         {
-            "start_date": "2026-08-01",
+            "start_date": first_day.isoformat(),
             "length_days": 1,
             "diners": 2,
             "entries": [
                 {
                     "entry_id": 1,
                     "day_index": 0,
-                    "date": "2026-08-01",
+                    "date": first_day.isoformat(),
                     "mode": "planned",
                     "recipes": [{"id": 11, "title": "Roast Veg", "purpose": "meal"}],
                     "servings": 2,
@@ -270,7 +296,7 @@ def test_generate_plan_reuses_constraints_and_entries(tmp_path, monkeypatch) -> 
 
     result = asyncio.run(
         service.generate_plan(
-            start_day=date(2026, 8, 10),
+            start_day=first_day + timedelta(days=9),
             length_days=3,
             diners=4,
             constraints={"leftover_days": [2], "takeout_days": [3], "empty_days": []},

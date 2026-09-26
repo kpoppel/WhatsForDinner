@@ -2072,6 +2072,15 @@ import { readMealPlanCache } from "./js/store/selectors.js";
     }
   });
 
+  window.addEventListener("wfd:data-changed", (event) => {
+    if (event.detail.source === "recipes") {
+      void runAction(async () => {
+        await refreshPlans();
+        await reloadSelectedPlan();
+      });
+    }
+  });
+
   window.addEventListener("wfd:open-meal-editor", (event) => {
     const detail = event instanceof CustomEvent ? event.detail : null;
     if (!detail || typeof detail !== "object") {

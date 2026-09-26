@@ -90,6 +90,7 @@
       <section id="wf-tab-meal-plans" class="wf-tab" data-tab-panel="meal-plans" aria-label="Meal Plans" hidden>
         <section class="wf-plan-toolbar">
           <button id="wf-plan-generate-btn" class="wf-btn wf-btn-blue" type="button" data-online-behavior="disable" data-offline-title="Offline: generation is unavailable.">+ Generate New Meal Plan</button>
+          <button id="wf-plan-review-btn" class="wf-btn wf-btn-outline" type="button">Don't Repeat</button>
         </section>
 
         <p id="wf-plan-status" class="wf-plan-status" aria-live="polite"></p>
@@ -114,6 +115,35 @@
             </div>
           </div>
           <section id="wf-plan-detail" class="wf-plan-detail" aria-label="Selected meal plan detail"></section>
+        </section>
+      </section>
+
+      <section id="wf-tab-recipes" class="wf-tab" data-tab-panel="recipes" aria-label="Recipes" hidden>
+        <div class="wf-segment wf-recipes-tabs" role="tablist" aria-label="Recipes views">
+          <button id="wf-recipes-search-tab" class="wf-segment-btn is-active" type="button" role="tab" aria-selected="true">Search</button>
+          <button id="wf-recipes-review-tab" class="wf-segment-btn" type="button" role="tab" aria-selected="false">Don't Repeat</button>
+        </div>
+        <section id="wf-recipes-search-view">
+          <form id="wf-recipes-form" class="wf-recipes-search-row">
+            <input id="wf-recipes-query" type="search" aria-label="Search recipes" placeholder="Search recipe names" />
+            <button id="wf-recipes-name" class="wf-recipes-icon is-active" type="button" aria-label="Search by name" title="Search by name" aria-pressed="true">A</button>
+            <button id="wf-recipes-ingredients" class="wf-recipes-icon" type="button" aria-label="Search by ingredients" title="Search by ingredients" aria-pressed="false">◫</button>
+          </form>
+          <div id="wf-recipes-food-options" class="wf-recipes-options" role="listbox" aria-label="Food matches" hidden></div>
+          <div id="wf-recipes-food-tokens" class="wf-recipes-tokens"></div>
+          <label class="wf-recipes-keywords"><input id="wf-recipes-keywords" type="checkbox" /> Selected meal plan keywords only</label>
+          <p id="wf-recipes-status" class="wf-plan-status" role="status" aria-live="polite"></p>
+          <div id="wf-recipes-results" class="wf-recipes-list"></div>
+          <div class="wf-recipes-pages">
+            <button id="wf-recipes-prev" class="wf-btn wf-btn-outline" type="button" disabled>Previous</button>
+            <span id="wf-recipes-page-label"></span>
+            <button id="wf-recipes-next" class="wf-btn wf-btn-outline" type="button" disabled>Next</button>
+          </div>
+        </section>
+        <section id="wf-recipes-review-view" hidden>
+          <p id="wf-recipes-review-status" class="wf-plan-status" role="status" aria-live="polite"></p>
+          <div id="wf-recipes-review-list" class="wf-recipes-list"></div>
+          <button id="wf-recipes-review-add" class="wf-btn wf-btn-outline" type="button">Add recipe</button>
         </section>
       </section>
 
@@ -163,6 +193,10 @@
         <span class="wf-nav-icon">🏠</span>
         <span>Home</span>
       </button>
+      <button class="wf-nav-btn" data-tab="recipes" type="button">
+        <span class="wf-nav-icon">♨</span>
+        <span>Recipes</span>
+      </button>
       <button class="wf-nav-btn" data-tab="meal-plans" type="button">
         <span class="wf-nav-icon">📅</span>
         <span>Meal Plans</span>
@@ -177,6 +211,20 @@
       </button>
     </nav>
   </main>
+
+  <div id="wf-recipe-plan-modal" class="wf-modal" hidden>
+    <form id="wf-recipe-plan-form" class="wf-modal-card" role="dialog" aria-modal="true" aria-labelledby="wf-recipe-plan-title">
+      <h2 id="wf-recipe-plan-title">Add to meal plan</h2>
+      <label class="wf-field">Saved plan <select id="wf-recipe-plan-select" required></select></label>
+      <label class="wf-field">Day <select id="wf-recipe-day-select" required></select></label>
+      <label class="wf-field" id="wf-recipe-date-field" hidden>Date <input id="wf-recipe-date" type="date" /></label>
+      <p id="wf-recipe-plan-status" class="wf-plan-status" role="status"></p>
+      <div class="wf-modal-actions">
+        <button id="wf-recipe-plan-cancel" class="wf-btn wf-btn-outline" type="button">Cancel</button>
+        <button class="wf-btn wf-btn-blue" type="submit">Add recipe</button>
+      </div>
+    </form>
+  </div>
 
   <div id="wf-editor-add-modal" class="wf-modal" hidden>
     <div class="wf-modal-card" role="dialog" aria-modal="true" aria-labelledby="wf-editor-add-title">
