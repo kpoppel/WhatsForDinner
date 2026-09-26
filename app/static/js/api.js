@@ -8,6 +8,7 @@ const apiPrefix = window.WFD_API_PREFIX;
 const DEFAULT_TIMEOUT_MS = 8000;
 const HEALTH_TIMEOUT_MS = 4000;
 const UPLOAD_TIMEOUT_MS = 120000;
+const CHAT_TIMEOUT_MS = 60000;
 
 // Gateway-level failures mean the app server is not answering, which is an
 // availability problem rather than a request the server rejected on purpose.
@@ -108,6 +109,13 @@ export async function apiUpload(path, formData) {
     method: "POST",
     body: formData,
   }, UPLOAD_TIMEOUT_MS);
+}
+
+export async function apiChat(path, options) {
+  return await request(path, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  }, CHAT_TIMEOUT_MS);
 }
 
 export async function health() {

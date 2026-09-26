@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import date
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -26,6 +26,32 @@ class RecipeUseDateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     used_date: date
+
+
+class RecipeChatMessage(BaseModel):
+    """One turn in a recipe-idea conversation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "model"]
+    content: str = Field(min_length=1, max_length=2000)
+
+
+class RecipeChatRequest(BaseModel):
+    """Bounded conversation ending in the user's current question."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    messages: list[RecipeChatMessage] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_turns(self) -> "RecipeChatRequest":
+        if self.messages[-1].role != "user" or any(
+            message.role != ("user" if index % 2 == 0 else "model")
+            for index, message in enumerate(self.messages)
+        ):
+            raise ValueError("messages must alternate user and model turns, ending with user.")
+        return self
 
 
 class MealPlanRulesRequest(BaseModel):

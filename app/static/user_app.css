@@ -438,11 +438,82 @@ body {
 
 .wf-recipes-tabs {
   display: flex;
+  width: 100%;
   margin-bottom: 0.75rem;
 }
 
 .wf-recipes-tabs .wf-segment-btn {
   flex: 1;
+}
+
+.wf-recipes-chat-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.wf-recipes-chat-heading h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.wf-recipes-chat-messages {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+  min-height: 180px;
+  max-height: min(48vh, 410px);
+  overflow-y: auto;
+  padding: 0.65rem 0;
+  border-block: 1px solid var(--wf-line);
+}
+
+.wf-recipes-chat-message {
+  padding: 0.7rem;
+  border-radius: 6px;
+  background: var(--wf-panel);
+  overflow-wrap: anywhere;
+}
+
+.wf-recipes-chat-user {
+  background: #e6f2e7;
+  margin-left: 1.5rem;
+}
+
+.wf-recipes-chat-message strong {
+  font-size: 0.8rem;
+}
+
+.wf-recipes-chat-message p {
+  margin: 0.35rem 0 0;
+  white-space: pre-wrap;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.wf-recipes-chat-form {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.wf-recipes-chat-form label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.wf-recipes-chat-form textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--wf-line);
+  border-radius: 6px;
+  padding: 0.65rem;
+  font: inherit;
+}
+
+.wf-recipes-chat-form button {
+  justify-self: end;
 }
 
 .wf-recipes-search-row {

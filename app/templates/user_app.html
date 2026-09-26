@@ -121,6 +121,7 @@
       <section id="wf-tab-recipes" class="wf-tab" data-tab-panel="recipes" aria-label="Recipes" hidden>
         <div class="wf-segment wf-recipes-tabs" role="tablist" aria-label="Recipes views">
           <button id="wf-recipes-search-tab" class="wf-segment-btn is-active" type="button" role="tab" aria-selected="true">Search</button>
+          <button id="wf-recipes-chat-tab" class="wf-segment-btn" type="button" role="tab" aria-selected="false">Ask AI</button>
           <button id="wf-recipes-review-tab" class="wf-segment-btn" type="button" role="tab" aria-selected="false">Don't Repeat</button>
         </div>
         <section id="wf-recipes-search-view">
@@ -139,6 +140,19 @@
             <span id="wf-recipes-page-label"></span>
             <button id="wf-recipes-next" class="wf-btn wf-btn-outline" type="button" disabled>Next</button>
           </div>
+        </section>
+        <section id="wf-recipes-chat-view" aria-label="Recipe idea chat" hidden>
+          <div class="wf-recipes-chat-heading">
+            <h2>Recipe ideas</h2>
+            <button id="wf-recipes-chat-clear" class="wf-recipes-icon" type="button" aria-label="Clear conversation" title="Clear conversation"><i data-lucide="trash-2"></i></button>
+          </div>
+          <div id="wf-recipes-chat-messages" class="wf-recipes-chat-messages" role="log" aria-label="Recipe conversation" aria-live="polite"></div>
+          <p id="wf-recipes-chat-status" class="wf-plan-status" role="status" aria-live="polite"></p>
+          <form id="wf-recipes-chat-form" class="wf-recipes-chat-form">
+            <label for="wf-recipes-chat-input">What would you like to cook?</label>
+            <textarea id="wf-recipes-chat-input" rows="3" maxlength="2000" placeholder="I have chickpeas, spinach and some rice..." required></textarea>
+            <button id="wf-recipes-chat-send" class="wf-btn wf-btn-blue" type="submit" data-online-behavior="disable" data-offline-title="Offline: recipe ideas are unavailable.">Ask for an idea</button>
+          </form>
         </section>
         <section id="wf-recipes-review-view" hidden>
           <p id="wf-recipes-review-status" class="wf-plan-status" role="status" aria-live="polite"></p>

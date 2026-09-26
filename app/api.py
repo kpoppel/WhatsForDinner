@@ -15,6 +15,7 @@ from app.models.contracts import (
     MealPlanEntryPatchRequest,
     MealPlanPatchRequest,
     MealPlanRulesRequest,
+    RecipeChatRequest,
     RecipeUseDateRequest,
     RecipeUseRequest,
     SetSelectedKeywordsRequest,
@@ -27,6 +28,7 @@ from app.models.contracts import (
 )
 from app.services.meal_plan_service import MealPlanService
 from app.services.ocr_client import GeminiOcrClient, OcrError
+from app.services.recipe_chat_client import GeminiRecipeChatClient, RecipeChatError
 from app.services.shopping_service import ShoppingService
 from app.services.server_state import ServerState
 from app.services.tandoor_client import TandoorClient, TandoorError, TandoorNotFound
@@ -129,6 +131,10 @@ async def _sync_pending_shopping_changes() -> None:
 
 def _ocr_client() -> GeminiOcrClient:
     return GeminiOcrClient()
+
+
+def _recipe_chat_client() -> GeminiRecipeChatClient:
+    return GeminiRecipeChatClient()
 
 SHOPPING_STATUSES = {"remaining", "skipped", "completed"}
 OCR_MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -702,6 +708,21 @@ async def find_recipes(
         return {"count": len(ranked), "results": ranked[offset:offset + page_size]}
     except TandoorError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/recipes/chat")
+async def recipe_chat(payload: RecipeChatRequest) -> dict[str, str]:
+    """Get a recipe for the saved diner count without modifying Tandoor recipes."""
+    if not settings.google_llm_api_key:
+        raise HTTPException(status_code=503, detail="Recipe chat is not configured (GOOGLE_LLM_API_KEY missing).")
+    try:
+        reply = await _recipe_chat_client().reply(
+            [message.model_dump() for message in payload.messages],
+            server_state.user_settings()["default_diners"],
+        )
+    except RecipeChatError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"reply": reply}
 
 
 @router.get("/recipe-foods")

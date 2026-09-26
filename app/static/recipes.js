@@ -1,5 +1,5 @@
 import { createIcons, CalendarPlus, CalendarMinus, Plus, Pencil, Trash2, Search, ListFilter, X } from "lucide";
-import { api } from "./js/api.js";
+import { api, apiChat } from "./js/api.js";
 import { isOnline } from "./js/selectors/connectivity.js";
 import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanEntry } from "./js/commands/meal-plans.js";
 
@@ -14,6 +14,12 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
   const tokens = document.getElementById("wf-recipes-food-tokens");
   const searchView = document.getElementById("wf-recipes-search-view");
   const reviewView = document.getElementById("wf-recipes-review-view");
+  const chatView = document.getElementById("wf-recipes-chat-view");
+  const chatMessages = document.getElementById("wf-recipes-chat-messages");
+  const chatInput = document.getElementById("wf-recipes-chat-input");
+  const chatStatus = document.getElementById("wf-recipes-chat-status");
+  const chatSend = document.getElementById("wf-recipes-chat-send");
+  const chatClear = document.getElementById("wf-recipes-chat-clear");
   const modal = document.getElementById("wf-recipe-plan-modal");
   const planSelect = document.getElementById("wf-recipe-plan-select");
   const daySelect = document.getElementById("wf-recipe-day-select");
@@ -31,6 +37,8 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
   let revision = 0;
   let searchController = null;
   let usesController = null;
+  let conversation = [];
+  let chatting = false;
 
   /** Create an accessible icon action using the same touch target everywhere. */
   function iconButton(icon, label, onClick) {
@@ -121,26 +129,72 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
     paintIcons();
   }
 
-  /** Show either the search surface or the same global review surface. */
+  /** Show search, AI ideas, or the global review surface. */
   function showView(view) {
     const reviewing = view === "review";
-    if (reviewing) {
+    const chattingView = view === "chat";
+    if (reviewing || chattingView) {
       ++revision;
       if (searchController) searchController.abort();
     }
-    searchView.hidden = reviewing;
+    searchView.hidden = reviewing || chattingView;
+    chatView.hidden = !chattingView;
     reviewView.hidden = !reviewing;
-    for (const [id, active] of [["wf-recipes-search-tab", !reviewing], ["wf-recipes-review-tab", reviewing]]) {
+    for (const [id, active] of [["wf-recipes-search-tab", view === "search"], ["wf-recipes-chat-tab", chattingView], ["wf-recipes-review-tab", reviewing]]) {
       const button = document.getElementById(id);
       button.classList.toggle("is-active", active);
       button.setAttribute("aria-selected", String(active));
     }
     if (reviewing) void refreshUses();
-    else {
+    else if (!chattingView) {
       const current = ++revision;
       void refreshUses().then(() => {
         if (current === revision && !root.hidden) void searchRecipes();
       });
+    } else {
+      chatInput.focus();
+    }
+  }
+
+  /** Render chat text without interpreting model output as HTML. */
+  function renderConversation() {
+    chatMessages.replaceChildren();
+    for (const message of conversation) {
+      const bubble = document.createElement("article");
+      bubble.className = `wf-recipes-chat-message wf-recipes-chat-${message.role}`;
+      const label = document.createElement("strong");
+      label.textContent = message.role === "user" ? "You" : "Recipe idea";
+      const body = document.createElement("p");
+      body.textContent = message.content;
+      bubble.append(label, body);
+      chatMessages.append(bubble);
+    }
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  /** Submit the conversation, committing the new turn only after a successful reply. */
+  async function askForRecipe(event) {
+    event.preventDefault();
+    const text = chatInput.value.trim();
+    if (!text || chatting || !isOnline()) return;
+    const messages = [...conversation.slice(-18), { role: "user", content: text }];
+    chatting = true;
+    chatSend.disabled = true;
+    chatInput.disabled = true;
+    chatClear.disabled = true;
+    chatStatus.textContent = "Thinking of a recipe...";
+    try {
+      const response = await apiChat("/recipes/chat", { method: "POST", body: JSON.stringify({ messages }) });
+      conversation = [...messages, { role: "model", content: response.reply }];
+      chatInput.value = "";
+      chatStatus.textContent = "";
+      renderConversation();
+    } catch (error) { report(error, chatStatus); }
+    finally {
+      chatting = false;
+      chatInput.disabled = false;
+      chatClear.disabled = false;
+      chatSend.disabled = !isOnline();
     }
   }
 
@@ -352,7 +406,16 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
   }
 
   document.getElementById("wf-recipes-search-tab").addEventListener("click", () => showView("search"));
+  document.getElementById("wf-recipes-chat-tab").addEventListener("click", () => showView("chat"));
   document.getElementById("wf-recipes-review-tab").addEventListener("click", () => showView("review"));
+  document.getElementById("wf-recipes-chat-form").addEventListener("submit", (event) => { void askForRecipe(event); });
+  chatClear.addEventListener("click", () => {
+    if (chatting) return;
+    conversation = [];
+    chatStatus.textContent = "";
+    renderConversation();
+    chatInput.focus();
+  });
   document.getElementById("wf-recipes-review-add").addEventListener("click", () => { showView("search"); query.focus(); });
   document.getElementById("wf-recipes-name").addEventListener("click", () => setMode("name"));
   document.getElementById("wf-recipes-ingredients").addEventListener("click", () => setMode("ingredients"));
@@ -385,6 +448,7 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
     if (event.detail.source === "meal-plans" && !root.hidden) void refreshUses();
   });
   window.addEventListener("wfd:online-state", () => {
+    chatSend.disabled = chatting || !isOnline();
     if (!root.hidden && isOnline()) void refreshUses();
   });
   for (const [id, icon] of [["wf-recipes-name", "search"], ["wf-recipes-ingredients", "list-filter"]]) {

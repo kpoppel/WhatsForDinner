@@ -90,13 +90,13 @@ Before deploying, ensure `.env` contains your Tandoor settings:
 #### Getting a Tandoor Token
 Visit your instance of Tandoor: https://<tandoor_url>/settings/api and create a new API token here. It needs read/write access to update meal plans and shopping lists.
 
-#### Handwritten Shopping List OCR
-To enable "scan a handwritten list" in the Shop Editor, set:
+#### Gemini Features
+To enable handwritten shopping-list scanning and recipe ideas via Ask AI on the Recipes screen, set:
 
 - `GOOGLE_LLM_API_KEY` — a Google AI Studio API key with access to the Gemini API.
 - `GOOGLE_LLM_MODEL` — optional, defaults to `gemini-2.5-flash`.
 
-If `GOOGLE_LLM_API_KEY` is unset, the camera button's OCR request returns a 503 error.
+If `GOOGLE_LLM_API_KEY` is unset, OCR and recipe-chat requests return a 503 error. Recipe ideas are conversational suggestions, not saved Tandoor recipes; the conversation lasts until the page is reloaded or cleared.
 
 ### Deploy with Caddy
 
