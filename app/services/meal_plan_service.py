@@ -1242,6 +1242,7 @@ class MealPlanService:
         ensure_tandoor_writes_enabled,
         build_shopping_view,
     ) -> dict:
+        """Generate recipe shopping entries while retaining all meal-plan row tracking."""
         def normalize_previous_instance_sync(
             desired_sync: dict[str, dict[str, Any]],
         ) -> dict[str, dict[str, Any]]:
@@ -1329,7 +1330,7 @@ class MealPlanService:
 
                 desired_sync = self._desired_instance_sync(plan, entries)
                 previous_sync = normalize_previous_instance_sync(desired_sync)
-                next_sync: dict[str, dict[str, Any]] = dict(previous_sync)
+                next_sync: dict[str, dict[str, Any]] = self._state.get_meal_plan_tandoor_sync(plan_id)
                 recipe_source = "regenerate_missing" if mode == "regenerate_missing" else "sync"
 
                 for instance_key in sorted(desired_sync.keys()):

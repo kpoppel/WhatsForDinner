@@ -1023,6 +1023,85 @@ def test_sync_tandoor_meal_plan_includes_mode_only_rows_without_recipe(tmp_path)
     assert all("recipe" not in row for row in rows)
 
 
+@pytest.mark.parametrize("entry_mode", ["leftover", "takeout", "empty"])
+@pytest.mark.parametrize("shopping_mode", ["sync", "regenerate_missing"])
+@pytest.mark.parametrize("deferred", [False, True])
+def test_shopping_generation_preserves_mode_row_for_reorder(
+    tmp_path, entry_mode, shopping_mode, deferred
+) -> None:
+    """Shopping generation must retain non-recipe row IDs for subsequent moves."""
+    state = ServerState(str(tmp_path))
+    client = FakeMealClient()
+    service = MealPlanService(state, client)
+    plan = state.create_meal_plan(
+        {
+            "start_date": "2026-09-10",
+            "length_days": 2,
+            "diners": 2,
+            "entries": [
+                {
+                    "entry_id": 1,
+                    "day_index": 0,
+                    "date": "2026-09-10",
+                    "mode": entry_mode,
+                    "recipes": [],
+                    "servings": 2,
+                },
+                {
+                    "entry_id": 2,
+                    "day_index": 1,
+                    "date": "2026-09-11",
+                    "mode": "planned",
+                    "recipes": [{"id": 11, "title": "Roast Veg", "purpose": "meal"}],
+                    "servings": 2,
+                },
+            ],
+            "keyword_ids": [],
+            "constraints": {"leftover_days": [], "takeout_days": [], "empty_days": []},
+            "no_repeat_days": 30,
+        }
+    )
+    plan_id = plan["plan_id"]
+    asyncio.run(service.patch_plan(
+        plan_id,
+        {"entries": plan["entries"]},
+        ensure_tandoor_writes_enabled=ensure_writes_enabled,
+    ))
+    mode_key = f"entry:1:mode:{entry_mode}"
+    original_sync = state.get_meal_plan_tandoor_sync(plan_id)
+    mode_row_id = original_sync[mode_key]["meal_plan_row_id"]
+    recipe_row_id = original_sync["entry:2:recipe:0:id:11"]["meal_plan_row_id"]
+
+    for generation in range(2):
+        result = asyncio.run(service.generate_shopping_from_plan(
+            plan_id=plan_id,
+            mode=shopping_mode,
+            ensure_tandoor_writes_enabled=ensure_writes_enabled,
+            build_shopping_view=build_shopping_view,
+        ))
+        assert result["data"]["failed"] == []
+        assert state.get_meal_plan_tandoor_sync(plan_id)[mode_key] == original_sync[mode_key]
+        assert set(client.meal_plan_rows) == {mode_row_id, recipe_row_id}
+        assert all(row["recipe"] == 11 for row in client.shopping_recipe_rows.values())
+
+    client.updated_meal_plan_calls.clear()
+    asyncio.run(service.patch_entry(
+        plan_id,
+        1,
+        {"target_day_index": 1},
+        ensure_tandoor_writes_enabled=ensure_writes_enabled,
+        defer_tandoor_sync=deferred,
+    ))
+    if deferred:
+        asyncio.run(service.sync_pending_plan(plan_id, ensure_writes_enabled))
+
+    assert set(client.meal_plan_rows) == {mode_row_id, recipe_row_id}
+    assert {row_id for row_id, payload in client.updated_meal_plan_calls} == {mode_row_id, recipe_row_id}
+    assert client.meal_plan_rows[mode_row_id]["from_date"] == "2026-09-11T18:00:00Z"
+    assert client.meal_plan_rows[recipe_row_id]["from_date"] == "2026-09-10T18:00:00Z"
+    assert state.get_meal_plan_tandoor_sync(plan_id)[mode_key] == original_sync[mode_key]
+
+
 def test_patch_entry_switch_to_non_planned_clears_recipe_and_syncs_mode_row(tmp_path) -> None:
     state = ServerState(str(tmp_path))
     client = FakeMealClient()
