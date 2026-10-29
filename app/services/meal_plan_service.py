@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.config import settings
+from app.models.contracts import AIRecipe, AIRecipeSaveRequest
 from app.services.server_state import ServerState
 from app.services.tandoor_client import TandoorClient, TandoorError
 
@@ -165,6 +166,40 @@ class MealPlanService:
     def _next_plan_entry_id(self) -> int:
         return self._state.allocate_entry_id()
 
+    async def save_ai_recipe(self, plan_id: int, request: AIRecipeSaveRequest) -> dict:
+        """Persist a selected AI snapshot and queue its recipe-less Tandoor row."""
+        plan = self._state.get_meal_plan(plan_id)
+        if plan is None:
+            raise HTTPException(status_code=404, detail="Meal plan not found.")
+        recipe_id = f"ai-{request.recipe_id.hex}"
+        for entry in plan["entries"]:
+            if any(recipe["id"] == recipe_id for recipe in entry["recipes"]):
+                return {"source": "local-state", "data": self._enrich_plan_recipe_urls(plan), "entry_id": entry["entry_id"]}
+        recipe = {
+            "id": recipe_id,
+            "title": request.recipe.title,
+            "purpose": "meal",
+            "ai_recipe": request.recipe.model_dump(),
+        }
+        if request.entry_id is not None:
+            entry = self._find_entry(plan, request.entry_id)
+            if entry is None:
+                raise HTTPException(status_code=404, detail="Meal day not found.")
+            result = await self.patch_entry(plan_id, request.entry_id, {
+                "mode": "planned", "recipes": [*entry["recipes"], recipe],
+            }, defer_tandoor_sync=True)
+            result["entry_id"] = request.entry_id
+            return result
+
+        previous_sync = self._state.get_meal_plan_tandoor_sync(plan_id)
+        result = await self.add_entry(plan_id, {
+            "date": request.date.isoformat(), "mode": "planned", "recipes": [recipe],
+        })
+        entry_id = result["data"]["entries"][-1]["entry_id"]
+        self._state.queue_meal_plan_entry_sync(plan_id, entry_id, previous_sync)
+        result["entry_id"] = entry_id
+        return result
+
     def _find_entry(self, plan: dict[str, Any], entry_id: int) -> dict[str, Any] | None:
         entries = plan.get("entries", [])
         if not isinstance(entries, list):
@@ -233,7 +268,7 @@ class MealPlanService:
         self,
         *,
         entry_id: int,
-        recipe_id: int,
+        recipe_id: int | str,
         slot_index: int,
     ) -> str:
         return f"entry:{entry_id}:recipe:{slot_index}:id:{recipe_id}"
@@ -264,7 +299,8 @@ class MealPlanService:
                 if not isinstance(recipe, dict):
                     continue
                 recipe_id = recipe.get("id")
-                if not isinstance(recipe_id, int):
+                is_ai_recipe = "ai_recipe" in recipe
+                if not isinstance(recipe_id, int) and not is_ai_recipe:
                     continue
                 key = self._instance_key_for_recipe(
                     entry_id=entry_id,
@@ -285,6 +321,8 @@ class MealPlanService:
                     "shopping_recipe_id": None,
                     "shopping_activated": False,
                 }
+                if is_ai_recipe:
+                    desired[key]["ai_recipe"] = recipe["ai_recipe"]
 
         return desired
 
@@ -463,7 +501,7 @@ class MealPlanService:
             raise
 
     async def _meal_plan_row_payload_for_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        """Build managed meal fields without writing or reconciling Tandoor notes."""
+        """Manage meal fields and AI recipe notes, leaving other notes untouched."""
         recipe_id = instance.get("recipe_id")
         servings = instance.get("servings")
         from_date = instance.get("date")
@@ -503,6 +541,9 @@ class MealPlanService:
         }
         if isinstance(recipe_id, int):
             payload["recipe"] = recipe_id
+        if "ai_recipe" in instance:
+            payload["title"] = title[:64]
+            payload["note"] = AIRecipe.model_validate(instance["ai_recipe"]).render_text(servings)
         return payload
 
     async def _create_meal_plan_row_for_instance(self, instance: dict[str, Any]) -> int:
@@ -1327,6 +1368,10 @@ class MealPlanService:
 
                 created: list[dict[str, Any]] = []
                 failed: list[dict[str, Any]] = []
+
+                local_items = self._state.sync_ai_shopping_entries(plan_id, mode == "regenerate_missing")
+                for item in local_items:
+                    created.append({"operation": "local_ai_shopping_create", "result": item})
 
                 desired_sync = self._desired_instance_sync(plan, entries)
                 previous_sync = normalize_previous_instance_sync(desired_sync)

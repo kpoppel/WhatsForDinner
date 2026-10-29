@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
+import datetime
 from datetime import date
 from enum import Enum
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -34,7 +36,55 @@ class RecipeChatMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     role: Literal["user", "model"]
-    content: str = Field(min_length=1, max_length=2000)
+    content: str = Field(min_length=1, max_length=20000)
+
+
+class AIRecipeIngredient(BaseModel):
+    """One ingredient with quantities suitable for local shopping entries."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=200)
+    amount: float = Field(ge=0, allow_inf_nan=False)
+    unit: str = Field(max_length=80)
+    needs_purchase: bool
+
+
+class AIRecipe(BaseModel):
+    """Complete one-off recipe retained independently of the chat conversation."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    title: str = Field(min_length=1, max_length=200)
+    servings: int = Field(strict=True, ge=1, le=20)
+    prep_time: str = Field(min_length=1, max_length=100)
+    cook_time: str = Field(min_length=1, max_length=100)
+    ingredients: list[AIRecipeIngredient] = Field(min_length=1, max_length=100)
+    steps: list[str] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_steps(self) -> "AIRecipe":
+        """Reject blank method steps before storing or displaying a recipe."""
+        if any(not step.strip() for step in self.steps):
+            raise ValueError("Recipe steps must not be blank.")
+        return self
+
+    def render_text(self, servings: int | None = None) -> str:
+        """Render a readable snapshot scaled to the scheduled meal's servings."""
+        target_servings = self.servings if servings is None else servings
+        factor = target_servings / self.servings
+        ingredients = [
+            f"{item.amount * factor:g} {item.unit} {item.name}".replace("  ", " ")
+            for item in self.ingredients
+        ]
+        to_buy = [text for text, ingredient in zip(ingredients, self.ingredients) if ingredient.needs_purchase]
+        return "\n".join([
+            self.title,
+            f"Serves {target_servings} | Prep: {self.prep_time} | Cook: {self.cook_time}",
+            "", "Ingredients", *(f"- {item}" for item in ingredients),
+            "", "Method", *(f"{index}. {step}" for index, step in enumerate(self.steps, start=1)),
+            *(["", "To buy", *(f"- {item}" for item in to_buy)] if to_buy else []),
+        ])
 
 
 class RecipeChatRequest(BaseModel):
@@ -51,6 +101,24 @@ class RecipeChatRequest(BaseModel):
             for index, message in enumerate(self.messages)
         ):
             raise ValueError("messages must alternate user and model turns, ending with user.")
+        return self
+
+
+class AIRecipeSaveRequest(BaseModel):
+    """Assign a selected chat reply to exactly one existing or new meal day."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    recipe_id: UUID
+    recipe: AIRecipe
+    entry_id: int | None = Field(default=None, gt=0)
+    date: datetime.date | None = None
+
+    @model_validator(mode="after")
+    def validate_destination(self) -> "AIRecipeSaveRequest":
+        """Require one unambiguous meal-day destination."""
+        if (self.entry_id is None) == (self.date is None):
+            raise ValueError("Choose an existing meal day or a new date.")
         return self
 
 

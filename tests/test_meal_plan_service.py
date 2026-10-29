@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from app.services.meal_plan_service import MealPlanService
 from app.services.server_state import ServerState
 from app.services.tandoor_client import TandoorError
+from app.models.contracts import AIRecipeSaveRequest
 
 
 class FakeMealClient:
@@ -235,6 +236,91 @@ def ensure_writes_enabled(_operation: str) -> None:
 
 def build_shopping_view(entries: list[dict]) -> dict:
     return {"count": len(entries)}
+
+
+def test_save_ai_recipe_persists_snapshot_and_syncs_note_without_tandoor_recipe(tmp_path) -> None:
+    """An AI reply survives reload and becomes a note, never a recipe reference."""
+    state = ServerState(str(tmp_path))
+    client = FakeMealClient()
+    service = MealPlanService(state, client)
+    plan = state.create_meal_plan({
+        "start_date": "2026-10-29", "length_days": 0, "diners": 4, "entries": [],
+    })
+    request = AIRecipeSaveRequest.model_validate({
+        "recipe_id": "de47984e-fbad-4c33-8c59-75cfeddb8500", "date": "2026-10-29",
+        "recipe": {
+            "title": "Chickpea bowl", "servings": 2, "prep_time": "5 min", "cook_time": "10 min",
+            "ingredients": [{"name": "chickpeas", "amount": 1, "unit": "can", "needs_purchase": True}],
+            "steps": ["Warm the chickpeas and serve."],
+        },
+    })
+    result = asyncio.run(service.save_ai_recipe(plan["plan_id"], request))
+    asyncio.run(service.save_ai_recipe(plan["plan_id"], request))
+    state.flush()
+    restored_state = ServerState(str(tmp_path))
+    stored = restored_state.get_meal_plan(plan["plan_id"])
+    assert len(stored["entries"]) == 1
+    assert stored["entries"][0]["recipes"][0]["ai_recipe"] == request.recipe.model_dump()
+    assert restored_state.list_recipe_uses() == []
+    asyncio.run(service.sync_pending_entry(plan["plan_id"], result["entry_id"], ensure_writes_enabled))
+    row = next(iter(client.meal_plan_rows.values()))
+    assert "recipe" not in row
+    assert "2 can chickpeas" in row["note"]
+    assert "Warm the chickpeas and serve." in row["note"]
+    assert row["servings"] == 4
+    assert state.pending_meal_plan_change(plan["plan_id"], result["entry_id"]) is None
+
+
+def test_ai_recipe_shopping_is_local_scaled_and_idempotent(tmp_path) -> None:
+    """Local AI ingredients retain statuses, deletion choices, and recipe ownership."""
+    state = ServerState(str(tmp_path))
+    client = FakeMealClient()
+    service = MealPlanService(state, client)
+    plan = state.create_meal_plan({
+        "start_date": "2026-10-29", "length_days": 0, "diners": 4, "entries": [],
+    })
+    request = AIRecipeSaveRequest.model_validate({
+        "recipe_id": "de47984e-fbad-4c33-8c59-75cfeddb8500", "date": "2026-10-29",
+        "recipe": {
+            "title": "Chickpea bowl", "servings": 2, "prep_time": "5 min", "cook_time": "10 min",
+            "ingredients": [
+                {"name": "chickpeas", "amount": 1, "unit": "can", "needs_purchase": False},
+                {"name": "lemon", "amount": 0.5, "unit": "", "needs_purchase": True},
+            ],
+            "steps": ["Warm the chickpeas and serve with lemon."],
+        },
+    })
+    saved = asyncio.run(service.save_ai_recipe(plan["plan_id"], request))
+    stale_recipes = saved["data"]["entries"][0]["recipes"]
+
+    async def generate(mode="sync"):
+        """Exercise the normal plan-shopping operation rather than a separate AI route."""
+        return await service.generate_shopping_from_plan(
+            plan_id=plan["plan_id"], mode=mode,
+            ensure_tandoor_writes_enabled=ensure_writes_enabled, build_shopping_view=build_shopping_view,
+        )
+
+    first = asyncio.run(generate())
+    assert first["data"]["failed_count"] == 0
+    items = state.list_local_shopping_entries()
+    assert [item["amount"] for item in items] == [2, 1]
+    assert all(item["recipe_context"] == "Chickpea bowl" for item in items)
+    assert client.shopping_recipe_rows == {}
+    asyncio.run(service.patch_entry(plan["plan_id"], saved["entry_id"], {"recipes": stale_recipes}))
+    assert asyncio.run(generate())["data"]["created_count"] == 0
+    assert len(state.list_local_shopping_entries()) == 2
+    state.update_local_shopping_entry(items[0]["id"], {"status": "completed"})
+    state.delete_local_shopping_entry(items[1]["id"])
+    asyncio.run(generate())
+    assert len(state.list_local_shopping_entries()) == 1
+    assert state.list_local_shopping_entries()[0]["status"] == "completed"
+    asyncio.run(generate("regenerate_missing"))
+    assert len(state.list_local_shopping_entries()) == 2
+    asyncio.run(service.patch_entry(plan["plan_id"], saved["entry_id"], {"servings": 2}))
+    asyncio.run(generate())
+    assert sorted(item["amount"] for item in state.list_local_shopping_entries()) == [0.5, 1]
+    asyncio.run(service.patch_entry(plan["plan_id"], saved["entry_id"], {"recipes": []}))
+    assert state.list_local_shopping_entries() == []
 
 
 @pytest.mark.parametrize("recipe_id", [11, None])

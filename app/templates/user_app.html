@@ -241,6 +241,19 @@
     </form>
   </div>
 
+  <dialog id="wf-meal-recipe-picker" class="wf-modal-card wf-meal-recipe-picker" aria-labelledby="wf-meal-recipe-picker-title">
+    <h2 id="wf-meal-recipe-picker-title">Choose a recipe</h2>
+    <div id="wf-meal-recipe-picker-list"></div>
+  </dialog>
+
+  <dialog id="wf-ai-recipe-viewer" class="wf-modal-card wf-ai-recipe-viewer" aria-labelledby="wf-ai-recipe-title">
+    <div class="wf-recipes-chat-heading">
+      <h2 id="wf-ai-recipe-title"></h2>
+      <button id="wf-ai-recipe-close" class="wf-recipes-icon" type="button" title="Close recipe" aria-label="Close recipe"><i data-lucide="x"></i></button>
+    </div>
+    <p id="wf-ai-recipe-content"></p>
+  </dialog>
+
   <div id="wf-editor-add-modal" class="wf-modal" hidden>
     <div class="wf-modal-card" role="dialog" aria-modal="true" aria-labelledby="wf-editor-add-title">
       <h2 id="wf-editor-add-title">Add Item</h2>

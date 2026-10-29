@@ -24,9 +24,12 @@ def test_recipe_chat_sends_ordered_turns_to_gemini(monkeypatch) -> None:
         def json(self):
             return {"candidates": [{"content": {"parts": [{"text": json.dumps({
                 "title": "Chickpea rice bowls", "servings": recipe_servings, "prep_time": "10 min", "cook_time": "20 min",
-                "ingredients": ["1 cup rice", "1 can chickpeas"],
+                "ingredients": [
+                    {"name": "rice", "amount": 1, "unit": "cup", "needs_purchase": False},
+                    {"name": "chickpeas", "amount": 1, "unit": "can", "needs_purchase": False},
+                    {"name": "lemon", "amount": 1, "unit": "", "needs_purchase": True},
+                ],
                 "steps": ["Cook rice for 15 minutes.", "Warm chickpeas for 5 minutes and serve."],
-                "to_buy": ["1 lemon"],
             })}]}}]}
 
     class FakeAsyncClient:
@@ -51,12 +54,15 @@ def test_recipe_chat_sends_ordered_turns_to_gemini(monkeypatch) -> None:
     ]})
 
     assert response.status_code == 200
-    assert response.json() == {"reply": (
+    assert response.json()["reply"] == (
         "Chickpea rice bowls\nServes 4 | Prep: 10 min | Cook: 20 min\n\n"
-        "Ingredients\n- 1 cup rice\n- 1 can chickpeas\n\n"
+        "Ingredients\n- 1 cup rice\n- 1 can chickpeas\n- 1 lemon\n\n"
         "Method\n1. Cook rice for 15 minutes.\n2. Warm chickpeas for 5 minutes and serve.\n\n"
         "To buy\n- 1 lemon"
-    )}
+    )
+    assert response.json()["recipe"]["ingredients"][2] == {
+        "name": "lemon", "amount": 1, "unit": "", "needs_purchase": True,
+    }
     assert requests[0][0]["contents"] == [
         {"role": "user", "parts": [{"text": "I have chickpeas and rice"}]},
         {"role": "model", "parts": [{"text": "Try chickpea rice bowls."}]},
@@ -66,7 +72,7 @@ def test_recipe_chat_sends_ordered_turns_to_gemini(monkeypatch) -> None:
     assert "Make exactly 4 servings and scale every ingredient quantity" in requests[0][0]["systemInstruction"]["parts"][0]["text"]
     assert "Every response must be one complete" in requests[0][0]["systemInstruction"]["parts"][0]["text"]
     assert requests[0][0]["generationConfig"]["responseSchema"]["required"] == [
-        "title", "servings", "prep_time", "cook_time", "ingredients", "steps", "to_buy",
+        "title", "servings", "prep_time", "cook_time", "ingredients", "steps",
     ]
     assert requests[0][1]["x-goog-api-key"] == "test-key"
     recipe_servings = 2
@@ -129,7 +135,8 @@ def test_recipe_chat_rejects_ingredients_without_method(monkeypatch) -> None:
         def json(self):
             return {"candidates": [{"content": {"parts": [{"text": json.dumps({
                 "title": "Rice bowl", "servings": 2, "prep_time": "5 min", "cook_time": "15 min",
-                "ingredients": ["1 cup rice"], "steps": [], "to_buy": [],
+                "ingredients": [{"name": "rice", "amount": 1, "unit": "cup", "needs_purchase": False}],
+                "steps": [],
             })}]}}]}
 
     class FakeAsyncClient:

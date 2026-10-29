@@ -1,4 +1,4 @@
-import { createIcons, CalendarPlus, CalendarMinus, Plus, Pencil, Trash2, Search, ListFilter, X } from "lucide";
+import { createIcons, CalendarPlus, CalendarMinus, Plus, Pencil, Trash2, Search, ListFilter, X, BookOpen } from "lucide";
 import { api, apiChat } from "./js/api.js";
 import { isOnline } from "./js/selectors/connectivity.js";
 import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanEntry } from "./js/commands/meal-plans.js";
@@ -27,6 +27,10 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
   const dateField = document.getElementById("wf-recipe-date-field");
   const dayDate = document.getElementById("wf-recipe-date");
   const planStatus = document.getElementById("wf-recipe-plan-status");
+  const planForm = document.getElementById("wf-recipe-plan-form");
+  const planSave = planForm.querySelector('button[type="submit"]');
+  const recipeViewer = document.getElementById("wf-ai-recipe-viewer");
+  let recipeViewerTrigger = null;
   let mode = "name";
   let page = 1;
   let total = 0;
@@ -39,6 +43,7 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
   let searchController = null;
   let usesController = null;
   let conversation = [];
+  let conversationOnline = isOnline();
   let chatting = false;
 
   /** Create an accessible icon action using the same touch target everywhere. */
@@ -58,7 +63,7 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
 
   /** Materialize newly inserted Lucide markers. */
   function paintIcons() {
-    createIcons({ icons: { CalendarPlus, CalendarMinus, Plus, Pencil, Trash2, Search, ListFilter, X } });
+    createIcons({ icons: { CalendarPlus, CalendarMinus, Plus, Pencil, Trash2, Search, ListFilter, X, BookOpen } });
   }
 
   /** Display a request error in the active view. */
@@ -170,6 +175,7 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
 
   /** Render chat text without interpreting model output as HTML. */
   function renderConversation() {
+    conversationOnline = isOnline();
     chatMessages.replaceChildren();
     for (const message of conversation) {
       const bubble = document.createElement("article");
@@ -179,8 +185,15 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
       const body = document.createElement("p");
       body.textContent = message.content;
       bubble.append(label, body);
+      if (message.role === "model") {
+        const save = iconButton("calendar-plus", `Save ${message.title} to meal plan`, () => { void openPlanPicker(message); });
+        save.disabled = message.saved || !isOnline();
+        if (message.saved) save.title = "Saved to meal plan";
+        bubble.append(save);
+      }
       chatMessages.append(bubble);
     }
+    paintIcons();
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
@@ -189,7 +202,7 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
     event.preventDefault();
     const text = chatInput.value.trim();
     if (!text || chatting || !isOnline()) return;
-    const messages = [...conversation.slice(-18), { role: "user", content: text }];
+    const messages = [...conversation.slice(-18).map(({ role, content }) => ({ role, content })), { role: "user", content: text }];
     chatting = true;
     chatSend.disabled = true;
     chatInput.disabled = true;
@@ -197,7 +210,10 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
     chatStatus.textContent = "Thinking of a recipe...";
     try {
       const response = await apiChat("/recipes/chat", { method: "POST", body: JSON.stringify({ messages }) });
-      conversation = [...messages, { role: "model", content: response.reply }];
+      conversation = [...conversation.slice(-18), { role: "user", content: text }, {
+        role: "model", content: response.reply, title: response.recipe.title,
+        id: crypto.randomUUID(), ai_recipe: response.recipe, saved: false,
+      }];
       chatInput.value = "";
       chatStatus.textContent = "";
       renderConversation();
@@ -354,6 +370,10 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
   async function openPlanPicker(recipe) {
     pendingRecipe = recipe;
     modal.hidden = false;
+    selectedPlan = null;
+    planSelect.replaceChildren();
+    daySelect.replaceChildren();
+    planSave.disabled = true;
     planStatus.textContent = "Loading saved plans...";
     try {
       const plans = (await loadStoredMealPlans()).data;
@@ -369,11 +389,14 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
         return;
       }
       await loadDays();
+      planSelect.focus();
     } catch (error) { report(error, planStatus); }
   }
 
   /** Retrieve the chosen plan and expose existing days plus a dated new day. */
   async function loadDays() {
+    planSave.disabled = true;
+    selectedPlan = null;
     try {
       selectedPlan = (await loadMealPlan(Number(planSelect.value))).data;
       daySelect.replaceChildren();
@@ -388,8 +411,18 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
       newDay.textContent = "New dated day";
       daySelect.append(newDay);
       dayDate.value = "";
+      if (selectedPlan.entries.length) {
+        const lastDate = selectedPlan.entries[selectedPlan.entries.length - 1].date;
+        const nextDate = new Date(`${lastDate}T12:00:00Z`);
+        nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+        dayDate.min = nextDate.toISOString().slice(0, 10);
+      } else {
+        dayDate.min = selectedPlan.start_date;
+      }
       dateField.hidden = daySelect.value !== "new";
+      dayDate.required = daySelect.value === "new";
       planStatus.textContent = "";
+      planSave.disabled = !isOnline();
     } catch (error) { report(error, planStatus); }
   }
 
@@ -397,25 +430,60 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
   async function addToPlan(event) {
     event.preventDefault();
     if (!selectedPlan || !pendingRecipe || !isOnline()) return;
-    const recipe = { id: pendingRecipe.id, title: pendingRecipe.title, purpose: "meal" };
+    if (daySelect.value === "new" && !dayDate.value) {
+      planStatus.textContent = "Choose the new day's date.";
+      return;
+    }
+    planForm.inert = true;
     try {
-      if (daySelect.value === "new") {
-        if (!dayDate.value) {
-          planStatus.textContent = "Choose the new day's date.";
-          return;
-        }
-        await createMealPlanEntry(selectedPlan.plan_id, { date: dayDate.value, mode: "planned", recipes: [recipe] });
+      let savedPlan;
+      if ("ai_recipe" in pendingRecipe) {
+        const destination = daySelect.value === "new" ? { date: dayDate.value } : { entry_id: Number(daySelect.value) };
+        const result = await api(`/meal-plans/${selectedPlan.plan_id}/ai-recipes`, {
+          method: "POST",
+          body: JSON.stringify({ recipe_id: pendingRecipe.id, recipe: pendingRecipe.ai_recipe, ...destination }),
+        });
+        savedPlan = result.data;
+        pendingRecipe.saved = true;
+        chatStatus.textContent = `${pendingRecipe.title} saved to meal plan.`;
+        renderConversation();
       } else {
-        const entry = selectedPlan.entries.find((row) => row.entry_id === Number(daySelect.value));
-        await updateMealPlanEntry(selectedPlan.plan_id, entry.entry_id, { mode: "planned", recipes: [...entry.recipes, recipe] });
+        const recipe = { id: pendingRecipe.id, title: pendingRecipe.title, purpose: "meal" };
+        if (daySelect.value === "new") {
+          savedPlan = (await createMealPlanEntry(selectedPlan.plan_id, { date: dayDate.value, mode: "planned", recipes: [recipe] })).data;
+        } else {
+          const entry = selectedPlan.entries.find((row) => row.entry_id === Number(daySelect.value));
+          savedPlan = (await updateMealPlanEntry(selectedPlan.plan_id, entry.entry_id, { mode: "planned", recipes: [...entry.recipes, recipe] })).data;
+        }
+        status.textContent = `${pendingRecipe.title} added to meal plan.`;
       }
       modal.hidden = true;
-      status.textContent = `${pendingRecipe.title} added to meal plan.`;
-      window.dispatchEvent(new CustomEvent("wfd:data-changed", { detail: { source: "recipes" } }));
+      window.dispatchEvent(new CustomEvent("wfd:data-changed", { detail: { source: "recipes", plan: savedPlan } }));
       await refreshUses();
       await searchRecipes();
     } catch (error) { report(error, planStatus); }
+    finally { planForm.inert = false; }
   }
+
+  /** Show the persisted recipe snapshot, scaled to its meal day's servings. */
+  window.addEventListener("wfd:view-ai-recipe", (event) => {
+    const { recipe, servings } = event.detail;
+    const factor = servings / recipe.servings;
+    const ingredientText = (item) => `- ${Number((item.amount * factor).toFixed(3))} ${item.unit} ${item.name}`.replace("  ", " ");
+    const toBuy = recipe.ingredients.filter((item) => item.needs_purchase);
+    document.getElementById("wf-ai-recipe-title").textContent = recipe.title;
+    document.getElementById("wf-ai-recipe-content").textContent = [
+      `Serves ${servings} | Prep: ${recipe.prep_time} | Cook: ${recipe.cook_time}`,
+      "", "Ingredients",
+      ...recipe.ingredients.map(ingredientText),
+      "", "Method", ...recipe.steps.map((step, index) => `${index + 1}. ${step}`),
+      ...(toBuy.length ? ["", "To buy", ...toBuy.map(ingredientText)] : []),
+    ].join("\n");
+    recipeViewerTrigger = document.activeElement;
+    recipeViewer.showModal();
+  });
+  document.getElementById("wf-ai-recipe-close").addEventListener("click", () => recipeViewer.close());
+  recipeViewer.addEventListener("close", () => recipeViewerTrigger.focus());
 
   document.getElementById("wf-recipes-search-tab").addEventListener("click", () => showView("search"));
   document.getElementById("wf-recipes-chat-tab").addEventListener("click", () => showView("chat"));
@@ -443,7 +511,10 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
   document.getElementById("wf-recipes-prev").addEventListener("click", () => { page -= 1; void searchRecipes(); });
   document.getElementById("wf-recipes-next").addEventListener("click", () => { page += 1; void searchRecipes(); });
   planSelect.addEventListener("change", () => { void loadDays(); });
-  daySelect.addEventListener("change", () => { dateField.hidden = daySelect.value !== "new"; });
+  daySelect.addEventListener("change", () => {
+    dateField.hidden = daySelect.value !== "new";
+    dayDate.required = daySelect.value === "new";
+  });
   document.getElementById("wf-recipe-plan-cancel").addEventListener("click", () => { modal.hidden = true; });
   document.getElementById("wf-recipe-plan-form").addEventListener("submit", (event) => { void addToPlan(event); });
   window.addEventListener("wfd:open-recipe-review", () => showView("review"));
@@ -461,6 +532,8 @@ import { createMealPlanEntry, loadMealPlan, loadStoredMealPlans, updateMealPlanE
   });
   window.addEventListener("wfd:online-state", () => {
     chatSend.disabled = chatting || !isOnline();
+    planSave.disabled = !selectedPlan || !isOnline();
+    if (conversationOnline !== isOnline()) renderConversation();
     if (!root.hidden && isOnline()) void refreshUses();
   });
   for (const [id, icon] of [["wf-recipes-name", "search"], ["wf-recipes-ingredients", "list-filter"]]) {

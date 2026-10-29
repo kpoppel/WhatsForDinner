@@ -106,6 +106,42 @@ def use_temp_state(monkeypatch, tmp_path):
     return state
 
 
+def test_ai_recipe_save_requires_destination_and_persists_note(monkeypatch, tmp_path) -> None:
+    """The save API validates the recipe and synchronizes a recipe-less meal row."""
+    state = use_temp_state(monkeypatch, tmp_path)
+    remote = MealPlanRowStatefulClient()
+    monkeypatch.setattr("app.api.client", remote)
+    plan = state.create_meal_plan({
+        "start_date": "2026-10-29", "length_days": 0, "diners": 2, "entries": [],
+    })
+    path = f"/api/v1/meal-plans/{plan['plan_id']}/ai-recipes"
+    payload = {
+        "recipe_id": "de47984e-fbad-4c33-8c59-75cfeddb8500",
+        "recipe": {
+            "title": "Rice bowl", "servings": 2, "prep_time": "5 min", "cook_time": "15 min",
+            "ingredients": [{"name": "rice", "amount": 1, "unit": "cup", "needs_purchase": False}],
+            "steps": ["Cook the rice and serve."],
+        },
+    }
+    assert client.post(path, json=payload).status_code == 422
+    assert client.post(path, json={**payload, "date": "2026-10-29", "entry_id": 1}).status_code == 422
+    assert client.post(path, json={**payload, "entry_id": 999}).status_code == 404
+    response = client.post(path, json={**payload, "date": "2026-10-29"})
+    assert response.status_code == 200
+    entry_id = response.json()["entry_id"]
+    assert client.post(path, json={**payload, "date": "2026-10-29"}).status_code == 200
+    assert len(remote.meal_plan_rows) == 1
+    row = next(iter(remote.meal_plan_rows.values()))
+    assert "recipe" not in row
+    assert row["note"].startswith("Rice bowl\nServes 2")
+    updated = {**payload, "recipe_id": "1147984e-fbad-4c33-8c59-75cfeddb8500", "entry_id": entry_id}
+    assert client.post(path, json=updated).status_code == 200
+    assert len(remote.meal_plan_rows) == 2
+    stored = client.get(f"/api/v1/meal-plans/{plan['plan_id']}").json()["data"]
+    assert len(stored["entries"][0]["recipes"]) == 2
+    assert state.pending_meal_plan_change(plan["plan_id"], entry_id) is None
+
+
 def test_recipe_food_search_ranks_any_match_before_paging(monkeypatch, tmp_path) -> None:
     use_temp_state(monkeypatch, tmp_path)
 

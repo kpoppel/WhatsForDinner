@@ -10,6 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, Query
 
 from app.config import settings
 from app.models.contracts import (
+    AIRecipeSaveRequest,
     GenerateMealPlanRequest,
     MealPlanEntryCreateRequest,
     MealPlanEntryPatchRequest,
@@ -711,7 +712,7 @@ async def find_recipes(
 
 
 @router.post("/recipes/chat")
-async def recipe_chat(payload: RecipeChatRequest) -> dict[str, str]:
+async def recipe_chat(payload: RecipeChatRequest) -> dict:
     """Get a recipe for the saved diner count without modifying Tandoor recipes."""
     if not settings.google_llm_api_key:
         raise HTTPException(status_code=503, detail="Recipe chat is not configured (GOOGLE_LLM_API_KEY missing).")
@@ -722,7 +723,7 @@ async def recipe_chat(payload: RecipeChatRequest) -> dict[str, str]:
         )
     except RecipeChatError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {"reply": reply}
+    return {"reply": reply.render_text(), "recipe": reply.model_dump()}
 
 
 @router.get("/recipe-foods")
@@ -1060,6 +1061,17 @@ async def add_meal_plan_entry(plan_id: int, payload: MealPlanEntryCreateRequest 
         payload.model_dump(mode="python", exclude_unset=True),
         ensure_tandoor_writes_enabled=_ensure_tandoor_writes_enabled,
     )
+
+
+@router.post("/meal-plans/{plan_id}/ai-recipes")
+async def save_ai_meal_recipe(
+    plan_id: int, payload: AIRecipeSaveRequest, background_tasks: BackgroundTasks,
+) -> dict:
+    """Save a one-off AI recipe locally, then synchronize its Tandoor note."""
+    _ensure_tandoor_writes_enabled("save_ai_meal_recipe")
+    result = await _meal_plan_service().save_ai_recipe(plan_id, payload)
+    background_tasks.add_task(_sync_pending_meal_plan_entry, plan_id, result["entry_id"])
+    return result
 
 
 @router.get("/meal-plans/{plan_id}/entries/{entry_id}/random-recipe")

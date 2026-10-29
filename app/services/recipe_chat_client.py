@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.models.contracts import AIRecipe
 
 RECIPE_INSTRUCTIONS = (
     "You are a practical home cook helping someone turn ingredients in their fridge or pantry "
@@ -26,11 +27,19 @@ RECIPE_SCHEMA = {
         "servings": {"type": "INTEGER"},
         "prep_time": {"type": "STRING"},
         "cook_time": {"type": "STRING"},
-        "ingredients": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "ingredients": {"type": "ARRAY", "items": {
+            "type": "OBJECT",
+            "properties": {
+                "name": {"type": "STRING"},
+                "amount": {"type": "NUMBER"},
+                "unit": {"type": "STRING"},
+                "needs_purchase": {"type": "BOOLEAN"},
+            },
+            "required": ["name", "amount", "unit", "needs_purchase"],
+        }},
         "steps": {"type": "ARRAY", "items": {"type": "STRING"}},
-        "to_buy": {"type": "ARRAY", "items": {"type": "STRING"}},
     },
-    "required": ["title", "servings", "prep_time", "cook_time", "ingredients", "steps", "to_buy"],
+    "required": ["title", "servings", "prep_time", "cook_time", "ingredients", "steps"],
 }
 
 
@@ -41,7 +50,7 @@ class RecipeChatError(RuntimeError):
 class GeminiRecipeChatClient:
     """Request a recipe suggestion using the conversation supplied by the caller."""
 
-    async def reply(self, messages: list[dict[str, str]], servings: int) -> str:
+    async def reply(self, messages: list[dict[str, str]], servings: int) -> AIRecipe:
         """Request a complete recipe scaled to the saved number of diners."""
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.google_llm_model}:generateContent"
         payload = {
@@ -70,33 +79,9 @@ class GeminiRecipeChatClient:
 
         try:
             text = "".join(part["text"] for part in data["candidates"][0]["content"]["parts"])
-            recipe = json.loads(text)
-            title = recipe["title"].strip()
-            recipe_servings = recipe["servings"]
-            prep_time = recipe["prep_time"].strip()
-            cook_time = recipe["cook_time"].strip()
-            ingredients = recipe["ingredients"]
-            steps = recipe["steps"]
-            to_buy = recipe["to_buy"]
-            if (
-                not title or type(recipe_servings) is not int or recipe_servings != servings
-                or not prep_time or not cook_time
-                or not isinstance(ingredients, list) or not ingredients
-                or not isinstance(steps, list) or not steps
-                or not isinstance(to_buy, list)
-                or not all(isinstance(item, str) and item.strip() for item in ingredients + steps + to_buy)
-            ):
-                raise ValueError("Incomplete recipe")
-            return "\n".join([
-                title,
-                f"Serves {recipe_servings} | Prep: {prep_time} | Cook: {cook_time}",
-                "",
-                "Ingredients",
-                *(f"- {item}" for item in ingredients),
-                "",
-                "Method",
-                *(f"{index}. {step}" for index, step in enumerate(steps, start=1)),
-                *(["", "To buy", *(f"- {item}" for item in to_buy)] if to_buy else []),
-            ])
+            recipe = AIRecipe.model_validate(json.loads(text))
+            if recipe.servings != servings:
+                raise ValueError("Recipe servings do not match the saved setting.")
+            return recipe
         except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
             raise RecipeChatError("Gemini did not return a complete recipe.") from exc

@@ -1,3 +1,4 @@
+import { createIcons, BookOpen } from "lucide";
 import {
   cachePlanDetail,
   cachePlanListRows,
@@ -30,6 +31,17 @@ import { readMealPlanCache, selectActiveMealPlan } from "./js/store/selectors.js
   const detailRangeNode = document.getElementById("wf-plan-detail-range");
   const statusNode = document.getElementById("wf-plan-status");
   const generateButton = document.getElementById("wf-plan-generate-btn");
+  const recipePicker = document.getElementById("wf-meal-recipe-picker");
+  const recipePickerList = document.getElementById("wf-meal-recipe-picker-list");
+  /** Dismiss backdrop taps without treating whitespace inside the picker as outside. */
+  recipePicker.addEventListener("click", (event) => {
+    if (event.target !== recipePicker) return;
+    const bounds = recipePicker.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right ||
+        event.clientY < bounds.top || event.clientY > bounds.bottom) {
+      recipePicker.close();
+    }
+  });
 
   const generateModal = document.getElementById("wf-plan-generate-modal");
   const generateStartDateInput = document.getElementById("wf-plan-start-date");
@@ -884,6 +896,39 @@ import { readMealPlanCache, selectActiveMealPlan } from "./js/store/selectors.js
     publishDataChanged();
   }
 
+  /** Open a saved AI recipe in-app or a linked recipe in Tandoor. */
+  function viewMealRecipe(recipe, servings) {
+    if ("ai_recipe" in recipe) {
+      window.dispatchEvent(new CustomEvent("wfd:view-ai-recipe", {
+        detail: { recipe: recipe.ai_recipe, servings },
+      }));
+    } else {
+      window.open(recipe.url, "_blank", "noopener,noreferrer");
+    }
+  }
+
+  /** Choose one recipe without adding separate actions to the meal card. */
+  function chooseMealRecipe(entry) {
+    recipePickerList.replaceChildren();
+    for (const recipe of entry.recipes) {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "wf-meal-recipe-option";
+      option.setAttribute("aria-label", `View ${recipe.title}`);
+      option.innerHTML = '<i data-lucide="book-open"></i>';
+      const title = document.createElement("span");
+      title.textContent = recipe.title;
+      option.append(title);
+      option.addEventListener("click", () => {
+        recipePicker.close();
+        viewMealRecipe(recipe, entry.servings);
+      });
+      recipePickerList.append(option);
+    }
+    createIcons({ icons: { BookOpen }, root: recipePickerList });
+    recipePicker.showModal();
+  }
+
   function renderPlanDetail(plan) {
     detailNode.innerHTML = "";
 
@@ -952,12 +997,33 @@ import { readMealPlanCache, selectActiveMealPlan } from "./js/store/selectors.js
             <p class="wf-plan-day-kicker">Day ${dayIndex + 1} • ${escapeHtml(dayDate)}</p>
             <span class="${modeClass(mode)}">${modeBadge(mode)}</span>
           </div>
-          <h4 class="wf-plan-day-title">${escapeHtml(recipeTitle)}</h4>
-          <p class="wf-plan-card-meta">👥 ${escapeHtml(servingsText)} ${reminderBadge}</p>
+          <div class="wf-plan-day-summary">
+            <div class="wf-plan-day-description">
+              <h4 class="wf-plan-day-title">${escapeHtml(recipeTitle)}</h4>
+              <p class="wf-plan-card-meta">👥 ${escapeHtml(servingsText)} ${reminderBadge}</p>
+            </div>
+          </div>
         </div>
       `;
 
       attachSwipeRightDeleteGesture(dayCard, entryId);
+
+      if (entry.recipes.length > 0) {
+        const view = document.createElement("button");
+        view.type = "button";
+        view.className = "wf-recipes-icon wf-plan-view-recipe";
+        view.title = entry.recipes.length === 1 ? `View ${entry.recipes[0].title}` : "Choose a recipe";
+        view.setAttribute("aria-label", view.title);
+        if (entry.recipes.length > 1) view.setAttribute("aria-haspopup", "dialog");
+        view.innerHTML = '<i data-lucide="book-open"></i>';
+        view.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (entry.recipes.length === 1) viewMealRecipe(entry.recipes[0], entry.servings);
+          else chooseMealRecipe(entry);
+        });
+        dayCard.querySelector(".wf-plan-day-summary").append(view);
+      }
+      createIcons({ icons: { BookOpen }, root: dayCard });
 
       dayCard.addEventListener("dragstart", (event) => {
         if (isMealPlanOfflineReadOnly()) {
@@ -1655,6 +1721,10 @@ import { readMealPlanCache, selectActiveMealPlan } from "./js/store/selectors.js
 
       const id = Number(recipe.id);
       const purpose = recipe.purpose === "shopping_only" ? "shopping_only" : "meal";
+      if ("ai_recipe" in recipe) {
+        normalized.push({ ...recipe, purpose });
+        continue;
+      }
       normalized.push({
         title,
         purpose,
@@ -1912,6 +1982,10 @@ import { readMealPlanCache, selectActiveMealPlan } from "./js/store/selectors.js
       }
       const recipeId = Number(recipe.id);
       const purpose = recipe.purpose === "shopping_only" ? "shopping_only" : "meal";
+      if ("ai_recipe" in recipe) {
+        recipeRows.push({ ...recipe, purpose });
+        continue;
+      }
       recipeRows.push({
         id: Number.isInteger(recipeId) ? recipeId : null,
         title: recipeTitle,
@@ -1935,6 +2009,7 @@ import { readMealPlanCache, selectActiveMealPlan } from "./js/store/selectors.js
   }
 
   function toEditorRecipePayload(recipe) {
+    if ("ai_recipe" in recipe) return { ...recipe };
     const title = String(recipe.title || "").trim();
     if (title.length === 0) {
       return null;
@@ -2086,6 +2161,7 @@ import { readMealPlanCache, selectActiveMealPlan } from "./js/store/selectors.js
     closeGenerateModalIfEscape(event);
     if (event.key === "Escape") {
       closeStartDateModal();
+      recipePicker.close();
     }
     closeMealEditorIfEscape(event);
   });
@@ -2107,6 +2183,8 @@ import { readMealPlanCache, selectActiveMealPlan } from "./js/store/selectors.js
 
   window.addEventListener("wfd:data-changed", (event) => {
     if (event.detail.source === "recipes") {
+      cachePlanPreview(event.detail.plan);
+      cachePlanDetail(event.detail.plan);
       void runAction(async () => {
         await refreshPlans();
         await reloadSelectedPlan();

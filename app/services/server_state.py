@@ -12,6 +12,7 @@ from typing import Any
 import uuid
 
 from app.models.state_schema import default_state_payload
+from app.models.contracts import AIRecipe
 from app.services.state_migrations import StateSchemaError, migrate_and_validate_state
 
 DEFAULT_STATE_FILENAME = "state.json"
@@ -317,6 +318,7 @@ class ServerState:
             return values
 
     def update_meal_plan(self, plan_id: int, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Apply plan edits while retaining server-owned AI shopping tracking."""
         with self._lock:
             data = self._load()
             key = str(plan_id)
@@ -325,7 +327,20 @@ class ServerState:
                 return None
             previous = deepcopy(current)
             current.update(payload)
+            tracked_ai_recipes = {
+                (entry["entry_id"], recipe["id"]): recipe
+                for entry in previous["entries"] for recipe in entry["recipes"] if "ai_recipe" in recipe
+            }
+            for entry in current["entries"]:
+                for recipe in entry["recipes"]:
+                    if "ai_recipe" not in recipe:
+                        continue
+                    recipe.pop("local_shopping_ids", None)
+                    owner = (entry["entry_id"], recipe["id"])
+                    if owner in tracked_ai_recipes and "local_shopping_ids" in tracked_ai_recipes[owner]:
+                        recipe["local_shopping_ids"] = deepcopy(tracked_ai_recipes[owner]["local_shopping_ids"])
             data["meal_plans"][key] = current
+            self._prune_ai_shopping_entries(data, plan_id, current)
             self._record_recipe_uses(data, plan_id, current, previous)
             self._save(data)
             return deepcopy(current)
@@ -336,8 +351,65 @@ class ServerState:
             removed = data["meal_plans"].pop(str(plan_id), None)
             if removed is None:
                 return None
+            self._prune_ai_shopping_entries(data, plan_id, {"entries": []})
             self._save(data)
             return deepcopy(removed)
+
+    def _prune_ai_shopping_entries(self, data: dict[str, Any], plan_id: int, plan: dict[str, Any]) -> None:
+        """Remove only local shopping entries whose owning AI meal was removed."""
+        owners = {
+            (entry["entry_id"], recipe["id"])
+            for entry in plan["entries"] for recipe in entry["recipes"] if "ai_recipe" in recipe
+        }
+        for key, item in list(data["local_shopping_entries"].items()):
+            if "meal_plan_source" not in item:
+                continue
+            source = item["meal_plan_source"]
+            if source["plan_id"] == plan_id and (source["entry_id"], source["recipe_id"]) not in owners:
+                del data["local_shopping_entries"][key]
+                data["shopping_status_overrides"].pop(key, None)
+                data["shopping_item_metadata"].pop(key, None)
+
+    def sync_ai_shopping_entries(self, plan_id: int, regenerate_missing: bool) -> list[dict[str, Any]]:
+        """Atomically generate scaled local AI ingredients, retaining statuses and deletion history."""
+        with self._lock:
+            data = self._load()
+            plan = data["meal_plans"][str(plan_id)]
+            created = []
+            for entry in plan["entries"]:
+                for recipe in entry["recipes"]:
+                    if "ai_recipe" not in recipe:
+                        continue
+                    snapshot = AIRecipe.model_validate(recipe["ai_recipe"])
+                    factor = entry["servings"] / snapshot.servings
+                    if "local_shopping_ids" not in recipe:
+                        recipe["local_shopping_ids"] = {}
+                    tracked = recipe["local_shopping_ids"]
+                    for index, ingredient in enumerate(snapshot.ingredients):
+                        key = str(index)
+                        if key in tracked:
+                            local_id = tracked[key]
+                            item = data["local_shopping_entries"].get(str(local_id))
+                            if item is not None:
+                                item.update({"amount": ingredient.amount * factor, "recipe_context": recipe["title"]})
+                                continue
+                            if not regenerate_missing:
+                                continue
+                        local_id = data["next_local_shopping_entry_id"]
+                        data["next_local_shopping_entry_id"] -= 1
+                        tracked[key] = local_id
+                        item = {
+                            "id": local_id, "source": "local", "food_id": None,
+                            "name": ingredient.name, "amount": ingredient.amount * factor, "unit": ingredient.unit,
+                            "ingredient_type": "Other", "store_group": {"id": None, "name": "General"},
+                            "recipe": {"id": None, "name": recipe["title"], "image": "", "url": None},
+                            "recipe_context": recipe["title"], "status": "remaining",
+                            "meal_plan_source": {"plan_id": plan_id, "entry_id": entry["entry_id"], "recipe_id": recipe["id"]},
+                        }
+                        data["local_shopping_entries"][str(local_id)] = item
+                        created.append(deepcopy(item))
+            self._save(data)
+            return created
 
     def _tandoor_sync_owner(self, plan: dict[str, Any], instance_key: str) -> dict[str, Any] | None:
         parts = instance_key.split(":")

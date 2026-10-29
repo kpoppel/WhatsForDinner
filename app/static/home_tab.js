@@ -66,6 +66,7 @@ import {
   let todayEntryId = null;
   let todayRecipeUrl = null;
   let todayRecipeLookupTitle = "";
+  let todayAIRecipe = null;
 
   function setTab(tabName) {
     if (typeof window.WFD_setActiveTab === "function") {
@@ -342,6 +343,7 @@ import {
   }
 
   function renderHomeFallbackCard(title, metaHtml) {
+    todayAIRecipe = null;
     todayEntryId = null;
     todayKicker.textContent = "Today";
     todayTitle.textContent = title;
@@ -366,6 +368,10 @@ import {
     }
     todayEntryId = entryId;
     setViewRecipeButton(recipeUrlFromEntry(entry), recipeLookupTitleFromEntry(entry));
+    const primaryRecipe = entry.recipes.find((recipe) => recipe.purpose === "meal");
+    todayAIRecipe = primaryRecipe && "ai_recipe" in primaryRecipe
+      ? { recipe: primaryRecipe.ai_recipe, servings: entry.servings } : null;
+    if (todayAIRecipe !== null) openPlansButton.disabled = false;
 
     const parsedDate = parseIsoDate(String(entry.date));
     if (parsedDate === null) {
@@ -640,6 +646,10 @@ import {
   }
 
   openPlansButton.addEventListener("click", async () => {
+    if (todayAIRecipe !== null) {
+      window.dispatchEvent(new CustomEvent("wfd:view-ai-recipe", { detail: todayAIRecipe }));
+      return;
+    }
     let targetUrl = todayRecipeUrl;
     if (!targetUrl && todayRecipeLookupTitle.length > 0) {
       try {

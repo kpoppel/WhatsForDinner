@@ -96,7 +96,9 @@ To enable handwritten shopping-list scanning and recipe ideas via Ask AI on the 
 - `GOOGLE_LLM_API_KEY` — a Google AI Studio API key with access to the Gemini API.
 - `GOOGLE_LLM_MODEL` — optional, defaults to `gemini-2.5-flash`.
 
-If `GOOGLE_LLM_API_KEY` is unset, OCR and recipe-chat requests return a 503 error. Recipe ideas are conversational suggestions, not saved Tandoor recipes; the conversation lasts until the page is reloaded or cleared.
+If `GOOGLE_LLM_API_KEY` is unset, OCR and recipe-chat requests return a 503 error. The conversation lasts until the page is reloaded or cleared. Each AI reply can be saved to an existing meal-plan day or a new dated day. Saved recipes persist independently of the conversation and can be viewed from Home or Meal Plans.
+
+One-off AI recipes are not added to Tandoor's recipe library. WhatsForDinner stores the structured snapshot locally and synchronizes a readable, serving-scaled copy to the Tandoor meal-plan row's Note. Generating the plan's shopping list adds the full ingredient list as app-local items labeled with the recipe name, without food matching or Tandoor shopping entries. Repeated generation preserves checked/skipped items and does not restore deleted items unless "regenerate missing" is used. Removing the recipe or plan removes its owned local shopping items.
 
 ### Deploy with Caddy
 
@@ -214,6 +216,7 @@ docker build -t whatsfordinner:latest -f Dockerfile ..
 - `DELETE /api/v1/meal-plans/stored/{plan_id}`
 - `PATCH /api/v1/meal-plans/{plan_id}`
 - `POST /api/v1/meal-plans/{plan_id}/entries`
+- `POST /api/v1/meal-plans/{plan_id}/ai-recipes`
 - `PATCH /api/v1/meal-plans/{plan_id}/entries/{entry_id}`
 - `DELETE /api/v1/meal-plans/{plan_id}/entries/{entry_id}`
 - `POST /api/v1/meal-plans/{plan_id}/shopping-list`
@@ -242,7 +245,7 @@ Stage 2 stores local app state (selected keywords, meal-plan drafts, and shoppin
 - default data directory: `./data`
 - configurable with: `DATA_DIR`
 
-This local state is app-managed metadata; recipe and shopping list data still come from Tandoor APIs.
+This local state includes app-managed metadata, saved one-off AI recipes, and app-local shopping entries. Tandoor-backed recipes and shopping entries continue to come from Tandoor APIs.
 
 ## Browser inspection
 

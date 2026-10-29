@@ -492,6 +492,33 @@ body {
   line-height: 1.5;
 }
 
+.wf-recipes-chat-message > button {
+  display: block;
+  margin: 0.5rem 0 0 auto;
+}
+
+.wf-modal-card.wf-ai-recipe-viewer {
+  width: min(620px, calc(100% - 2rem));
+  max-height: 85vh;
+  overflow-y: auto;
+  border: 1px solid var(--wf-line);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+
+.wf-ai-recipe-viewer:not([open]) {
+  display: none;
+}
+
+.wf-ai-recipe-viewer::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+#wf-ai-recipe-content {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
 .wf-recipes-chat-form {
   display: grid;
   gap: 0.5rem;
@@ -1098,6 +1125,75 @@ body {
   flex: 1;
   min-width: 0;
   display: grid;
+}
+
+.wf-plan-day-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.wf-plan-day-description {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 0.4rem;
+  overflow-wrap: anywhere;
+}
+
+.wf-plan-day-description .wf-plan-card-meta {
+  margin: 0;
+}
+
+.wf-plan-view-recipe {
+  width: 42px;
+}
+
+.wf-modal-card.wf-meal-recipe-picker {
+  width: min(390px, calc(100% - 2rem));
+  max-height: 85vh;
+  overflow-y: auto;
+  border-radius: 8px;
+}
+
+.wf-meal-recipe-picker:not([open]) {
+  display: none;
+}
+
+.wf-meal-recipe-picker::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+#wf-meal-recipe-picker-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.wf-meal-recipe-option {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 42px;
+  width: 100%;
+  padding: 0.6rem;
+  border: 1px solid var(--wf-line);
+  border-radius: 6px;
+  background: var(--wf-panel);
+  color: var(--wf-primary);
+  text-align: left;
+  font: inherit;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.wf-meal-recipe-option svg {
+  flex: 0 0 19px;
+  width: 19px;
+  height: 19px;
+}
+
+.wf-meal-recipe-option span {
+  min-width: 0;
 }
 
 .wf-plan-swipe-delete-right-hint {
