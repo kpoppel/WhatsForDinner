@@ -30,13 +30,17 @@ def test_stage2_state_flush_persists_memory_changes(tmp_path) -> None:
 
 
 def test_recipe_use_history_keeps_latest_use_across_plan_changes(tmp_path) -> None:
+    """Keep recent recipe uses when their plan is edited or deleted."""
+    today = date.today()
+    first_date = (today - timedelta(days=1)).isoformat()
+    second_date = today.isoformat()
     state = ServerState(str(tmp_path))
     plan = state.create_meal_plan(
         {
             "entries": [
                 {
                     "entry_id": 1,
-                    "date": "2026-09-01",
+                    "date": first_date,
                     "recipes": [
                         {"id": 11, "title": "Roast Veg", "purpose": "meal"},
                         {"id": 12, "title": "Rice Bowl", "purpose": "meal"},
@@ -53,7 +57,7 @@ def test_recipe_use_history_keeps_latest_use_across_plan_changes(tmp_path) -> No
             "entries": [
                 {
                     "entry_id": 1,
-                    "date": "2026-09-02",
+                    "date": second_date,
                     "recipes": [{"id": 13, "title": "Pasta", "purpose": "meal"}],
                 }
             ]
@@ -65,20 +69,22 @@ def test_recipe_use_history_keeps_latest_use_across_plan_changes(tmp_path) -> No
     with state.state_file.open("r", encoding="utf-8") as fp:
         payload = json.load(fp)
     assert payload["recipe_use_history"] == [
-        {"recipe_id": 11, "title": "Roast Veg", "used_date": "2026-09-01", "source": "plan", "plan_id": 1, "entry_id": 1},
-        {"recipe_id": 12, "title": "Rice Bowl", "used_date": "2026-09-01", "source": "plan", "plan_id": 1, "entry_id": 1},
-        {"recipe_id": 13, "title": "Pasta", "used_date": "2026-09-02", "source": "plan", "plan_id": 1, "entry_id": 1},
+        {"recipe_id": 11, "title": "Roast Veg", "used_date": first_date, "source": "plan", "plan_id": 1, "entry_id": 1},
+        {"recipe_id": 12, "title": "Rice Bowl", "used_date": first_date, "source": "plan", "plan_id": 1, "entry_id": 1},
+        {"recipe_id": 13, "title": "Pasta", "used_date": second_date, "source": "plan", "plan_id": 1, "entry_id": 1},
     ]
 
 
 def test_recipe_use_history_backfills_existing_plans_on_startup(tmp_path) -> None:
+    """Backfill recent recipe uses when loading a legacy state file."""
+    used_date = date.today().isoformat()
     state = ServerState(str(tmp_path))
     state.create_meal_plan(
         {
             "entries": [
                 {
                     "entry_id": 1,
-                    "date": "2026-09-01",
+                    "date": used_date,
                         "recipe": {"id": 11, "title": "Roast Veg"},
                 }
             ]
@@ -97,7 +103,7 @@ def test_recipe_use_history_backfills_existing_plans_on_startup(tmp_path) -> Non
     with restored.state_file.open("r", encoding="utf-8") as fp:
         restored_payload = json.load(fp)
     assert restored_payload["recipe_use_history"] == [
-        {"recipe_id": 11, "title": None, "used_date": "2026-09-01", "source": "plan", "plan_id": 1, "entry_id": 1}
+        {"recipe_id": 11, "title": None, "used_date": used_date, "source": "plan", "plan_id": 1, "entry_id": 1}
     ]
 
 
