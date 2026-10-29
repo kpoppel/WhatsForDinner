@@ -237,6 +237,37 @@ def build_shopping_view(entries: list[dict]) -> dict:
     return {"count": len(entries)}
 
 
+@pytest.mark.parametrize("recipe_id", [11, None])
+@pytest.mark.parametrize("existing_note", ["wfd-instance:entry:1:mode:leftover", "Keep this meal note."])
+def test_meal_plan_sync_leaves_notes_unmanaged(tmp_path, recipe_id, existing_note) -> None:
+    """Do not create notes, compare existing notes, or overwrite them on updates."""
+    client = FakeMealClient()
+    service = MealPlanService(ServerState(str(tmp_path)), client)
+    instance = {
+        "instance_key": "entry:1:mode:leftover",
+        "recipe_id": recipe_id,
+        "recipe_title": "Dinner",
+        "servings": 2,
+        "date": "2026-10-29",
+        "purpose": "meal" if recipe_id is not None else "leftover",
+    }
+
+    async def verify_notes() -> None:
+        """Exercise the shared create, compare, and update payload path."""
+        row_id = await service._create_meal_plan_row_for_instance(instance)
+        remote_row = client.meal_plan_rows[row_id]
+        assert "note" not in remote_row
+        remote_row["note"] = existing_note
+        assert await service._remote_meal_plan_row_matches_instance(remote_row, instance)
+
+        await service._update_meal_plan_row_for_instance(row_id, {**instance, "servings": 3})
+        assert "note" not in client.updated_meal_plan_calls[-1][1]
+        assert remote_row["note"] == existing_note
+        assert remote_row["servings"] == 3
+
+    asyncio.run(verify_notes())
+
+
 def test_new_dated_day_keeps_chosen_date_after_later_plan_edits(tmp_path) -> None:
     state = ServerState(str(tmp_path))
     first_day = date.today()

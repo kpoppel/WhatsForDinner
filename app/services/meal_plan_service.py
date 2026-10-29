@@ -463,6 +463,7 @@ class MealPlanService:
             raise
 
     async def _meal_plan_row_payload_for_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
+        """Build managed meal fields without writing or reconciling Tandoor notes."""
         recipe_id = instance.get("recipe_id")
         servings = instance.get("servings")
         from_date = instance.get("date")
@@ -499,7 +500,6 @@ class MealPlanService:
             "to_date": iso_date,
             "meal_type": meal_type_payload,
             "addshopping": False,
-            "note": f"wfd-instance:{instance.get('instance_key')}",
         }
         if isinstance(recipe_id, int):
             payload["recipe"] = recipe_id
