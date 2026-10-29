@@ -12,6 +12,7 @@ client = TestClient(app)
 
 
 def test_recipe_chat_sends_ordered_turns_to_gemini(monkeypatch) -> None:
+    """Send ordered turns, culinary checks and saved servings to the provider."""
     monkeypatch.setattr("app.config.settings.google_llm_api_key", "test-key")
     monkeypatch.setattr("app.api.server_state.user_settings", lambda: {"default_diners": 4})
     requests = []
@@ -71,6 +72,20 @@ def test_recipe_chat_sends_ordered_turns_to_gemini(monkeypatch) -> None:
     assert "pantry" in requests[0][0]["systemInstruction"]["parts"][0]["text"]
     assert "Make exactly 4 servings and scale every ingredient quantity" in requests[0][0]["systemInstruction"]["parts"][0]["text"]
     assert "Every response must be one complete" in requests[0][0]["systemInstruction"]["parts"][0]["text"]
+    instructions = requests[0][0]["systemInstruction"]["parts"][0]["text"]
+    assert "Treat the user's ingredient list as available options, not a requirement to use everything" in instructions
+    assert "Prioritize a coherent, appetizing meal over using as many ingredients as possible" in instructions
+    assert "Leave out ingredients that do not suit the dish" in instructions
+    assert "mandarin and raisins can be left unused" in instructions
+    assert "mark anything not stated as available as needing purchase" in instructions
+    assert "Before responding, check that the result is a complete, practical recipe" in instructions
+    assert "the flavors and textures work together" in instructions
+    assert "quantities and portions are realistic" in instructions
+    assert "preparation and cooking are food-safe" in instructions
+    assert "every listed ingredient is used in the method" in instructions
+    assert "every ingredient required by the method is listed" in instructions
+    assert "If any check fails, revise the recipe and check it again" in instructions
+    assert "Return only the final recipe, not the review or discarded ideas" in instructions
     assert requests[0][0]["generationConfig"]["responseSchema"]["required"] == [
         "title", "servings", "prep_time", "cook_time", "ingredients", "steps",
     ]
